@@ -47,6 +47,13 @@ import Widget from "./blocks/Widget.svelte";
 import Network from "./blocks/Network.svelte";
 import Geo from "./blocks/Geo.svelte";
 import Embedding3D from "./blocks/Embedding3D.svelte";
+// Resolver-driven blocks — usable from the package now that they no longer
+// import Convex types directly. They call the WorkbookDataResolver from
+// workbookContext, which the consumer wires up.
+import File from "./blocks/File.svelte";
+import Image from "./blocks/Image.svelte";
+import Video from "./blocks/Video.svelte";
+import Input from "./blocks/Input.svelte";
 
 /**
  * Map of block-kind string → Svelte component.
@@ -79,18 +86,22 @@ export interface BlockRegistry {
   geo: Component;
   embedding_3d: Component;
 
-  // Coupled blocks — consumer must inject if they appear in workbooks
-  file?: Component;
-  image?: Component;
-  video?: Component;
-  input?: Component;
+  // Resolver-driven blocks — package implementations call the
+  // WorkbookDataResolver from workbookContext. Consumers configure the
+  // resolver; no per-block injection needed.
+  file: Component;
+  image: Component;
+  video: Component;
+  input: Component;
+
+  // Still-coupled blocks — consumer must inject if they appear in workbooks
+  // (concept depends on the apps/web model-skill registry; pending P1.1c)
   concept?: Component;
 }
 
 /**
- * Default registry — the package's clean display blocks. Convex-coupled
- * block slots (file/image/video/input/concept) are undefined; consumers
- * extend this object with their implementations.
+ * Default registry — the package's display + resolver-driven blocks.
+ * Concept stays optional pending P1.1c (model-skill registry decoupling).
  */
 export const defaultBlockRegistry: BlockRegistry = {
   heading: Heading,
@@ -110,4 +121,8 @@ export const defaultBlockRegistry: BlockRegistry = {
   network: Network,
   geo: Geo,
   embedding_3d: Embedding3D,
+  file: File,
+  image: Image,
+  video: Video,
+  input: Input,
 };
