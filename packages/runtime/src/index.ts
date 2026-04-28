@@ -2,12 +2,22 @@
  * @signal/workbook-runtime — Svelte 5 components that render the workbook
  * block tree.
  *
- * The root `Workbook` component is built in apps/web/src/lib/workbook/ for now
- * (it imports a few app-specific helpers). It will move into this package
- * once those deps are decoupled. See README.md > Migration status.
+ * Root component + dispatcher live here. Consumers extend
+ * `defaultBlockRegistry` with locally-coupled blocks (file/image/video/
+ * input/concept) and pass the combined registry as a `Workbook` prop.
  */
 
-// Block components (clean — no convex coupling)
+// Root + dispatcher
+export { default as Workbook } from "./Workbook.svelte";
+export { default as WorkbookBlock } from "./WorkbookBlock.svelte";
+export { default as CitationReport } from "./CitationReport.svelte";
+
+// Block registry
+export { defaultBlockRegistry } from "./blockRegistry";
+export type { BlockRegistry } from "./blockRegistry";
+
+// Block components (individual exports — kept for callers that mount a
+// single block in isolation; most callers use Workbook.svelte + registry)
 export { default as HeadingBlock } from "./blocks/Heading.svelte";
 export { default as ParagraphBlock } from "./blocks/Paragraph.svelte";
 export { default as MarkdownBlock } from "./blocks/Markdown.svelte";
