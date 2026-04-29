@@ -122,11 +122,41 @@ interface AgentSpec {
   tools: string[];
 }
 
+/**
+ * A `<wb-data>` block — the SQL/blob counterpart to `<wb-input>`.
+ * Inputs are scalar (number/text/boolean); data blocks are
+ * sized payloads (CSV / JSON / SQLite db / parquet / arbitrary
+ * bytes). Cells consume them via `reads="dataId"`, identical to how
+ * they read upstream cell outputs.
+ *
+ * Three storage forms — the parser picks based on attributes:
+ *   - inline-text:    `<wb-data id="x" mime="text/csv">id,name\n...</wb-data>`
+ *   - inline-base64:  `<wb-data id="x" mime="application/x-sqlite3" encoding="base64" sha256="...">U1FMaXRl...</wb-data>`
+ *   - external:       `<wb-data id="x" mime="application/parquet" src="https://..." sha256="..." bytes="..."/>`
+ *
+ * `sha256` is required for any binary form (inline-base64 + external)
+ * — it's the integrity guarantee. Inline-text may carry sha256
+ * optionally; the runtime verifies if present.
+ */
+export interface WorkbookData {
+  id: string;
+  mime: string;
+  /** Optional row count hint for UI; never trusted by the runtime. */
+  rows?: number;
+  /** Optional pre-decompression algorithm. */
+  compression?: "gzip" | "zstd";
+  source:
+    | { kind: "inline-text"; content: string; sha256?: string }
+    | { kind: "inline-base64"; base64: string; sha256: string }
+    | { kind: "external"; src: string; sha256: string; bytes?: number };
+}
+
 interface WorkbookHtmlSpec {
   name: string;
   cells: Cell[];
   inputs: Record<string, unknown>;
   agents: AgentSpec[];
+  data: WorkbookData[];
 }
 
 /**
@@ -193,9 +223,60 @@ const MAX_SOURCE_BYTES = 1 * 1024 * 1024;       // 1 MB per cell source
 const MAX_SYSTEM_PROMPT_BYTES = 100 * 1024;     // 100 KB per agent prompt
 const MAX_INPUT_DEFAULT_BYTES = 16 * 1024;      // 16 KB per input default
 
+/**
+ * `<wb-data>` caps. Tighter than cell source because data blocks
+ * dominate workbook file size — a 50 MB inline blob bloats the HTML
+ * past parser-friendly limits and torches first-paint. Authors that
+ * need more push to external + sha256.
+ */
+const ALLOWED_DATA_MIMES = new Set<string>([
+  "text/csv",
+  "text/tab-separated-values",
+  "application/json",
+  "application/jsonl",
+  "application/x-sqlite3",
+  "application/parquet",
+  "application/octet-stream",
+]);
+const TEXT_DATA_MIMES = new Set<string>([
+  "text/csv",
+  "text/tab-separated-values",
+  "application/json",
+  "application/jsonl",
+]);
+/** Lowercase hex sha-256. The hostBindings parser-side check; the
+ *  resolver re-verifies on bytes. */
+const VALID_SHA256 = /^[a-f0-9]{64}$/;
+const MAX_DATA_BLOCKS = 32;
+const MAX_INLINE_TEXT_BYTES = 5 * 1024 * 1024;        // 5 MB per text block
+const MAX_INLINE_BASE64_CHARS = 14_000_000;            // ~10 MB binary after decode
+const MAX_AGGREGATE_INLINE_BYTES = 25 * 1024 * 1024;  // 25 MB total inline
+const MAX_EXTERNAL_DECLARED_BYTES = 500 * 1024 * 1024; // 500 MB declared size
+
 function clipString(raw: string, maxBytes: number): string {
   if (raw.length <= maxBytes) return raw;
   return raw.slice(0, maxBytes);
+}
+
+/** Parse + validate a `bytes=` attribute as a non-negative integer. */
+function parseBytesAttr(raw: string | null): number | undefined {
+  if (!raw) return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > MAX_EXTERNAL_DECLARED_BYTES) {
+    return undefined;
+  }
+  return Math.floor(n);
+}
+
+/** http(s) only, well-formed URL. Host-allowlist enforcement happens
+ *  in the resolver, not here — same split as model artifacts. */
+function isFetchableUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch {
+    return false;
+  }
 }
 
 export function parseWorkbookHtml(root: Element): WorkbookHtmlSpec {
@@ -203,6 +284,8 @@ export function parseWorkbookHtml(root: Element): WorkbookHtmlSpec {
   const cells: Cell[] = [];
   const inputs: Record<string, unknown> = {};
   const agents: AgentSpec[] = [];
+  const data: WorkbookData[] = [];
+  let aggregateInlineBytes = 0;
 
   // Inputs.
   for (const el of root.querySelectorAll("wb-input")) {
@@ -252,7 +335,82 @@ export function parseWorkbookHtml(root: Element): WorkbookHtmlSpec {
     agents.push({ id, model, systemPrompt, reads, tools });
   }
 
-  return { name, cells, inputs, agents };
+  // Data blocks. Cells join the same `reads=` namespace as upstream
+  // cell outputs, so a `<wb-data id="orders">` is referenceable as
+  // `reads="orders"` from any cell. Resolution + decode happens at
+  // mount time via createWorkbookDataResolver (separate file).
+  for (const el of root.querySelectorAll("wb-data")) {
+    if (data.length >= MAX_DATA_BLOCKS) break;
+    const id = validId(el.getAttribute("id"));
+    if (!id) continue;
+    const mime = (el.getAttribute("mime") ?? "").toLowerCase();
+    if (!ALLOWED_DATA_MIMES.has(mime)) continue;
+
+    const sha256Attr = (el.getAttribute("sha256") ?? "").toLowerCase();
+    const sha256 = VALID_SHA256.test(sha256Attr) ? sha256Attr : null;
+
+    const rawCompression = el.getAttribute("compression");
+    const compression =
+      rawCompression === "gzip" || rawCompression === "zstd"
+        ? rawCompression
+        : undefined;
+
+    const rowsAttr = Number(el.getAttribute("rows"));
+    const rows = Number.isFinite(rowsAttr) && rowsAttr >= 0 ? rowsAttr : undefined;
+
+    const srcAttr = el.getAttribute("src");
+    const encoding = (el.getAttribute("encoding") ?? "").toLowerCase();
+
+    let entry: WorkbookData | null = null;
+
+    if (srcAttr) {
+      // External form. sha256 + http(s) URL required.
+      if (!sha256) continue;
+      if (!isFetchableUrl(srcAttr)) continue;
+      const bytes = parseBytesAttr(el.getAttribute("bytes"));
+      entry = { id, mime, rows, compression, source: { kind: "external", src: srcAttr, sha256, bytes } };
+    } else if (encoding === "base64") {
+      // Inline binary. sha256 required; cap base64 char count to bound
+      // decoded payload at ~10 MB.
+      if (!sha256) continue;
+      const raw = el.textContent ?? "";
+      // Strip whitespace — base64 in HTML often line-wrapped.
+      const base64 = raw.replace(/\s+/g, "");
+      if (!base64) continue;
+      if (base64.length > MAX_INLINE_BASE64_CHARS) continue;
+      // Approximate decoded byte count for the aggregate budget.
+      const approxBytes = Math.floor((base64.length * 3) / 4);
+      if (aggregateInlineBytes + approxBytes > MAX_AGGREGATE_INLINE_BYTES) continue;
+      aggregateInlineBytes += approxBytes;
+      entry = { id, mime, rows, compression, source: { kind: "inline-base64", base64, sha256 } };
+    } else if (TEXT_DATA_MIMES.has(mime)) {
+      // Inline text. sha256 optional (editor-driven workbooks recompute
+      // on save; readers verify when present).
+      const content = clipString(el.textContent ?? "", MAX_INLINE_TEXT_BYTES);
+      if (!content) continue;
+      const byteLen = content.length;
+      if (aggregateInlineBytes + byteLen > MAX_AGGREGATE_INLINE_BYTES) continue;
+      aggregateInlineBytes += byteLen;
+      entry = {
+        id,
+        mime,
+        rows,
+        compression,
+        source: sha256
+          ? { kind: "inline-text", content, sha256 }
+          : { kind: "inline-text", content },
+      };
+    } else {
+      // Binary mime without `encoding="base64"` and without `src=`
+      // has no defined storage form — drop. (Authors who want raw
+      // bytes inline must use base64 + sha256.)
+      continue;
+    }
+
+    if (entry) data.push(entry);
+  }
+
+  return { name, cells, inputs, agents, data };
 }
 
 function coerceValue(raw: string, type: string): unknown {

@@ -154,6 +154,7 @@ export type {
   CustomCellExecutor,
   MountOptions,
   WorkbookCellRegistry,
+  WorkbookData,
 } from "./htmlBindings";
 
 // Model artifact resolver (P4.2) — content-addressed IndexedDB cache for
