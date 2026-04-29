@@ -220,6 +220,7 @@ Click through the nav: each demo proves a different layer of the runtime.
 | `chat-app/` | Multi-mode agent app on top of the runtime | Hamburger / left nav / right inspector |
 | `html-workbook/` | HTML *is* the workbook | View Source = workbook source |
 | `html-agent/` | Agent grounded on cell outputs | Polars table → GPT-4o-mini quotes exact numbers in chat |
+| `notebook-agent/` | Agent reads + writes cells in a live notebook | list_cells / read_cell / append_cell / edit_cell tools wired to ReactiveExecutor |
 | `svelte-app/` | Multi-page SPA via the build tool | Hash-routed Svelte 5 app, lazy wasm runtime |
 | `runner/` | `.workbook` files run via drag-drop | Generic player |
 

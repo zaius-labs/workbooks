@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>notebook-agent · workbook</title>
+<link rel="stylesheet" href="../_shared/design.css" />
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); }
+  .wrap {
+    max-width: 980px; margin: 0 auto;
+    padding: var(--s-6) var(--s-5);
+    display: grid; gap: var(--s-5);
+  }
+  header { display: flex; gap: var(--s-3); align-items: baseline; }
+  .brand { font-family: var(--font-mono); font-size: var(--t-sm); font-weight: 600; letter-spacing: 0.04em; }
+  .brand .accent { color: var(--accent); }
+  .hint { font-size: var(--t-sm); color: var(--ink-3); }
+  .keyrow {
+    display: flex; gap: var(--s-3); align-items: center;
+    padding: var(--s-3) var(--s-4);
+    background: var(--bg-soft); border: 1px solid var(--line); border-radius: var(--radius);
+  }
+  .keyrow input {
+    flex: 1; padding: 6px 10px;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    font-family: var(--font-mono); font-size: var(--t-xs);
+    background: var(--bg);
+  }
+  .keystate { font-family: var(--font-mono); font-size: var(--t-xs); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); }
+  .keystate.set   { color: var(--ok);  border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+  .keystate.unset { color: var(--err); border-color: color-mix(in srgb, var(--err) 35%, transparent); }
+
+  /* Notebook panel */
+  .panel { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+  .panel-head {
+    padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: var(--s-3);
+    font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .panel-head strong { color: var(--ink); font-weight: 600; }
+  .panel-body { padding: var(--s-4); display: grid; gap: var(--s-3); }
+
+  .cell {
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--bg);
+    transition: border-color var(--t-mid) var(--ease-out);
+  }
+  .cell.running { border-color: var(--run); }
+  .cell.ok { border-color: color-mix(in srgb, var(--ok) 60%, var(--line)); }
+  .cell.error { border-color: color-mix(in srgb, var(--err) 60%, var(--line)); }
+  .cell-head {
+    display: flex; align-items: baseline; gap: var(--s-3);
+    padding: 6px var(--s-3);
+    font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-3);
+    border-bottom: 1px solid var(--line);
+  }
+  .cell-head .id { color: var(--ink); font-weight: 600; }
+  .cell-head .lang { color: var(--ink-2); }
+  .cell-head .status { margin-left: auto; }
+  .cell-head .dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--idle); margin-right: 6px;
+  }
+  .cell.running .dot { background: var(--run); animation: wb-pulse 1.4s var(--ease-out) infinite; }
+  .cell.ok .dot { background: var(--ok); }
+  .cell.error .dot { background: var(--err); }
+  .cell-source {
+    padding: 8px var(--s-3);
+    font-family: var(--font-mono); font-size: var(--t-xs);
+    white-space: pre-wrap; color: var(--ink-2);
+    background: var(--bg-soft);
+  }
+  .cell-out {
+    padding: 8px var(--s-3); min-height: 16px;
+    font-family: var(--font-mono); font-size: var(--t-xs);
+  }
+  .cell-out.empty { color: var(--ink-4); font-style: italic; }
+  .cell-out table { border-collapse: collapse; font-size: var(--t-xs); }
+  .cell-out th, .cell-out td { border: 1px solid var(--line); padding: 2px 8px; text-align: left; }
+  .cell-out th { background: var(--bg-soft); font-weight: 600; }
+  .cell-out td.num { text-align: right; font-feature-settings: "tnum"; }
+  .cell-out .err { color: var(--err); white-space: pre-wrap; }
+
+  /* Chat composer */
+  .chat-thread { display: grid; gap: var(--s-3); }
+  .turn { display: grid; gap: 4px; }
+  .turn-meta {
+    font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .turn.user .turn-meta { color: var(--ink-2); }
+  .turn.assistant .turn-meta { color: var(--accent); }
+  .turn-text { white-space: pre-wrap; line-height: 1.55; font-size: var(--t-base); color: var(--ink); }
+  .tool-step {
+    margin: 6px 0; border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--bg-soft); font-family: var(--font-mono); font-size: var(--t-xs);
+    overflow: hidden;
+  }
+  .tool-step-head {
+    display: flex; gap: 8px; align-items: center;
+    padding: 4px 8px; cursor: pointer; color: var(--ink-2);
+  }
+  .tool-step-head .arrow { color: var(--ink-3); transition: transform var(--t-fast) var(--ease-out); }
+  .tool-step.open .tool-step-head .arrow { transform: rotate(90deg); }
+  .tool-step .name { color: var(--ink); font-weight: 600; }
+  .tool-step .args-preview { color: var(--ink-3); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tool-step-body { display: none; padding: 6px 8px; border-top: 1px solid var(--line); }
+  .tool-step.open .tool-step-body { display: block; }
+  .tool-step .label { color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; margin-bottom: 4px; }
+  .tool-step pre { margin: 0 0 8px; white-space: pre-wrap; color: var(--ink); }
+  .tool-step pre.result { color: var(--ink-2); max-height: 220px; overflow: auto; background: var(--bg); padding: 6px 8px; border-radius: var(--radius); border: 1px solid var(--line); }
+
+  .compose {
+    display: flex; gap: 8px; align-items: end;
+    padding-top: var(--s-3); border-top: 1px solid var(--line);
+    margin-top: var(--s-3);
+  }
+  .compose textarea {
+    flex: 1; min-height: 36px; max-height: 200px; resize: none;
+    padding: 8px 10px;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    font-family: var(--font-sans); font-size: var(--t-base);
+    background: var(--bg);
+  }
+  .compose button {
+    padding: 8px 14px;
+    border: 1px solid var(--accent); border-radius: var(--radius);
+    background: var(--accent); color: white; cursor: pointer;
+    font-size: var(--t-sm);
+  }
+  .compose button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .compose button.stop { border-color: var(--err); background: var(--err); }
+
+  .examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .examples button {
+    background: transparent; color: var(--ink-2); border: 1px solid var(--line);
+    border-radius: 999px; padding: 3px 10px;
+    font-family: var(--font-mono); font-size: var(--t-xs); cursor: pointer;
+  }
+  .examples button:hover { background: var(--bg-soft); color: var(--ink); border-color: var(--line-2); }
+
+  .boot {
+    position: fixed; left: 50%; top: 40%; transform: translateX(-50%);
+    font-family: var(--font-mono); font-size: var(--t-sm); color: var(--ink-3);
+    padding: 10px 14px; background: var(--bg-soft); border: 1px solid var(--line); border-radius: var(--radius);
+  }
+  .boot.error { color: var(--err); border-color: color-mix(in srgb, var(--err) 35%, transparent); }
+</style>
+</head>
+<body>
+  <div id="boot" class="boot">booting…</div>
+
+  <div class="wrap" id="app" hidden>
+    <header>
+      <span class="brand">workbook<span class="accent">/</span>notebook-agent</span>
+      <span class="hint">— an agent that reads + writes the notebook below as it works.</span>
+    </header>
+
+    <div class="keyrow">
+      <span class="hint">openrouter key</span>
+      <input id="apiKey" type="password" placeholder="sk-or-…" autocomplete="off"/>
+      <span id="keyState" class="keystate unset">no key</span>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <strong>notebook</strong>
+        <span>cells re-run on dependency change · agent edits land here live</span>
+      </div>
+      <div id="cells" class="panel-body"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <strong>agent</strong>
+        <span>has tools to list / read / append / edit cells in the notebook above</span>
+      </div>
+      <div class="panel-body">
+        <div id="chat" class="chat-thread"></div>
+        <div class="compose">
+          <textarea id="input" rows="1" placeholder="ask the agent to add or change a cell…"></textarea>
+          <button id="send">send</button>
+          <button id="stop" class="stop" style="display:none;">stop</button>
+        </div>
+        <div class="examples" id="examples"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    // ─── Boot ──────────────────────────────────────────────────
+    const bootEl = document.getElementById("boot");
+    const setBoot = (msg, isErr = false) => {
+      bootEl.textContent = msg;
+      bootEl.classList.toggle("error", !!isErr);
+    };
+
+    let wasm, bundle;
+    try {
+      setBoot("loading wasm…");
+      wasm = await import("../../pkg/workbook_runtime.js");
+      await wasm.default();
+      setBoot("loading runtime bundle…");
+      bundle = await import("../reactive-cells/runtime.bundle.js");
+    } catch (err) {
+      setBoot("boot failed: " + (err?.stack ?? err?.message ?? String(err)), true);
+      throw err;
+    }
+
+    const {
+      createRuntimeClient,
+      ReactiveExecutor,
+      runAgentLoop,
+      createBrowserLlmClient,
+      createWorkbookAgentTools,
+      renderMarkdown,
+    } = bundle;
+
+    // ─── Inline VFS so agents can promote query_data into a cell ──
+    const vfs = (() => {
+      const PREFIX = "notebook-agent.vfs.";
+      function exists(p) { return localStorage.getItem(PREFIX + p) !== null; }
+      function readText(p) {
+        const v = localStorage.getItem(PREFIX + p);
+        if (v === null) throw new Error(`no such file: ${p}`);
+        return v;
+      }
+      function writeText(p, s) { localStorage.setItem(PREFIX + p, String(s ?? "")); return s.length; }
+      return { exists, readText, writeText };
+    })();
+
+    const SAMPLE_CSV = `region,revenue,churn
+us,12000,0.04
+us,8400,0.11
+eu,15600,0.02
+eu,3200,0.18
+apac,21000,0.05
+apac,4400,0.22`;
+    if (!vfs.exists("/workspace/customers.csv")) {
+      vfs.writeText("/workspace/customers.csv", SAMPLE_CSV);
+    }
+
+    // ─── Starter notebook cells ────────────────────────────────
+    // Two cells: one rhai (reads input n), one polars (operates on a
+    // small inline CSV). These give the agent something to inspect
+    // before authoring more.
+    const starterCells = [
+      {
+        id: "doubled",
+        language: "rhai",
+        source: "n * 2",
+        provides: ["doubled"],
+        dependsOn: ["n"],
+      },
+      {
+        id: "by_region",
+        language: "polars",
+        source: `SELECT region, SUM(revenue) AS total, AVG(churn) AS avg_churn
+FROM data
+GROUP BY region
+ORDER BY total DESC`,
+      },
+    ];
+
+    // ─── Cell rendering ────────────────────────────────────────
+    const cellsRoot = document.getElementById("cells");
+    const cellEls = new Map();
+
+    function renderCell(cell) {
+      const el = document.createElement("div");
+      el.className = "cell pending";
+      el.innerHTML = `
+        <div class="cell-head">
+          <span><span class="dot"></span><span class="id"></span></span>
+          <span class="lang"></span>
+          <span class="status"></span>
+        </div>
+        <div class="cell-source"></div>
+        <div class="cell-out empty">—</div>`;
+      el.querySelector(".id").textContent = cell.id;
+      el.querySelector(".lang").textContent = cell.language;
+      el.querySelector(".cell-source").textContent = cell.source ?? "(no source)";
+      cellsRoot.appendChild(el);
+      cellEls.set(cell.id, el);
+      return el;
+    }
+
+    function updateCellOutputs(cellId, outputs) {
+      const el = cellEls.get(cellId);
+      if (!el) return;
+      const out = el.querySelector(".cell-out");
+      out.innerHTML = "";
+      out.classList.remove("empty");
+      if (!outputs || !outputs.length) {
+        out.classList.add("empty");
+        out.textContent = "—";
+        return;
+      }
+      for (const o of outputs) out.appendChild(renderOutput(o));
+    }
+
+    function renderOutput(o) {
+      if (o.kind === "text" && o.mime_type === "text/csv") return csvToTable(o.content);
+      if (o.kind === "table") {
+        const div = document.createElement("div");
+        div.textContent = `[table ${o.sql_table}${o.row_count != null ? `, ${o.row_count} rows` : ""}]`;
+        return div;
+      }
+      if (o.kind === "image" && o.mime_type === "image/svg+xml") {
+        const div = document.createElement("div"); div.innerHTML = o.content; return div;
+      }
+      const div = document.createElement("div");
+      if (o.kind === "error") {
+        div.className = "err";
+        div.textContent = "ERROR: " + o.message;
+      } else if (o.kind === "text") {
+        div.textContent = o.content;
+      } else {
+        div.textContent = JSON.stringify(o);
+      }
+      return div;
+    }
+
+    function csvToTable(csv) {
+      const rows = csv.trim().split("\n").map(parseCsvRow);
+      const t = document.createElement("table");
+      const thead = document.createElement("thead"); const tr = document.createElement("tr");
+      for (const c of rows[0]) { const th = document.createElement("th"); th.textContent = c; tr.appendChild(th); }
+      thead.appendChild(tr); t.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      for (let i = 1; i < rows.length; i++) {
+        const r = document.createElement("tr");
+        for (const c of rows[i]) {
+          const td = document.createElement("td"); td.textContent = c;
+          if (!isNaN(Number(c)) && c !== "") td.className = "num";
+          r.appendChild(td);
+        }
+        tbody.appendChild(r);
+      }
+      t.appendChild(tbody);
+      return t;
+    }
+    function parseCsvRow(row) {
+      const out = []; let cur = ""; let inQ = false;
+      for (let i = 0; i < row.length; i++) {
+        const ch = row[i];
+        if (ch === '"') { inQ = !inQ; continue; }
+        if (ch === "," && !inQ) { out.push(cur); cur = ""; continue; }
+        cur += ch;
+      }
+      out.push(cur);
+      return out;
+    }
+
+    // Render starter cells.
+    for (const c of starterCells) renderCell(c);
+
+    // ─── Executor ──────────────────────────────────────────────
+    const client = createRuntimeClient({ loadWasm: async () => wasm });
+    const executor = new ReactiveExecutor({
+      client,
+      cells: starterCells,
+      inputs: { n: 21 },
+      workbookSlug: "notebook-agent",
+      debounceMs: 120,
+      onCellState: (state) => {
+        // Lazily render cells the agent appends — onCellState fires
+        // for ids we haven't rendered yet.
+        let el = cellEls.get(state.cellId);
+        if (!el) {
+          const cell = executor.getCell(state.cellId);
+          if (cell) el = renderCell(cell);
+          else return;
+        }
+        el.className = `cell ${state.status}`;
+        const status = el.querySelector(".status");
+        if (state.status === "running") status.textContent = "running…";
+        else if (state.status === "ok") status.textContent = state.lastRunMs != null ? `${state.lastRunMs} ms` : "ok";
+        else if (state.status === "error") status.textContent = "error";
+        else status.textContent = "";
+        if (state.status === "ok") updateCellOutputs(state.cellId, state.outputs);
+        if (state.status === "error") {
+          const out = el.querySelector(".cell-out");
+          out.classList.remove("empty");
+          out.innerHTML = "";
+          const err = document.createElement("div");
+          err.className = "err";
+          err.textContent = state.error ?? "error";
+          out.appendChild(err);
+        }
+      },
+    });
+    await executor.runAll();
+
+    // ─── Chat composer ─────────────────────────────────────────
+    const KEY_STORAGE = "wb.env.notebook-agent.OPENROUTER_API_KEY";
+    const els = {
+      key: document.getElementById("apiKey"),
+      keyState: document.getElementById("keyState"),
+      chat: document.getElementById("chat"),
+      input: document.getElementById("input"),
+      send: document.getElementById("send"),
+      stop: document.getElementById("stop"),
+      examples: document.getElementById("examples"),
+    };
+
+    const state = {
+      apiKey: localStorage.getItem(KEY_STORAGE) ?? "",
+      llm: null,
+      thread: [],   // [{ role, segments }]
+    };
+
+    function rebuildLlm() {
+      state.llm = state.apiKey ? createBrowserLlmClient({ apiKey: state.apiKey }) : null;
+      els.keyState.classList.toggle("set", !!state.apiKey);
+      els.keyState.classList.toggle("unset", !state.apiKey);
+      els.keyState.textContent = state.apiKey ? "key set" : "no key";
+    }
+    els.key.value = state.apiKey;
+    els.key.addEventListener("input", () => {
+      state.apiKey = els.key.value.trim();
+      if (state.apiKey) localStorage.setItem(KEY_STORAGE, state.apiKey);
+      else localStorage.removeItem(KEY_STORAGE);
+      rebuildLlm();
+    });
+    rebuildLlm();
+
+    // Example prompts to seed the user's intuition for what the
+    // agent can do here. Click → fills the compose box.
+    const EXAMPLES = [
+      "what cells are in the notebook?",
+      "read by_region and tell me which region has lowest churn",
+      "append a polars cell that returns rows where churn > 0.10",
+      "edit the doubled cell to compute n * 3 + 1 instead",
+    ];
+    for (const ex of EXAMPLES) {
+      const b = document.createElement("button");
+      b.textContent = ex;
+      b.addEventListener("click", () => { els.input.value = ex; els.input.focus(); });
+      els.examples.appendChild(b);
+    }
+
+    function renderToolStep(step) {
+      const wrap = document.createElement("div");
+      wrap.className = "tool-step";
+      let argsPretty = "";
+      try { argsPretty = JSON.stringify(JSON.parse(step.argumentsJson || "{}"), null, 2); }
+      catch { argsPretty = String(step.argumentsJson || ""); }
+      const argsPreview = argsPretty.replace(/\s+/g, " ").trim();
+      wrap.innerHTML = `
+        <div class="tool-step-head">
+          <span class="arrow">▸</span>
+          <span class="name"></span>
+          <span class="args-preview"></span>
+        </div>
+        <div class="tool-step-body">
+          <div class="label">arguments</div>
+          <pre></pre>
+          <div class="label">result</div>
+          <pre class="result"></pre>
+        </div>`;
+      wrap.querySelector(".name").textContent = step.name;
+      wrap.querySelector(".args-preview").textContent = argsPreview;
+      const pres = wrap.querySelectorAll("pre");
+      pres[0].textContent = argsPretty;
+      pres[1].textContent = String(step.result ?? "");
+      wrap.querySelector(".tool-step-head").addEventListener("click", () => wrap.classList.toggle("open"));
+      return wrap;
+    }
+
+    function renderHistory(streamingTurnNode) {
+      els.chat.innerHTML = "";
+      for (const m of state.thread) {
+        const node = document.createElement("div");
+        node.className = "turn " + m.role;
+        const meta = document.createElement("div");
+        meta.className = "turn-meta";
+        meta.textContent = m.role === "user" ? "you" : "agent";
+        node.appendChild(meta);
+        for (const seg of m.segments) {
+          if (seg.kind === "text") {
+            if (!seg.text) continue;
+            const t = document.createElement("div");
+            t.className = "turn-text";
+            t.innerHTML = renderMarkdown(seg.text);
+            node.appendChild(t);
+          } else if (seg.kind === "tool") {
+            node.appendChild(renderToolStep(seg));
+          }
+        }
+        els.chat.appendChild(node);
+      }
+      if (streamingTurnNode) els.chat.appendChild(streamingTurnNode);
+    }
+
+    function buildPromptWithHistory(thread, message) {
+      if (!thread.length) return message;
+      const flatten = (m) => m.role === "user"
+        ? `User: ${m.segments[0]?.text ?? ""}`
+        : "Assistant: " + m.segments.map((s) =>
+            s.kind === "text" ? s.text : `[used tool ${s.name}]`,
+          ).join("").trim();
+      return `Earlier conversation:\n\n${thread.map(flatten).join("\n\n")}\n\nCurrent message:\n\n${message}`;
+    }
+
+    const SYSTEM_PROMPT =
+      "You are an agent embedded in an executable notebook. The user's notebook " +
+      "has cells you can list, read, append, and edit. Cells re-execute automatically " +
+      "on edit. Languages available: rhai (scripting), polars (SQL against in-VFS CSVs). " +
+      "Default Polars table name is `data`; the default CSV is /workspace/customers.csv " +
+      "with columns region, revenue, churn. " +
+      "When the user asks for analysis, prefer adding or editing a cell over describing " +
+      "the answer — the cell's output IS the answer, and the user can re-run it. " +
+      "Always start by calling list_cells if you don't know what's there. " +
+      "Use query_data only for quick scoping that doesn't deserve its own cell. " +
+      "Reply concisely; show your work in tool calls, not prose.";
+
+    let activeAbort = null;
+
+    async function send() {
+      const text = els.input.value.trim();
+      if (!text) return;
+      if (!state.llm) { els.key.focus(); return; }
+      els.input.value = "";
+      autoResize();
+      els.send.style.display = "none";
+      els.stop.style.display = "";
+
+      state.thread.push({ role: "user", segments: [{ kind: "text", text }] });
+
+      // Streaming turn lives outside state.thread until done.
+      const streamingNode = document.createElement("div");
+      streamingNode.className = "turn assistant";
+      const meta = document.createElement("div");
+      meta.className = "turn-meta";
+      meta.textContent = "agent";
+      streamingNode.appendChild(meta);
+      const segments = [];
+      let currentTextEl = null;
+      function ensureText() {
+        if (currentTextEl) return currentTextEl;
+        const el = document.createElement("div");
+        el.className = "turn-text";
+        streamingNode.appendChild(el);
+        currentTextEl = el;
+        segments.push({ kind: "text", text: "", _el: el });
+        return el;
+      }
+      function appendDelta(delta) {
+        const el = ensureText();
+        const seg = segments[segments.length - 1];
+        if (seg && seg.kind === "text") {
+          seg.text += delta;
+          el.innerHTML = renderMarkdown(seg.text);
+        }
+      }
+      function appendTool(step) {
+        currentTextEl = null;
+        streamingNode.appendChild(renderToolStep(step));
+        segments.push({ kind: "tool", name: step.name, argumentsJson: step.argumentsJson, result: step.result });
+      }
+
+      renderHistory(streamingNode);
+
+      // Tools: cell-aware. Pass vfs + wasm so query_data is also exposed.
+      const tools = createWorkbookAgentTools({
+        executor,
+        vfs: { exists: vfs.exists, readText: vfs.readText },
+        wasm,
+        defaultCsvPath: "/workspace/customers.csv",
+      });
+
+      activeAbort = new AbortController();
+      try {
+        const result = await runAgentLoop({
+          llmClient: state.llm,
+          model: "minimax/minimax-m2.7",
+          systemPrompt: SYSTEM_PROMPT,
+          initialUserMessage: buildPromptWithHistory(state.thread.slice(0, -1), text),
+          tools,
+          maxIterations: 20,
+          onDelta: appendDelta,
+          onToolCall: (call, result) =>
+            appendTool({ name: call.name, argumentsJson: call.argumentsJson, result }),
+        });
+        const lastSeg = segments[segments.length - 1];
+        if (result?.text && (!lastSeg || lastSeg.kind !== "text" || !lastSeg.text)) {
+          appendDelta(result.text);
+        }
+        const clean = segments.map((s) => s.kind === "text"
+          ? { kind: "text", text: s.text }
+          : { kind: "tool", name: s.name, argumentsJson: s.argumentsJson, result: s.result });
+        state.thread.push({ role: "assistant", segments: clean });
+      } catch (err) {
+        appendDelta(`\n[error] ${err?.message ?? err}`);
+        const clean = segments.map((s) => s.kind === "text"
+          ? { kind: "text", text: s.text }
+          : { kind: "tool", name: s.name, argumentsJson: s.argumentsJson, result: s.result });
+        state.thread.push({ role: "assistant", segments: clean });
+      } finally {
+        els.send.style.display = "";
+        els.stop.style.display = "none";
+        activeAbort = null;
+        renderHistory();
+      }
+    }
+
+    function autoResize() {
+      els.input.style.height = "auto";
+      els.input.style.height = Math.min(els.input.scrollHeight, 200) + "px";
+    }
+
+    els.send.addEventListener("click", send);
+    els.stop.addEventListener("click", () => activeAbort?.abort());
+    els.input.addEventListener("input", autoResize);
+    els.input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
+    });
+
+    bootEl.remove();
+    document.getElementById("app").hidden = false;
+    els.input.focus();
+  </script>
+</body>
+</html>

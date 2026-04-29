@@ -13,6 +13,7 @@ const PAGES = [
   { slug: "chat-cell",        title: "chat",       desc: "llm" },
   { slug: "html-workbook",    title: "html",       desc: "custom elements" },
   { slug: "html-agent",       title: "html agent", desc: "agent + chat" },
+  { slug: "notebook-agent",   title: "notebook agent", desc: "agent edits cells" },
   { slug: "runner",           title: "runner",     desc: "open .workbook" },
 ];
 

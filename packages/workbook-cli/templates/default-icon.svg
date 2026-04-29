@@ -1,8 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <rect width="64" height="64" rx="10" fill="#7c2d12"/>
-  <rect x="14" y="14" width="36" height="36" rx="2" fill="#fbfaf7"/>
-  <rect x="20" y="22" width="24" height="2.5" rx="1.25" fill="#7c2d12"/>
-  <rect x="20" y="29" width="20" height="2.5" rx="1.25" fill="#a8a29e"/>
-  <rect x="20" y="36" width="24" height="2.5" rx="1.25" fill="#a8a29e"/>
-  <rect x="20" y="43" width="14" height="2.5" rx="1.25" fill="#a8a29e"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Squircle (Apple-style rounded-square; rx ≈ 22.5% of side) -->
+  <rect width="64" height="64" rx="14" fill="#7c2d12"/>
+  <!-- Notebook emoji centered. Font stack falls through to whichever
+       emoji font the host has; glyph appearance will vary by OS but
+       the squircle background keeps it recognizable as a workbook. -->
+  <text x="32" y="46"
+        text-anchor="middle"
+        font-size="38"
+        font-family="-apple-system, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif">📓</text>
 </svg>
