@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { DiagramBlock } from "../types";
   import { onMount } from "svelte";
+  import { sanitizeSvg } from "../util/sanitize";
 
   let { block }: { block: DiagramBlock } = $props();
 
@@ -48,7 +49,11 @@
         });
         const { svg } = await mermaid.render(renderId, block.source);
         if (cancelled) return;
-        node.innerHTML = svg;
+        // Mermaid runs in securityLevel: "strict" mode (configured
+        // above), but sanitize anyway — the rendered SVG can still
+        // contain author-controlled label text and the strict mode
+        // is a Mermaid-internal concern, not a sanitizer. closes core-0id.2
+        node.innerHTML = sanitizeSvg(svg);
       } catch (e) {
         error = e instanceof Error ? e.message : "Mermaid render failed";
       }

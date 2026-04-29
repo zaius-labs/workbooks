@@ -5,6 +5,7 @@
   import type { NetworkBlock } from "../types";
   import { onMount } from "svelte";
   import { PALETTE } from "./chart/palette";
+  import { sanitizeHtml } from "../util/sanitize";
 
   let { block }: { block: NetworkBlock } = $props();
 
@@ -154,7 +155,10 @@
          * `target.data()`, which carries the fields we set above. */
         const nodeById = new Map(block.nodes.map((n) => [n.id, n] as const));
         const showTip = (html: string, ev: { renderedPosition: { x: number; y: number } }) => {
-          tip.innerHTML = html;
+          // Each callsite escTip's its interpolations (P0.4), but
+          // belt-and-suspenders sanitize on the way into innerHTML
+          // anyway. closes core-0id.2
+          tip.innerHTML = sanitizeHtml(html);
           tip.style.left = `${ev.renderedPosition.x + 12}px`;
           tip.style.top = `${ev.renderedPosition.y + 12}px`;
           tip.style.opacity = "1";

@@ -40,6 +40,7 @@ import type {
 import type { CellState } from "./reactiveExecutor";
 import type { LlmClient } from "./llmClient";
 import { runAgentLoop } from "./agentLoop";
+import { sanitizeSvg } from "./util/sanitize";
 
 // ----------------------------------------------------------------------
 // Plugin registry — third parties can register cell languages.
@@ -383,7 +384,10 @@ function renderOutputElement(
 function renderOutput(o: CellOutput): HTMLElement {
   if (o.kind === "image" && o.mime_type === "image/svg+xml") {
     const div = document.createElement("div");
-    div.innerHTML = o.content;
+    // SVG is not a safe subset of HTML. <svg><script>, on*= handlers,
+    // and <foreignObject><iframe src=javascript:> all execute if we
+    // drop raw SVG into innerHTML. closes core-0id.2
+    div.innerHTML = sanitizeSvg(o.content);
     return div;
   }
   if (o.kind === "text" && o.mime_type === "text/csv") {
@@ -534,7 +538,9 @@ function bindChatElement(
   }
   const agent = spec.agents.find((a) => a.id === agentId);
   if (!agent) {
-    el.innerHTML = `<div class="wb-out error">wb-chat: no agent with id '${agentId}'</div>`;
+    // agentId is from getAttribute("for")/("agent"), workbook-controlled.
+    // Escape before interpolating into the error message. closes core-0id.2 + .3
+    el.innerHTML = `<div class="wb-out error">wb-chat: no agent with id '${escapeHtml(agentId)}'</div>`;
     return;
   }
   if (!ctx.llmClient) {
