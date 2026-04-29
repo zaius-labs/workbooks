@@ -16,14 +16,58 @@ pub struct RhaiCellRequest {
     pub params: serde_json::Value,
 }
 
+/// Default sandbox limits applied to every Rhai engine. Closes core-0id.5.
+///
+/// Without these, `Engine::new()` permits unbounded operation counts,
+/// arbitrary recursion depth, and arbitrarily large strings/arrays/maps.
+/// `loop {}`, `let s = ""; loop { s += "a"; }`, and deep recursion all
+/// hang the WASM call indefinitely. Since the runtime today executes
+/// on the main thread (only the DuckDB sidecar is in a Worker), an
+/// adversarial cell freezes the whole tab.
+///
+/// Tuned conservatively for analytical cells:
+///   - 10M operations covers complex Rhai script computations but
+///     halts pathological loops in <1s on typical hardware.
+///   - 64-deep call levels supports recursive helpers; deeper than
+///     this is almost always a runaway.
+///   - 1MB string / 100K array / 10K map caps prevent
+///     length-amplification (`s += s` doubling).
+///   - max_modules=0 — no module imports. Cells should be
+///     self-contained Rhai snippets, not entry points to a module
+///     graph the host can't audit.
+///   - 64-deep expression nesting matches the call-level cap.
+const RHAI_MAX_OPERATIONS: u64 = 10_000_000;
+const RHAI_MAX_CALL_LEVELS: usize = 64;
+const RHAI_MAX_STRING_SIZE: usize = 1_000_000;
+const RHAI_MAX_ARRAY_SIZE: usize = 100_000;
+const RHAI_MAX_MAP_SIZE: usize = 10_000;
+const RHAI_MAX_EXPR_DEPTH: usize = 64;
+
+fn make_engine() -> rhai::Engine {
+    let mut engine = rhai::Engine::new();
+    engine.set_max_operations(RHAI_MAX_OPERATIONS);
+    engine.set_max_call_levels(RHAI_MAX_CALL_LEVELS);
+    engine.set_max_string_size(RHAI_MAX_STRING_SIZE);
+    engine.set_max_array_size(RHAI_MAX_ARRAY_SIZE);
+    engine.set_max_map_size(RHAI_MAX_MAP_SIZE);
+    engine.set_max_modules(0);
+    engine.set_max_expr_depths(RHAI_MAX_EXPR_DEPTH, RHAI_MAX_EXPR_DEPTH);
+    engine
+}
+
 /// Evaluate a Rhai script and return the result as a stringified value.
 ///
 /// `params` is a JSON object whose keys are bound as Rhai variables.
 /// JSON types map: number → INT or FLOAT, string → ImmutableString,
 /// boolean → bool, null → unit. Nested objects/arrays come through as
 /// stringified Dynamic.
+///
+/// Sandbox limits (operation count, recursion depth, string/array/map
+/// size) are applied via `make_engine`. See its rustdoc for rationale
+/// and the specific caps. Hitting any cap surfaces as a `rhai eval
+/// error: ...` to the caller.
 pub fn run_rhai_cell(req: RhaiCellRequest) -> Result<Vec<CellOutput>, String> {
-    let engine = rhai::Engine::new();
+    let engine = make_engine();
     let mut scope = rhai::Scope::new();
     bind_params(&mut scope, &req.params);
 
