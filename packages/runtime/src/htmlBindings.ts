@@ -343,10 +343,22 @@ export function parseWorkbookHtml(root: Element): WorkbookHtmlSpec {
   // cell outputs, so a `<wb-data id="orders">` is referenceable as
   // `reads="orders"` from any cell. Resolution + decode happens at
   // mount time via createWorkbookDataResolver (separate file).
+  //
+  // ID collisions: the `reads=` namespace is shared with <wb-input>
+  // and <wb-cell> provides. A duplicate id between any of these
+  // produces silent shadowing at mount (data > inputs > outputs).
+  // Reject collisions here so the author sees the conflict instead.
+  const usedIds = new Set<string>([
+    ...Object.keys(inputs),
+    ...cells.map((c) => c.id),
+    ...cells.flatMap((c) => c.provides ?? []),
+  ]);
   for (const el of root.querySelectorAll("wb-data")) {
     if (data.length >= MAX_DATA_BLOCKS) break;
     const id = validId(el.getAttribute("id"));
     if (!id) continue;
+    if (usedIds.has(id)) continue;
+    usedIds.add(id);
     const mime = (el.getAttribute("mime") ?? "").toLowerCase();
     if (!ALLOWED_DATA_MIMES.has(mime)) continue;
 
