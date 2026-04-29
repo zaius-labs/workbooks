@@ -147,6 +147,29 @@ export interface WorkbookRuntimeWasm {
    * truncate at the first EOS marker. Throws if schemas differ.
    */
   appendArrowIpc?: (existing: Uint8Array, new_batch: Uint8Array) => Uint8Array;
+  // ----- Prolly Tree (<wb-history>) primitives -----
+  /** Initialize an empty history with a single root commit. */
+  prollyInit?: (message: string) => Uint8Array;
+  /** Read HEAD commit hash (hex). */
+  prollyHead?: (serialized: Uint8Array) => string;
+  /** Read value at key from current HEAD's leaf. Returns Uint8Array | null. */
+  prollyGet?: (serialized: Uint8Array, key: string) => Uint8Array | null;
+  /** List utf-8 keys in current HEAD's leaf. */
+  prollyKeys?: (serialized: Uint8Array) => string[];
+  /** Set key=value, commit, return new serialized history bytes. */
+  prollySet?: (serialized: Uint8Array, key: string, value: Uint8Array, message: string) => Uint8Array;
+  /** Remove key, commit, return new serialized history bytes. */
+  prollyDelete?: (serialized: Uint8Array, key: string, message: string) => Uint8Array;
+  /** Walk parent chain from HEAD, return array of commit info. */
+  prollyLog?: (serialized: Uint8Array) => Array<{
+    hash: string;
+    parent: string | null;
+    root: string;
+    timestamp_ms: number;
+    message: string;
+  }>;
+  /** Materialize the leaf at a past commit. Returns [key, value][]. */
+  prollyCheckout?: (serialized: Uint8Array, commit_hash_hex: string) => Array<[string, Uint8Array]>;
   runChart?: (spec_json: string) => CellOutput[];
   candleSmokeTest?: () => CellOutput[];
   linfaSmokeTest?: () => CellOutput[];

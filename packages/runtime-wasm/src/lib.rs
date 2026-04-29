@@ -43,6 +43,7 @@ use wasm_bindgen::prelude::*;
 pub mod bridge;
 pub mod runtime;
 pub mod outputs;
+pub mod prolly;
 
 #[cfg(feature = "polars-frames")]
 pub mod frames;

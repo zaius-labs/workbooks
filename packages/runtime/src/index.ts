@@ -213,15 +213,18 @@ export type {
 
 // Workbook history resolver — content-addressed Merkle commit chain
 // of the workbook itself. Parser + types are live; the Prolly Tree
-// reader is the dedicated multi-month epic. Resolver verifies bytes
-// and throws on traversal until that work lands; pass bytesOnly=true
-// to opt into raw-bytes resolution for hosts shipping their own
-// readers.
+// reader is backed by the Rust+WASM Prolly Tree primitive in
+// runtime-wasm/src/prolly.rs. Phase-1 ships depth-1 trees with
+// content-addressed integrity, parent-chained commits, and live
+// mutation via the HistoryHandle. Three-way merge + rolling-hash
+// chunking land in Phase-2.
 export { createWorkbookHistoryResolver } from "./workbookHistoryResolver";
 export type {
   ResolvedHistory,
   WorkbookHistoryResolver,
   WorkbookHistoryResolverOptions,
+  HistoryHandle,
+  CommitInfo,
 } from "./workbookHistoryResolver";
 
 // SQLite cell dispatcher — JS-side sidecar around @sqlite.org/sqlite-wasm.

@@ -65,16 +65,45 @@
 import { sha256Hex } from "./modelArtifactResolver";
 import type { WorkbookHistory } from "./htmlBindings";
 
-/** Stub return — when the real implementation lands this becomes a
- *  rich handle with checkout/diff/merge/log. */
+export interface CommitInfo {
+  hash: string;
+  parent: string | null;
+  root: string;
+  timestamp_ms: number;
+  message: string;
+}
+
+/**
+ * Live handle to a `<wb-history>` block. Backed by the Rust+WASM
+ * Prolly Tree primitive (`prolly` module). Mutations return new
+ * serialized bytes the host writes back to the element body on save.
+ */
+export interface HistoryHandle {
+  /** Current serialized history bytes. */
+  bytes(): Uint8Array;
+  /** HEAD commit hash (hex). */
+  head(): string;
+  /** Read value at key from current HEAD's leaf. */
+  get(key: string): Uint8Array | null;
+  /** Keys present in current HEAD's leaf. */
+  keys(): string[];
+  /** Commit a key=value mutation. Updates internal bytes. */
+  set(key: string, value: Uint8Array, message: string): void;
+  /** Commit a key removal. Updates internal bytes. */
+  remove(key: string, message: string): void;
+  /** Walk parent chain from HEAD. Most recent first. */
+  log(): CommitInfo[];
+  /** Materialize the leaf at a past commit. */
+  checkout(commitHash: string): Array<[string, Uint8Array]>;
+}
+
 export interface ResolvedHistory {
   id: string;
   format: WorkbookHistory["format"];
-  headSha256: string;
-  /** The raw chunk-store bytes after sha256 verification. The real
-   *  resolver decodes these into a chunk Map; for now they're returned
-   *  as-is for hosts that want to ship custom tooling alongside. */
-  bytes: Uint8Array;
+  /** Recorded HEAD from the parsed element attribute (informational). */
+  declaredHeadSha256: string;
+  /** Live handle for reading and mutating. */
+  handle: HistoryHandle;
   fromCache: boolean;
 }
 
@@ -88,12 +117,12 @@ export interface WorkbookHistoryResolverOptions {
   allowedHosts?: string[] | null;
   fetchBytes?: (url: string) => Promise<Uint8Array>;
   /**
-   * If false (default), resolution throws to surface that history
-   * traversal isn't yet implemented. Set true to verify bytes +
-   * head sha256 only and return raw bytes — useful for hosts that
-   * want to surface "history exists, real reader pending" UI.
+   * Required: the runtime client whose loaded WASM module exposes
+   * the prolly* bindings. Resolver verifies bytes integrity and
+   * head sha256, then constructs a HistoryHandle that delegates
+   * mutations and reads to the Rust+WASM primitive.
    */
-  bytesOnly?: boolean;
+  wasm: import("./wasmBridge").WorkbookRuntimeWasm;
 }
 
 function hostAllowed(rawUrl: string, allow: ReadonlyArray<string>): boolean {
@@ -121,13 +150,47 @@ function decodeBase64(b64: string): Uint8Array {
 }
 
 export function createWorkbookHistoryResolver(
-  opts: WorkbookHistoryResolverOptions = {},
+  opts: WorkbookHistoryResolverOptions,
 ): WorkbookHistoryResolver {
   const allow: ReadonlyArray<string> | null =
     opts.allowedHosts === null ? null : opts.allowedHosts ?? [];
   const fetchBytes = opts.fetchBytes ?? defaultFetchBytes;
   const cache = new Map<string, ResolvedHistory>();
-  const bytesOnly = opts.bytesOnly === true;
+  const wasm = opts.wasm;
+
+  if (
+    !wasm.prollyInit ||
+    !wasm.prollyHead ||
+    !wasm.prollyGet ||
+    !wasm.prollyKeys ||
+    !wasm.prollySet ||
+    !wasm.prollyDelete ||
+    !wasm.prollyLog ||
+    !wasm.prollyCheckout
+  ) {
+    throw new Error(
+      "createWorkbookHistoryResolver: runtime WASM module is missing one or more " +
+        "prolly* bindings. Rebuild runtime-wasm — these landed alongside <wb-history>.",
+    );
+  }
+
+  function buildHandle(initial: Uint8Array): HistoryHandle {
+    let current = initial;
+    return {
+      bytes: () => current,
+      head: () => wasm.prollyHead!(current),
+      get: (key: string) => wasm.prollyGet!(current, key),
+      keys: () => wasm.prollyKeys!(current),
+      set(key, value, message) {
+        current = wasm.prollySet!(current, key, value, message);
+      },
+      remove(key, message) {
+        current = wasm.prollyDelete!(current, key, message);
+      },
+      log: () => wasm.prollyLog!(current),
+      checkout: (h) => wasm.prollyCheckout!(current, h),
+    };
+  }
 
   async function fetchExternal(
     src: string,
@@ -179,21 +242,22 @@ export function createWorkbookHistoryResolver(
       );
     }
 
-    if (!bytesOnly) {
+    // Verify the declared HEAD attribute matches what's actually inside
+    // the serialized blob. Catches authoring mistakes where the
+    // attribute drifted from the body.
+    const actualHead = wasm.prollyHead!(bytes);
+    if (actualHead !== block.headSha256) {
       throw new Error(
-        `<wb-history> traversal not yet implemented for format ` +
-          `${block.format} — bytes verified, but the Prolly Tree reader ` +
-          `is the dedicated 2-3 month epic. Pass bytesOnly: true to ` +
-          `createWorkbookHistoryResolver to opt into raw-bytes resolution ` +
-          `for tooling that ships its own reader.`,
+        `<wb-history> ${block.id}: declared head-sha256 (${block.headSha256}) ` +
+          `disagrees with body's HEAD (${actualHead})`,
       );
     }
 
     const out: ResolvedHistory = {
       id: block.id,
       format: block.format,
-      headSha256: block.headSha256,
-      bytes,
+      declaredHeadSha256: block.headSha256,
+      handle: buildHandle(bytes),
       fromCache: false,
     };
     cache.set(block.id, out);

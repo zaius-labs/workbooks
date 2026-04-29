@@ -251,10 +251,11 @@ export interface WorkbookDoc {
  *               head-sha256="abc..." encoding="base64"
  *               sha256="def...">PROLLY1...</wb-history>
  *
- * Status: parser + types only this commit. Real implementation is
- * the 2-3 month Prolly-Tree-in-Rust+WASM epic — no maintained JS
- * library exists. The resolver stub validates and throws; the
- * format is locked so future work doesn't need a breaking change.
+ * Status: live. Phase-1 implementation ships depth-1 trees (single
+ * leaf per commit, no rolling-hash chunking) backed by
+ * runtime-wasm/src/prolly.rs — content-addressed chunks, parent-
+ * chained commits, hash-verified deserialization. Three-way merge
+ * + multi-level interior nodes land in Phase-2.
  */
 export interface WorkbookHistory {
   id: string;
