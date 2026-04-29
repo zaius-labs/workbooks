@@ -194,7 +194,7 @@ export class ReactiveExecutor {
       this.transition(cell.id, { status: "running" });
       const start = performance.now();
       try {
-        const params = collectParams(cell, this.inputs);
+        const params = this.collectParams(cell);
         const resp: RunCellResponse = await this.client.runCell({
           runtimeId,
           cell,
@@ -213,6 +213,38 @@ export class ReactiveExecutor {
         });
       }
     }
+  }
+
+  /**
+   * Collect param bindings for `cell` — workbook inputs + upstream cell
+   * outputs. Each name in `cell` reads (per cellAnalyzer) is resolved:
+   *   1. as a workbook input (`this.inputs`)
+   *   2. as the parsed scalar output of an upstream cell that `provides`
+   *      that name (using the cell that produced it most recently)
+   *
+   * Scalar coercion: text/plain outputs that parse as a number return a
+   * JS number; otherwise the raw string. Non-text outputs come through
+   * stringified (callers that want richer typing extend this in P3.11).
+   */
+  private collectParams(cell: Cell): Record<string, unknown> {
+    const a = analyzeCell(cell);
+    const params: Record<string, unknown> = {};
+    const allCells = [...this.cells.values()];
+
+    for (const name of a.reads) {
+      if (this.inputs.has(name)) {
+        params[name] = this.inputs.get(name);
+        continue;
+      }
+      const provider = allCells.find((c) =>
+        analyzeCell(c).provides.includes(name),
+      );
+      if (!provider) continue;
+      const state = this.states.get(provider.id);
+      if (state?.status !== "ok" || !state.outputs?.length) continue;
+      params[name] = scalarFromOutputs(state.outputs);
+    }
+    return params;
   }
 
   private transition(cellId: string, patch: Partial<CellState>): void {
@@ -287,11 +319,13 @@ function providerOf(name: string, cells: Cell[]): Cell | undefined {
   return undefined;
 }
 
-function collectParams(cell: Cell, inputs: Map<string, unknown>): Record<string, unknown> {
-  const a = analyzeCell(cell);
-  const params: Record<string, unknown> = {};
-  for (const name of a.reads) {
-    if (inputs.has(name)) params[name] = inputs.get(name);
+function scalarFromOutputs(outputs: CellOutput[]): unknown {
+  for (const out of outputs) {
+    if (out.kind !== "text") continue;
+    const trimmed = out.content.trim();
+    const n = Number(trimmed);
+    if (!Number.isNaN(n) && Number.isFinite(n)) return n;
+    return trimmed;
   }
-  return params;
+  return outputs[0];
 }

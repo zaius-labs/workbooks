@@ -69,9 +69,7 @@
 
   <script type="module">
     import init, * as wasm from "../../pkg/workbook_runtime.js";
-    import { createRuntimeClient } from "../../../runtime/src/wasmBridge.ts";
-    import { analyzeCell } from "../../../runtime/src/cellAnalyzer.ts";
-    import { ReactiveExecutor } from "../../../runtime/src/reactiveExecutor.ts";
+    import { createRuntimeClient, analyzeCell, ReactiveExecutor } from "./runtime.bundle.js";
 
     const t0 = performance.now();
     await init();
@@ -134,7 +132,8 @@
             .map((o) => o.kind === "text" ? o.content : JSON.stringify(o))
             .join("\n");
         } else if (state.status === "error") {
-          out.textContent = state.error ?? "(error)";
+          out.textContent = "ERROR: " + (state.error ?? "(unknown)");
+          out.style.color = "#c0392b";
         } else if (state.status === "stale") {
           // leave previous output visible, just dim via CSS
         } else if (state.status === "running") {

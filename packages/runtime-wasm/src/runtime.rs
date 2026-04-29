@@ -23,6 +23,7 @@ pub struct InitRuntimeResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Environment {
+    #[serde(default)]
     pub runtime_features: Vec<String>,
     #[serde(default)]
     pub model_artifacts: Vec<ModelArtifactRef>,

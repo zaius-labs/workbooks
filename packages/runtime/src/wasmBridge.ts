@@ -111,7 +111,7 @@ export interface WorkbookRuntimeWasm {
   default: (input?: unknown) => Promise<unknown>;
   build_info: () => BuildInfo;
   initRuntime: (req: { workbook_slug: string; environment: Environment }) => InitRuntimeResponse;
-  runRhai?: (source: string) => CellOutput[];
+  runRhai?: (source: string, params?: unknown) => CellOutput[];
   runPolarsSql?: (sql: string, csv: string) => CellOutput[];
   runChart?: (spec_json: string) => CellOutput[];
   candleSmokeTest?: () => CellOutput[];
@@ -175,7 +175,7 @@ export function createRuntimeClient(opts: RuntimeClientOptions): RuntimeClient {
 
       if (lang === "rhai") {
         if (!wasm.runRhai) throw new Error("runtime built without rhai-glue feature");
-        const outputs = wasm.runRhai(req.cell.source ?? "");
+        const outputs = wasm.runRhai(req.cell.source ?? "", req.params ?? {});
         return { outputs };
       }
 
