@@ -115,6 +115,82 @@ pub fn run_polars_sql_ipc(sql: String, tables: JsValue) -> Result<JsValue, JsVal
     serde_wasm_bindgen::to_value(&outputs).map_err(Into::into)
 }
 
+/// JS-bridge entry — `appendArrowIpc(existing, new_batch)` parses both
+/// inputs as Arrow IPC streams, verifies the schemas match, and emits
+/// a unified IPC stream containing all batches from both inputs under
+/// a single schema header + EOS.
+///
+/// Replaces the broken naive byte concatenation in the JS-side
+/// `appendMemory` shim. Naive concat produces `<stream1><stream2>`
+/// which IPC readers truncate at the first EOS — losing rows from
+/// any append past the first. This binding instead reads both
+/// streams, validates schemas, and writes a fresh well-formed
+/// stream.
+///
+/// Schema compatibility: same field count, same field names + data
+/// types + nullability, ignoring schema metadata. Anything else
+/// throws — incompatible appends would produce a stream that
+/// readers can't decode correctly.
+#[wasm_bindgen(js_name = appendArrowIpc)]
+pub fn append_arrow_ipc(existing: Vec<u8>, new_batch: Vec<u8>) -> Result<Vec<u8>, JsValue> {
+    append_arrow_ipc_inner(&existing, &new_batch).map_err(|e| JsValue::from_str(&e))
+}
+
+fn append_arrow_ipc_inner(existing: &[u8], new_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let existing_reader = arrow::ipc::reader::StreamReader::try_new(Cursor::new(existing), None)
+        .map_err(|e| format!("appendArrowIpc: parse existing: {e}"))?;
+    let existing_schema = existing_reader.schema();
+    let existing_batches: Vec<arrow::record_batch::RecordBatch> = existing_reader
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("appendArrowIpc: read existing batches: {e}"))?;
+
+    let new_reader = arrow::ipc::reader::StreamReader::try_new(Cursor::new(new_bytes), None)
+        .map_err(|e| format!("appendArrowIpc: parse new: {e}"))?;
+    let new_schema = new_reader.schema();
+    let new_batches: Vec<arrow::record_batch::RecordBatch> = new_reader
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("appendArrowIpc: read new batches: {e}"))?;
+
+    if !schemas_compatible(&existing_schema, &new_schema) {
+        return Err(format!(
+            "appendArrowIpc: schema mismatch — existing has {} fields, new has {} fields",
+            existing_schema.fields().len(),
+            new_schema.fields().len(),
+        ));
+    }
+
+    let mut out: Vec<u8> = Vec::new();
+    {
+        let mut writer = arrow::ipc::writer::StreamWriter::try_new(&mut out, &existing_schema)
+            .map_err(|e| format!("appendArrowIpc: writer init: {e}"))?;
+        for b in existing_batches.iter() {
+            writer
+                .write(b)
+                .map_err(|e| format!("appendArrowIpc: write existing batch: {e}"))?;
+        }
+        for b in new_batches.iter() {
+            writer
+                .write(b)
+                .map_err(|e| format!("appendArrowIpc: write new batch: {e}"))?;
+        }
+        writer
+            .finish()
+            .map_err(|e| format!("appendArrowIpc: writer finish: {e}"))?;
+    }
+    Ok(out)
+}
+
+fn schemas_compatible(a: &arrow::datatypes::Schema, b: &arrow::datatypes::Schema) -> bool {
+    if a.fields().len() != b.fields().len() {
+        return false;
+    }
+    a.fields().iter().zip(b.fields().iter()).all(|(fa, fb)| {
+        fa.name() == fb.name()
+            && fa.data_type() == fb.data_type()
+            && fa.is_nullable() == fb.is_nullable()
+    })
+}
+
 fn run_polars_sql_ipc_inner(
     sql: String,
     tables: HashMap<String, Vec<u8>>,

@@ -140,6 +140,13 @@ export interface WorkbookRuntimeWasm {
    * through wasm-bindgen.
    */
   runPolarsSqlIpc?: (sql: string, tables: Record<string, Uint8Array>) => CellOutput[];
+  /**
+   * Concatenate two Arrow IPC streams under a single schema header
+   * + EOS, validating schema compatibility. Used by appendMemory
+   * to produce a well-formed stream — naive byte concat would
+   * truncate at the first EOS marker. Throws if schemas differ.
+   */
+  appendArrowIpc?: (existing: Uint8Array, new_batch: Uint8Array) => Uint8Array;
   runChart?: (spec_json: string) => CellOutput[];
   candleSmokeTest?: () => CellOutput[];
   linfaSmokeTest?: () => CellOutput[];
@@ -460,16 +467,25 @@ export function createRuntimeClient(opts: RuntimeClientOptions): RuntimeClient {
       if (!existing) {
         throw new Error(`memory id not registered: ${id}`);
       }
-      // Arrow IPC stream format is append-native: concatenating two
-      // valid streams produces a valid stream as long as the second
-      // stream's leading schema matches the first. We don't enforce
-      // the schema match here — the Rust runtime will reject mismatched
-      // schemas when it parses; for now we trust the host.
-      // TODO: when the Rust side lands, verify schema compatibility
-      // before concatenation.
-      const combined = new Uint8Array(existing.byteLength + rows.byteLength);
-      combined.set(existing, 0);
-      combined.set(rows, existing.byteLength);
+      // Prefer the Rust-side appendArrowIpc binding (proper schema
+      // check + single-header concat). Falls back to naive byte
+      // concat with a clear warning when the binding isn't present
+      // — broken past the first append, but non-fatal so first ship
+      // works on stale runtime bundles.
+      const wasm = await ensureWasm();
+      let combined: Uint8Array;
+      if (wasm.appendArrowIpc) {
+        combined = wasm.appendArrowIpc(existing, rows);
+      } else {
+        console.warn(
+          "appendMemory: runtime-wasm missing appendArrowIpc binding — " +
+            "falling back to naive concatenation, which truncates at the " +
+            "first EOS marker on subsequent appends. Rebuild runtime-wasm.",
+        );
+        combined = new Uint8Array(existing.byteLength + rows.byteLength);
+        combined.set(existing, 0);
+        combined.set(rows, existing.byteLength);
+      }
       memoryBuffers.set(id, combined);
       const sha256 = await sha256HexFromBytes(combined);
       return { sha256, bytes: combined.byteLength };
