@@ -2324,7 +2324,7 @@ ${contextLines.join("\n\n")}` : agent.systemPrompt;
 
 // ../../../runtime/src/util/url.ts
 function normalize(raw) {
-  return String(raw ?? "").replace(/^[ - \s]+/, "").replace(/[ - ]/g, "");
+  return String(raw ?? "").replace(/^[\u0000-\u001F\u00A0\s]+/, "").replace(/[\u0000-\u001F\u00A0]/g, "");
 }
 var SAFE_HREF = /^(?:https?:\/\/|mailto:|\/[^/]|#)/i;
 function safeHref(raw) {
