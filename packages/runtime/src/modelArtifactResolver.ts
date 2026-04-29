@@ -56,10 +56,62 @@ export interface ModelArtifactResolver {
 }
 
 /**
+ * Constructor options. Closes core-0id.8.
+ *
+ * Without an allowlist, `resolve()` would happily fetch any URL a
+ * workbook puts in `ref.url`. SHA-256 verifies byte integrity but
+ * does NOT prove the URL was a legitimate destination. Risks:
+ *   - Tracking pixel / IP-reveal: workbook references a URL on an
+ *     attacker-controlled host; the consumer's IP + headers leak
+ *     on every page load.
+ *   - Intranet probing if this code is ever reused server-side:
+ *     workbook reaches an internal hostname only the consumer
+ *     can route to. (SSRF.)
+ *   - Cache pollution: workbook fans out to N junk URLs, filling
+ *     IndexedDB with content-addressed garbage that never gets
+ *     hit again.
+ *
+ * Default `allowedHosts` covers the canonical Hugging Face origins.
+ * Embedders self-host or pass their own allowlist to extend.
+ * Pass `null` to opt out (back to the previous unrestricted
+ * behavior — caller takes responsibility).
+ */
+export interface ModelArtifactResolverOptions {
+  /**
+   * Hostnames that may serve model artifacts. Default:
+   *   ["huggingface.co", "cdn-lfs.huggingface.co", "cdn-lfs-us-1.hf.co"]
+   * Pass `null` to disable host validation entirely (legacy behavior).
+   */
+  allowedHosts?: string[] | null;
+}
+
+const DEFAULT_ALLOWED_HOSTS: ReadonlyArray<string> = [
+  "huggingface.co",
+  "cdn-lfs.huggingface.co",
+  "cdn-lfs-us-1.hf.co",
+];
+
+/** True if the URL's hostname is in the allowlist (case-insensitive). */
+function hostAllowed(rawUrl: string, allow: ReadonlyArray<string>): boolean {
+  let parsed: URL;
+  try { parsed = new URL(rawUrl); }
+  catch { return false; }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+  const host = parsed.hostname.toLowerCase();
+  return allow.some((h) => h.toLowerCase() === host);
+}
+
+/**
  * Default IndexedDB-backed resolver. Singleton-friendly — one instance
  * per page is correct.
  */
-export function createModelArtifactResolver(): ModelArtifactResolver {
+export function createModelArtifactResolver(
+  opts: ModelArtifactResolverOptions = {},
+): ModelArtifactResolver {
+  const allow: ReadonlyArray<string> | null =
+    opts.allowedHosts === null
+      ? null
+      : opts.allowedHosts ?? DEFAULT_ALLOWED_HOSTS;
   let dbPromise: Promise<IDBDatabase> | null = null;
 
   function ensureDb(): Promise<IDBDatabase> {
@@ -122,6 +174,17 @@ export function createModelArtifactResolver(): ModelArtifactResolver {
       } catch {
         // IndexedDB unavailable (private mode, no quota) — fall through
         // to network and skip caching.
+      }
+
+      // Host allowlist gate. SHA-256 verifies bytes but not destination —
+      // an attacker-controlled URL still leaks IP/headers on every load
+      // and can pollute IndexedDB. See ModelArtifactResolverOptions.
+      if (allow !== null && !hostAllowed(ref.url, allow)) {
+        throw new Error(
+          `model artifact host not in allowlist: ${ref.url}. ` +
+            `Pass allowedHosts to createModelArtifactResolver to extend, ` +
+            `or null to opt out.`,
+        );
       }
 
       // Network fetch.
