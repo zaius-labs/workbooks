@@ -27,6 +27,8 @@
  *     editors here, just render assistant output).
  */
 
+import { safeHref } from "./util/url";
+
 export function escapeHtml(s: string | null | undefined): string {
   return String(s ?? "").replace(/[&<>"']/g, (c) =>
     c === "&" ? "&amp;"
@@ -150,16 +152,23 @@ function inline(s: string): string {
   s = s.replace(/__([^_\n]+)__/g, "<strong>$1</strong>");
   s = s.replace(/(?<![*\w])\*([^*\n]+)\*(?!\w)/g, "<em>$1</em>");
   s = s.replace(/(?<![_\w])_([^_\n]+)_(?!\w)/g, "<em>$1</em>");
-  // Links [text](url) — only http(s) / anchor / root-relative.
-  // Anything else (javascript:, data:, etc.) renders as plain text.
+  // Links [text](url) — http(s) / mailto / anchor / root-relative
+  // only. Anything else (javascript:, data:html, vbscript:, etc.)
+  // renders as plain text. Centralized via safeHref for consistency
+  // with brand-anchor / Paragraph / Markdown rendering.
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"([^"]+)")?\)/g, (m, label, url, title) => {
-    if (!/^(https?:\/\/|\/|#)/.test(url)) return m;
+    const safe = safeHref(url);
+    if (!safe) return m;
     const t = title ? ` title="${escapeHtml(title)}"` : "";
-    return `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer noopener"${t}>${label}</a>`;
+    return `<a href="${escapeHtml(safe)}" target="_blank" rel="noreferrer noopener"${t}>${label}</a>`;
   });
   // Autolinks for bare http(s) URLs.
   s = s.replace(/(^|[\s(])(https?:\/\/[^\s)<]+)/g,
-    (_m, lead, url) => `${lead}<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(url)}</a>`);
+    (_m, lead, url) => {
+      const safe = safeHref(url);
+      if (!safe) return _m;
+      return `${lead}<a href="${escapeHtml(safe)}" target="_blank" rel="noreferrer noopener">${escapeHtml(safe)}</a>`;
+    });
   // Restore code spans.
   s = s.replace(/ CODE(\d+) /g, (_m, n) => codes[Number(n)]);
   return s;

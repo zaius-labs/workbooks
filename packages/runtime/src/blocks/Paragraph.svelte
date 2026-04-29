@@ -5,6 +5,7 @@
     getCitationContext,
   } from "../citationContext";
   import { BRAND_ICON_ONERROR } from "./chart/brandIcon";
+  import { safeHref, safeImgSrc } from "../util/url";
 
   let { block }: { block: ParagraphBlock } = $props();
   const citations = getCitationContext();
@@ -60,8 +61,17 @@
       (_match, id: string) => {
         const r = citations.resolveBrand(id);
         if (!r) return "";
-        const url = encodeURI(r.brand.url);
-        return `<a class="sd-brand" href="${url}" target="_blank" rel="noopener noreferrer" data-brand-id="${escapeHtml(id)}"><img class="sd-brand-icon" src="${escapeHtml(r.faviconUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="${escapeHtml(BRAND_ICON_ONERROR)}" /><span class="sd-brand-name">${escapeHtml(r.brand.name)}</span></a>`;
+        // Validate URL scheme — encodeURI is a percent-encoder, NOT a
+        // scheme filter. A workbook-controlled `r.brand.url` of
+        // "javascript:alert(1)" would otherwise ship a working XSS
+        // payload through the {@html ...} consumer above. closes core-0id.1
+        const url = safeHref(r.brand.url);
+        if (!url) {
+          // Brand has an unsafe URL — render as plain text, no anchor.
+          return `<span class="sd-brand sd-brand-disabled" data-brand-id="${escapeHtml(id)}">${escapeHtml(r.brand.name)}</span>`;
+        }
+        const iconSrc = safeImgSrc(r.faviconUrl) ?? "";
+        return `<a class="sd-brand" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" data-brand-id="${escapeHtml(id)}"><img class="sd-brand-icon" src="${escapeHtml(iconSrc)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="${escapeHtml(BRAND_ICON_ONERROR)}" /><span class="sd-brand-name">${escapeHtml(r.brand.name)}</span></a>`;
       },
     );
     return t;

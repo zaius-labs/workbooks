@@ -183,13 +183,21 @@
             `<div style="font-weight:600;margin-bottom:4px">${escTip(String(data.label ?? id))}</div>`,
           );
           if (original?.group) rows.push(`<div><span style="color:${fgMuted}">group</span> <code>${escTip(original.group)}</code></div>`);
-          if (original?.weight != null) rows.push(`<div><span style="color:${fgMuted}">weight</span> <code>${original.weight}</code></div>`);
+          // weight is typed `number` in NetworkBlock but the value comes
+          // from parsed JSON — TypeScript types don't survive into JS.
+          // A workbook can ship a string "weight" and slip XSS through
+          // the tooltip's tip.innerHTML below. Always escTip every
+          // interpolation regardless of declared type. closes core-0id.4
+          if (original?.weight != null) rows.push(`<div><span style="color:${fgMuted}">weight</span> <code>${escTip(String(original.weight))}</code></div>`);
           rows.push(`<div><span style="color:${fgMuted}">id</span> <code>${escTip(id)}</code></div>`);
           showTip(rows.join(""), e);
         });
         cyAny.on("mouseover", "edge", (e) => {
           const data = e.target.data();
-          const html = `<div><strong>${escTip(String(data.source ?? ""))}</strong> → <strong>${escTip(String(data.target ?? ""))}</strong>${data.label ? `<div style="color:${fgMuted};margin-top:2px">${escTip(String(data.label))}</div>` : ""}${data.weight != null ? `<div style="color:${fgMuted};margin-top:2px">weight: <code>${data.weight}</code></div>` : ""}</div>`;
+          // Same discipline as node-tooltip rendering above — every
+          // interpolated value goes through escTip, including numerics.
+          // closes core-0id.4
+          const html = `<div><strong>${escTip(String(data.source ?? ""))}</strong> → <strong>${escTip(String(data.target ?? ""))}</strong>${data.label ? `<div style="color:${fgMuted};margin-top:2px">${escTip(String(data.label))}</div>` : ""}${data.weight != null ? `<div style="color:${fgMuted};margin-top:2px">weight: <code>${escTip(String(data.weight))}</code></div>` : ""}</div>`;
           showTip(html, e);
         });
         cyAny.on("mouseout", "node", hideTip);
