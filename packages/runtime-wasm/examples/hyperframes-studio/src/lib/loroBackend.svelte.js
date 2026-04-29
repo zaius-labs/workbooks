@@ -2,17 +2,33 @@
 //
 // One Loro doc carries everything that benefits from CRDT semantics:
 //
-//   getMap("composition").get("html")   string — composition source
+//   getText("composition")               source HTML — char-level merge
 //   getList("assets")                    list of JSON-encoded asset entries
 //
 // Two sessions on different machines can fork-and-merge automatically.
-// Composition uses LWW on the "html" key (Phase-1; LoroText for
-// char-level merge is task #32). Assets use Loro List semantics —
-// concurrent push lands cleanly via the list CRDT.
+//
+// Composition uses LoroText: writeComposition shrinks the common
+// prefix + suffix between the old and new strings and emits one
+// delete + one insert at the diverging region. Concurrent edits at
+// different positions in a long composition merge cleanly; concurrent
+// edits to the same byte range still resolve deterministically via
+// Loro's RGA-flavored text CRDT.
+//
+// Assets use Loro List semantics — concurrent push lands cleanly via
+// the list CRDT.
 //
 // Storage: one Loro snapshot bytes blob round-trips through IDB
-// under WORKBOOK_KEY. We migrate older keys (composition-only or
-// plain-string) once on first boot, then they're dormant.
+// under WORKBOOK_KEY. We migrate older keys once on first boot:
+//
+//   workbook.loro       (current)         ← canonical
+//   composition.loro    (prior shape)     ← imports once, dormant
+//   composition         (legacy plain)    ← imports html into Text
+//   assets              (legacy IDB blob) ← imports into list, dormant
+//
+// Earlier shapes used getMap("composition").set("html", …); on
+// migration we copy any Map state into the Text container so the
+// canonical home is always the Text. Map state is left in place for
+// readers that still consult it but is no longer written to.
 
 import { loadState, markDirty } from "./persistence.svelte.js";
 
@@ -58,9 +74,19 @@ export function bootstrapLoro() {
       } else {
         const legacy = await loadState(LEGACY_KEY);
         if (legacy && typeof legacy.html === "string" && legacy.html.length > 0) {
-          doc.getMap("composition").set("html", legacy.html);
+          doc.getText("composition").insert(0, legacy.html);
           doc.commit();
         }
+      }
+      // Migrate prior Map-backed composition into the Text container.
+      // The Map was used by the earlier Phase-1 of #27; the Text is
+      // the canonical home from #32 onward. We don't clear the Map
+      // (older readers still consult it) but new writes go to Text.
+      const priorMap = doc.getMap("composition").get("html");
+      const currentText = doc.getText("composition").toString();
+      if (typeof priorMap === "string" && priorMap.length > 0 && currentText.length === 0) {
+        doc.getText("composition").insert(0, priorMap);
+        doc.commit();
       }
       // Migrate the prior asset-list IDB blob ("assets") into the doc
       // if no list state has landed in Loro yet. After this commit it
@@ -84,20 +110,56 @@ export function bootstrapLoro() {
 /** Synchronous access — returns null until bootstrapLoro() resolves. */
 export function getDoc() { return _doc; }
 
-/** Read the current composition html from Loro. Returns "" if the
- *  doc has no html set yet. */
+/** Read the current composition html from the Loro Text container.
+ *  Returns "" if the doc isn't bootstrapped or the Text is empty. */
 export function readComposition() {
   if (!_doc) return "";
-  const v = _doc.getMap("composition").get("html");
-  return typeof v === "string" ? v : "";
+  return _doc.getText("composition").toString();
 }
 
-/** Apply a new composition html as a single Loro op + commit. The
+/** Compute the diverging region between two strings as
+ *  {start, deleteLen, insertText} — strip common prefix + suffix,
+ *  return the middle. Replaces the most common edit shapes
+ *  (full-string set, prepend, append, in-place patch) with one
+ *  delete + one insert at the right position, so concurrent edits
+ *  to non-overlapping regions of the composition merge cleanly via
+ *  Loro's text CRDT. Optimal-diff (Myers et al.) is a future
+ *  optimization for many-small-edits scenarios. */
+function diffShrink(oldStr, newStr) {
+  const oldLen = oldStr.length;
+  const newLen = newStr.length;
+  let prefix = 0;
+  const minLen = Math.min(oldLen, newLen);
+  while (prefix < minLen && oldStr.charCodeAt(prefix) === newStr.charCodeAt(prefix)) {
+    prefix++;
+  }
+  let suffix = 0;
+  const maxSuffix = minLen - prefix;
+  while (
+    suffix < maxSuffix &&
+    oldStr.charCodeAt(oldLen - 1 - suffix) === newStr.charCodeAt(newLen - 1 - suffix)
+  ) {
+    suffix++;
+  }
+  return {
+    start: prefix,
+    deleteLen: oldLen - prefix - suffix,
+    insertText: newStr.slice(prefix, newLen - suffix),
+  };
+}
+
+/** Apply a new composition html as Loro Text ops + commit. The
  *  snapshot save is debounced via markDirty in the persistence
  *  coordinator. Safe to call before bootstrap (no-op until ready). */
 export function writeComposition(html) {
   if (!_doc) return;
-  _doc.getMap("composition").set("html", String(html ?? ""));
+  const next = String(html ?? "");
+  const text = _doc.getText("composition");
+  const cur = text.toString();
+  if (cur === next) return; // no-op; don't churn the op log
+  const { start, deleteLen, insertText } = diffShrink(cur, next);
+  if (deleteLen > 0) text.delete(start, deleteLen);
+  if (insertText.length > 0) text.insert(start, insertText);
   _doc.commit();
   scheduleSave();
 }
