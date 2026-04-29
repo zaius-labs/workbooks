@@ -14,17 +14,21 @@
 //   - Cost: ~33% size inflation (base64), and the whole asset
 //     lives in the JS heap. We don't accept files > ~50 MB.
 //
-// Persistence: IndexedDB-backed via lib/persistence.svelte.js. Each
-// mutation marks the registry dirty; the coordinator debounces and
-// writes the whole {items} blob under PERSIST_ID. Reload rehydrates
-// from the same store. The Package zip captures the live registry,
-// so cross-machine portability still goes through that path. Asset
-// add/remove also records a Prolly Tree commit for audit.
+// Persistence: a top-level Loro List inside the workbook's CRDT doc
+// (see loroBackend.svelte.js). Concurrent asset adds across forks
+// merge cleanly via the list CRDT. Reload rehydrates from the doc.
+// Asset add/remove also records a Prolly Tree commit for audit.
 
 import { recordEdit, recordDelete } from "./historyBackend.svelte.js";
+import {
+  bootstrapLoro,
+  readAssets,
+  pushAsset,
+  removeAssetById,
+  replaceAssets,
+} from "./loroBackend.svelte.js";
 
 const MAX_BYTES = 50 * 1024 * 1024; // 50 MB hard cap per asset
-const PERSIST_ID = "assets";
 
 function classify(file) {
   const t = file?.type ?? "";
@@ -63,25 +67,16 @@ class AssetsStore {
   hydrated = $state(false);
 
   constructor() {
-    // Lazy-import to avoid a circular dep — composition imports assets.
-    import("./persistence.svelte.js").then(({ loadState }) => {
-      return loadState(PERSIST_ID).then((saved) => {
-        if (saved && Array.isArray(saved.items)) {
-          this.items = saved.items;
-        }
+    bootstrapLoro()
+      .then(() => {
+        const stored = readAssets();
+        if (stored.length > 0) this.items = stored;
+        this.hydrated = true;
+      })
+      .catch((e) => {
+        console.warn("assets: hydrate failed:", e?.message ?? e);
         this.hydrated = true;
       });
-    });
-  }
-
-  _persist() {
-    // Tolerated cost: every mutation re-serializes the full asset
-    // list (including base64 dataUrls). With a 50 MB cap per asset
-    // and IDB's structured-clone path, this is fine for tens of
-    // assets. Per-asset diffing is a future optimization.
-    import("./persistence.svelte.js").then(({ markDirty }) => {
-      markDirty(PERSIST_ID, () => ({ items: this.items }));
-    });
   }
 
   async addFromFile(file) {
@@ -104,19 +99,14 @@ class AssetsStore {
       addedAt: Date.now(),
     };
     this.items = [...this.items, item];
-    this._persist();
-    // Record the add as a Prolly commit. We omit dataUrl from the
-    // recorded blob — the audit chain just needs to know an asset
-    // existed; the actual bytes live in the assets registry blob.
-    const auditEntry = {
-      id: item.id,
-      name: item.name,
-      kind: item.kind,
-      mime: item.type,
-      size: item.size,
-      duration: item.duration,
-    };
-    recordEdit(`asset:${item.id}`, auditEntry, `add asset ${item.name}`);
+    pushAsset(item);
+    // Audit-chain entry: omit the dataUrl since the bytes already
+    // live in the Loro list; the audit just records identity.
+    recordEdit(
+      `asset:${item.id}`,
+      { id: item.id, name: item.name, kind: item.kind, mime: item.type, size: item.size, duration: item.duration },
+      `add asset ${item.name}`,
+    );
     return item;
   }
 
@@ -132,7 +122,7 @@ class AssetsStore {
 
   remove(id) {
     this.items = this.items.filter((a) => a.id !== id);
-    this._persist();
+    removeAssetById(id);
     recordDelete(`asset:${id}`, `remove asset ${id}`);
   }
 
@@ -141,7 +131,7 @@ class AssetsStore {
    *  state without firing per-item subscribers. */
   replaceAll(items) {
     this.items = (items ?? []).slice();
-    this._persist();
+    replaceAssets(this.items);
   }
 
   get(id) { return this.items.find((a) => a.id === id) ?? null; }
