@@ -115,6 +115,22 @@ export class ReactiveExecutor {
     return this.executeFrom(null);
   }
 
+  /** Snapshot of every cell currently in the executor, in insertion order.
+   *  Used by the agent harness to give a model the current notebook state. */
+  listCells(): Cell[] {
+    return [...this.cells.values()];
+  }
+
+  getCell(id: string): Cell | undefined {
+    return this.cells.get(id);
+  }
+
+  /** Read the most recent state (status + outputs) for a cell.
+   *  Returns undefined for unknown cell ids. */
+  getState(id: string): CellState | undefined {
+    return this.states.get(id);
+  }
+
   destroy(): void {
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     if (this.runtimeId) {

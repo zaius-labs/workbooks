@@ -16,6 +16,12 @@ export * from "./types";
 // workbooks rendering assistant output. Returns trusted HTML.
 export { renderMarkdown, escapeHtml } from "./markdown";
 
+// Agent tools — wires runAgentLoop to a ReactiveExecutor so the agent
+// can read + mutate cells in the surrounding workbook. Used by
+// <wb-chat> and any custom chat-block authoring path.
+export { createWorkbookAgentTools } from "./agentTools";
+export type { CreateWorkbookAgentToolsOptions } from "./agentTools";
+
 // Root + dispatcher
 export { default as Workbook } from "./Workbook.svelte";
 export { default as WorkbookBlock } from "./WorkbookBlock.svelte";

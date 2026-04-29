@@ -12,3 +12,4 @@ export {
   registerWorkbookCell,
 } from "../../../runtime/src/htmlBindings";
 export { renderMarkdown, escapeHtml } from "../../../runtime/src/markdown";
+export { createWorkbookAgentTools } from "../../../runtime/src/agentTools";

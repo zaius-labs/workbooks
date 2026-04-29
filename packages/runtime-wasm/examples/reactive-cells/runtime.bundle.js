@@ -388,6 +388,19 @@ var ReactiveExecutor = class {
   runAll() {
     return this.executeFrom(null);
   }
+  /** Snapshot of every cell currently in the executor, in insertion order.
+   *  Used by the agent harness to give a model the current notebook state. */
+  listCells() {
+    return [...this.cells.values()];
+  }
+  getCell(id) {
+    return this.cells.get(id);
+  }
+  /** Read the most recent state (status + outputs) for a cell.
+   *  Returns undefined for unknown cell ids. */
+  getState(id) {
+    return this.states.get(id);
+  }
   destroy() {
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     if (this.runtimeId) {
@@ -1383,11 +1396,209 @@ function inline(s) {
   s = s.replace(/ CODE(\d+) /g, (_m, n) => codes[Number(n)]);
   return s;
 }
+
+// ../../../runtime/src/agentTools.ts
+function createWorkbookAgentTools(opts) {
+  const { executor, vfs, wasm, defaultCsvPath } = opts;
+  const newId = opts.newCellId ?? defaultNewCellId;
+  const tools = [
+    {
+      definition: {
+        name: "list_cells",
+        description: "List every cell in the current workbook with id, language, and a one-line summary. Use this first to understand what's already there before appending or editing.",
+        parameters: { type: "object", properties: {} }
+      },
+      invoke: () => {
+        const cells = executor.listCells();
+        if (!cells.length) return "(no cells yet)";
+        return cells.map((c) => {
+          const state = executor.getState(c.id);
+          const status = state?.status ?? "pending";
+          const summary = c.source ? firstLine(c.source) : "(no source)";
+          return `${c.id}	${c.language}	${status}	${summary}`;
+        }).join("\n");
+      }
+    },
+    {
+      definition: {
+        name: "read_cell",
+        description: "Read a cell's full source plus its most recent outputs. Use to inspect existing work before deciding whether to append a new cell or edit this one.",
+        parameters: {
+          type: "object",
+          properties: { id: { type: "string", description: "Cell id (from list_cells)." } },
+          required: ["id"]
+        }
+      },
+      invoke: ({ id }) => {
+        const cell = executor.getCell(String(id));
+        if (!cell) return `error: no cell with id '${id}'`;
+        const state = executor.getState(String(id));
+        const lines = [];
+        lines.push(`# ${cell.id} (${cell.language})`);
+        lines.push("");
+        lines.push("## source");
+        lines.push(cell.source ?? "(no source)");
+        lines.push("");
+        lines.push(`## status: ${state?.status ?? "pending"}`);
+        if (state?.outputs?.length) {
+          lines.push("");
+          lines.push("## outputs");
+          for (const out of state.outputs) {
+            lines.push(formatOutput(out));
+          }
+        }
+        if (state?.error) {
+          lines.push("");
+          lines.push(`## error
+${state.error}`);
+        }
+        return lines.join("\n");
+      }
+    },
+    {
+      definition: {
+        name: "append_cell",
+        description: "Append a new cell to the workbook. Cell re-executes immediately as part of the DAG. Returns the cell id so you can read back its output on the next turn.",
+        parameters: {
+          type: "object",
+          properties: {
+            language: {
+              type: "string",
+              description: "One of: rhai, polars, sqlite, duckdb, candle-inference, linfa-train, wasm-fn, chat"
+            },
+            source: { type: "string", description: "Cell source code or query." },
+            id: {
+              type: "string",
+              description: "Optional explicit cell id. Auto-generated if omitted."
+            }
+          },
+          required: ["language", "source"]
+        }
+      },
+      invoke: async ({ language, source, id }) => {
+        if (!source || typeof source !== "string") return "error: source is required";
+        const lang = String(language);
+        if (!isCellLanguage(lang)) return `error: unknown language '${language}'`;
+        const existing = executor.listCells();
+        const cellId = typeof id === "string" && id ? id : newId(existing);
+        if (executor.getCell(cellId)) {
+          return `error: cell '${cellId}' already exists; use edit_cell to replace.`;
+        }
+        executor.setCell({ id: cellId, language: lang, source });
+        return `appended ${cellId} (${lang}). DAG re-executing \u2014 use read_cell on next turn to see outputs.`;
+      }
+    },
+    {
+      definition: {
+        name: "edit_cell",
+        description: "Replace an existing cell's source. The cell and everything downstream re-runs. Use to fix errors found via read_cell or to refine logic.",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Cell id." },
+            source: { type: "string", description: "New source." }
+          },
+          required: ["id", "source"]
+        }
+      },
+      invoke: ({ id, source }) => {
+        const cell = executor.getCell(String(id));
+        if (!cell) return `error: no cell with id '${id}'`;
+        executor.setCell({ ...cell, source: String(source ?? "") });
+        return `updated ${cell.id}. DAG re-executing \u2014 use read_cell on next turn to see outputs.`;
+      }
+    }
+  ];
+  if (vfs && wasm?.runPolarsSql) {
+    tools.push({
+      definition: {
+        name: "query_data",
+        description: "Run a Polars-SQL query against a CSV in the workbook VFS without adding a cell. Use for quick scoping; promote to append_cell once you know what you want.",
+        parameters: {
+          type: "object",
+          properties: {
+            sql: { type: "string", description: "SQL string. Table name is `data`." },
+            csv_path: {
+              type: "string",
+              description: defaultCsvPath ? `VFS path to CSV. Default: ${defaultCsvPath}.` : "VFS path to CSV."
+            }
+          },
+          required: ["sql"]
+        }
+      },
+      invoke: ({ sql, csv_path }) => {
+        const path = typeof csv_path === "string" && csv_path ? csv_path : defaultCsvPath;
+        if (!path) return "error: csv_path is required (no default configured).";
+        if (!vfs.exists(path)) return `error: ${path} not found in VFS`;
+        try {
+          const csv = vfs.readText(path);
+          const outputs = wasm.runPolarsSql(String(sql), csv);
+          const csvOut = outputs.find((o) => o.kind === "text" && o.mime_type === "text/csv");
+          return csvOut ? csvOut.content : JSON.stringify(outputs);
+        } catch (e) {
+          return `error: ${e.message ?? String(e)}`;
+        }
+      }
+    });
+  }
+  return tools;
+}
+var VALID_LANGUAGES = /* @__PURE__ */ new Set([
+  "rhai",
+  "polars",
+  "sqlite",
+  "duckdb",
+  "candle-inference",
+  "linfa-train",
+  "wasm-fn",
+  "chat"
+]);
+function isCellLanguage(s) {
+  return VALID_LANGUAGES.has(s);
+}
+function defaultNewCellId(existing) {
+  let max = 0;
+  for (const c of existing) {
+    const m = c.id.match(/^cell-(\d+)$/);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `cell-${max + 1}`;
+}
+function firstLine(s) {
+  const i = s.indexOf("\n");
+  const line = i === -1 ? s : s.slice(0, i);
+  return line.length > 80 ? line.slice(0, 79) + "\u2026" : line;
+}
+function formatOutput(out) {
+  switch (out.kind) {
+    case "text": {
+      const mime = out.mime_type ? ` (${out.mime_type})` : "";
+      return `[text${mime}]
+${truncate(out.content, 1500)}`;
+    }
+    case "image":
+      return `[image ${out.mime_type}, ${out.content.length} base64 chars]`;
+    case "table": {
+      const rows = out.row_count != null ? `, ${out.row_count} rows` : "";
+      return `[table ${out.sql_table}${rows}]`;
+    }
+    case "error":
+      return `[error]
+${out.message}`;
+    case "stream":
+      return `[stream]
+${truncate(out.content, 1500)}`;
+  }
+}
+function truncate(s, n) {
+  return s.length > n ? s.slice(0, n - 1) + "\u2026" : s;
+}
 export {
   ReactiveExecutor,
   analyzeCell,
   createBrowserLlmClient,
   createRuntimeClient,
+  createWorkbookAgentTools,
   escapeHtml2 as escapeHtml,
   mountHtmlWorkbook,
   parseWorkbookHtml,
