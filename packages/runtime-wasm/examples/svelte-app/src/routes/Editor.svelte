@@ -64,41 +64,41 @@ apac,4400,0.22`);
 <style>
   section { display: grid; gap: 12px; }
   h1 { font-size: 24px; font-weight: 700; margin: 0; }
-  p { font-size: 14px; color: #78716c; margin: 0 0 8px; }
+  p { font-size: 14px; color: #707070; margin: 0 0 8px; }
   label { display: grid; gap: 4px; }
   .lbl {
     font-family: "JetBrains Mono", ui-monospace, monospace;
-    font-size: 12px; color: #78716c;
+    font-size: 12px; color: #707070;
     text-transform: uppercase; letter-spacing: 0.06em;
   }
   textarea {
     width: 100%; box-sizing: border-box;
     padding: 8px 10px;
-    border: 1px solid #d6d3d1; border-radius: 4px;
-    background: #fbfaf7; color: #0c0a09;
+    border: 1px solid #d6d6d6; border-radius: 4px;
+    background: #ffffff; color: #000000;
     font-family: "JetBrains Mono", ui-monospace, monospace;
     font-size: 13px; line-height: 1.5;
     resize: vertical;
   }
-  textarea:focus { outline: 1px solid #7c2d12; outline-offset: -1px; border-color: #7c2d12; }
+  textarea:focus { outline: 1px solid #000000; outline-offset: -1px; border-color: #000000; }
   .controls { display: flex; gap: 8px; }
   button {
     padding: 6px 14px;
-    border: 1px solid #7c2d12; border-radius: 4px;
-    background: #7c2d12; color: white;
+    border: 1px solid #000000; border-radius: 4px;
+    background: #000000; color: white;
     font-size: 13px; cursor: pointer;
   }
-  button:hover:not(:disabled) { background: #5e220e; border-color: #5e220e; }
+  button:hover:not(:disabled) { background: #2a2a2a; border-color: #2a2a2a; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   pre {
     margin: 8px 0 0;
     padding: 10px 12px;
-    background: #f3f1ec; border: 1px solid #d6d3d1; border-radius: 4px;
+    background: #f5f5f5; border: 1px solid #d6d6d6; border-radius: 4px;
     font-family: "JetBrains Mono", ui-monospace, monospace;
     font-size: 13px; line-height: 1.5;
     white-space: pre-wrap; word-break: break-word;
     max-height: 360px; overflow: auto;
   }
-  pre.err { color: #7f1d1d; background: #fef2f2; border-color: #fecaca; }
-  pre.result { color: #0c0a09; }
+  pre.err { color: #000000; background: #f5f5f5; border: 2px solid #000000; font-weight: 600; }
+  pre.result { color: #000000; }
 </style>

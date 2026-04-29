@@ -1,11 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- Squircle (Apple-style rounded-square; rx ≈ 22.5% of side) -->
-  <rect width="64" height="64" rx="14" fill="#7c2d12"/>
-  <!-- Notebook emoji centered. Font stack falls through to whichever
-       emoji font the host has; glyph appearance will vary by OS but
-       the squircle background keeps it recognizable as a workbook. -->
-  <text x="32" y="46"
+  <!-- Squircle (Apple-style rounded-square; rx ≈ 22.5% of side).
+       Lime green; vibrant default that reads on light + dark chrome. -->
+  <rect width="64" height="64" rx="14" fill="#84cc16"/>
+  <!-- Notebook emoji centered both axes via dominant-baseline.
+       Font stack falls through to whichever emoji font the host has;
+       glyph appearance varies by OS but the vibrant squircle keeps
+       it recognizable as a workbook even at 16×16. -->
+  <text x="32" y="32"
         text-anchor="middle"
+        dominant-baseline="central"
         font-size="38"
         font-family="-apple-system, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif">📓</text>
 </svg>

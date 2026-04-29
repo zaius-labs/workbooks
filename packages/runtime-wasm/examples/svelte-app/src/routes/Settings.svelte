@@ -72,15 +72,15 @@
 <style>
   section { display: grid; gap: 16px; max-width: 600px; }
   h1 { font-size: 24px; font-weight: 700; margin: 0; }
-  p { font-size: 14px; color: #78716c; margin: 0; }
+  p { font-size: 14px; color: #707070; margin: 0; }
   code {
     font-family: "JetBrains Mono", ui-monospace, monospace;
-    font-size: 0.92em; background: #f3f1ec;
+    font-size: 0.92em; background: #f5f5f5;
     padding: 1px 6px; border-radius: 3px;
   }
   .empty {
-    padding: 24px; text-align: center; color: #a8a29e;
-    border: 1px dashed #d6d3d1; border-radius: 4px;
+    padding: 24px; text-align: center; color: #a8a8a8;
+    border: 1px solid #d6d6d6; border-radius: 4px;
     font-size: 14px;
   }
   .rows { display: grid; gap: 16px; }
@@ -88,19 +88,19 @@
   .row-head { display: flex; gap: 12px; align-items: baseline; }
   .key {
     font-family: "JetBrains Mono", ui-monospace, monospace;
-    font-size: 13px; color: #0c0a09; font-weight: 600;
+    font-size: 13px; color: #000000; font-weight: 600;
   }
   .flags {
     font-family: "JetBrains Mono", ui-monospace, monospace;
-    font-size: 11px; color: #78716c;
+    font-size: 11px; color: #707070;
   }
-  .label { font-size: 13px; color: #44403c; }
+  .label { font-size: 13px; color: #2a2a2a; }
   input {
     padding: 8px 10px;
-    border: 1px solid #d6d3d1; border-radius: 4px;
-    background: #fbfaf7; color: #0c0a09;
+    border: 1px solid #d6d6d6; border-radius: 4px;
+    background: #ffffff; color: #000000;
     font-family: "JetBrains Mono", ui-monospace, monospace;
     font-size: 13px;
   }
-  input:focus { outline: 1px solid #7c2d12; outline-offset: -1px; border-color: #7c2d12; }
+  input:focus { outline: 1px solid #000000; outline-offset: -1px; border-color: #000000; }
 </style>

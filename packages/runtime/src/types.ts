@@ -788,6 +788,50 @@ export type StepBlock = {
   outputBinding?: { kind: "block"; blockId: string };
 };
 
+/** A runnable cell in the linear block stream. Notebook-shaped workbooks
+ *  use cells alongside prose blocks; the host's ReactiveExecutor extracts
+ *  every `kind: "cell"` block, runs the static dependency analyzer over
+ *  the source, builds a DAG, and re-executes downstream cells when an
+ *  input changes. The block-side discriminator (`kind: "cell"`) lets the
+ *  block renderer dispatch a cell-shaped widget while the executor reads
+ *  the same row's `language` + `source` as a wasmBridge `Cell`.
+ *
+ *  Shape mirrors the executor's `Cell` interface (wasmBridge.ts) so the
+ *  bridge is `{ id: blockId, language, source, ...rest }`. The block id
+ *  comes from the host's addressable row layer (sbookBlocks.blockId), not
+ *  duplicated here. `provides` / `reads` are populated by the static
+ *  analyzer at save time; `dependsOn` is derived. */
+export type CellBlock = {
+  kind: "cell";
+  /** One of the executor's structured language tags. Free-form code is
+   *  not supported — the executor dispatches each language to a typed
+   *  WASM entry point. See `CellLanguage` in wasmBridge.ts. */
+  language:
+    | "rhai"
+    | "polars"
+    | "sqlite"
+    | "duckdb"
+    | "candle-inference"
+    | "linfa-train"
+    | "wasm-fn"
+    | "chat";
+  /** Source for source-driven languages (rhai, sqlite, duckdb, polars). */
+  source?: string;
+  /** Structured spec for declarative languages (candle-inference,
+   *  linfa-train, wasm-fn, chat). Shape varies by language; the executor
+   *  validates it at run time. */
+  spec?: unknown;
+  /** Variables / tables this cell consumes. Populated by the analyzer. */
+  reads?: string[];
+  /** Variables / tables this cell defines. Populated by the analyzer. */
+  provides?: string[];
+  /** Cell ids this cell depends on. Derived from reads/provides. */
+  dependsOn?: string[];
+  /** Optional human label rendered in the cell shell. Falls back to a
+   *  language-derived placeholder. */
+  label?: string;
+};
+
 export type WorkbookBlock =
   | HeadingBlock
   | ParagraphBlock
@@ -810,7 +854,8 @@ export type WorkbookBlock =
   | WidgetBlock
   | MachineBlock
   | InputBlock
-  | StepBlock;
+  | StepBlock
+  | CellBlock;
 
 /* -------------------------------- citations ------------------------------- */
 /* Citations are first-class on the document. References are addressed by
@@ -1093,6 +1138,9 @@ export const WORKBOOK_BLOCK_KINDS = [
   "machine",
   "input",
   "step",
+  // Notebook execution cell — runs in the WASM runtime via
+  // ReactiveExecutor. See CellBlock above and wasmBridge.Cell.
+  "cell",
 ] as const;
 
 export type WorkbookBlockKind = (typeof WORKBOOK_BLOCK_KINDS)[number];

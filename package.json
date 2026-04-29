@@ -10,7 +10,9 @@
   "homepage": "https://github.com/zaius-labs/workbooks",
   "workspaces": [
     "packages/*",
-    "packages/runtime-wasm/examples/svelte-app"
+    "packages/runtime-wasm/examples/svelte-app",
+    "packages/runtime-wasm/examples/notebook-agent",
+    "packages/runtime-wasm/examples/tailwind-app"
   ],
   "scripts": {
     "build": "pnpm -r --filter ./packages/* build",
