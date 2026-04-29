@@ -1,5 +1,5 @@
 {
-  "name": "@workbook/example-svelte-app",
+  "name": "@zaiusai/example-svelte-app",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,7 +13,7 @@
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
-    "@workbook/cli": "*",
+    "@zaiusai/workbook-cli": "*",
     "vite": "^6.0.0"
   }
 }

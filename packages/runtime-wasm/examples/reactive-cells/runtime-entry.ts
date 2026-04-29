@@ -11,3 +11,4 @@ export {
   parseWorkbookHtml,
   registerWorkbookCell,
 } from "../../../runtime/src/htmlBindings";
+export { renderMarkdown, escapeHtml } from "../../../runtime/src/markdown";

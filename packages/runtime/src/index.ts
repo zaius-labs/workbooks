@@ -12,6 +12,10 @@
 // rather than maintaining their own copy.
 export * from "./types";
 
+// Markdown renderer — small CommonMark-ish; suitable for chat / agent
+// workbooks rendering assistant output. Returns trusted HTML.
+export { renderMarkdown, escapeHtml } from "./markdown";
+
 // Root + dispatcher
 export { default as Workbook } from "./Workbook.svelte";
 export { default as WorkbookBlock } from "./WorkbookBlock.svelte";

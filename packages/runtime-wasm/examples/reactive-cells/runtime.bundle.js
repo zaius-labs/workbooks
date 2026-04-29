@@ -1,39 +1,36 @@
 var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target, all) => {
   for (var name in all)
-    __defProp(target, name, {
-      get: all[name],
-      enumerable: true,
-      configurable: true,
-      set: (newValue) => all[name] = () => newValue
-    });
+    __defProp(target, name, { get: all[name], enumerable: true });
 };
-var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
-  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
-}) : x)(function(x) {
-  if (typeof require !== "undefined")
-    return require.apply(this, arguments);
-  throw Error('Dynamic require of "' + x + '" is not supported');
-});
+var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
-// ../runtime/src/duckdbSidecar.ts
-var exports_duckdbSidecar = {};
-__export(exports_duckdbSidecar, {
+// ../../../runtime/src/duckdbSidecar.ts
+var duckdbSidecar_exports = {};
+__export(duckdbSidecar_exports, {
   runDuckdbSql: () => runDuckdbSql
 });
 async function ensureDuckdb() {
-  if (dbInstance)
-    return dbInstance;
-  if (duckdbPromise)
-    return await duckdbPromise;
+  if (dbInstance) return dbInstance;
+  if (duckdbPromise) return await duckdbPromise;
   duckdbPromise = (async () => {
-    const duckdb = await import("@duckdb/duckdb-wasm");
+    const duckdb = await import(
+      /* @vite-ignore */
+      "@duckdb/duckdb-wasm"
+    );
     const bundles = duckdb.getJsDelivrBundles();
     const bundle = await duckdb.selectBundle(bundles);
     const workerScript = `importScripts("${bundle.mainWorker}");`;
-    const workerUrl = URL.createObjectURL(new Blob([workerScript], { type: "application/javascript" }));
+    const workerUrl = URL.createObjectURL(
+      new Blob([workerScript], { type: "application/javascript" })
+    );
     const worker = new Worker(workerUrl);
-    const logger = new duckdb.ConsoleLogger;
+    const logger = new duckdb.ConsoleLogger();
     const db = new duckdb.AsyncDuckDB(logger, worker);
     await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
     URL.revokeObjectURL(workerUrl);
@@ -41,8 +38,7 @@ async function ensureDuckdb() {
     return { db };
   })();
   await duckdbPromise;
-  if (!dbInstance)
-    throw new Error("duckdb instance not initialized");
+  if (!dbInstance) throw new Error("duckdb instance not initialized");
   return dbInstance;
 }
 async function runDuckdbSql(sql, csv) {
@@ -54,7 +50,9 @@ async function runDuckdbSql(sql, csv) {
   try {
     if (csv) {
       try {
-        await conn.query("CREATE OR REPLACE TABLE data AS SELECT * FROM read_csv_auto('data.csv', HEADER=TRUE)");
+        await conn.query(
+          "CREATE OR REPLACE TABLE data AS SELECT * FROM read_csv_auto('data.csv', HEADER=TRUE)"
+        );
       } catch (err) {
         return [{
           kind: "error",
@@ -87,33 +85,31 @@ function renderCsv(headers, rows) {
     const r = row;
     lines.push(headers.map((h) => escapeCsv(formatCell(r[h]))).join(","));
   }
-  return lines.join(`
-`) + `
-`;
+  return lines.join("\n") + "\n";
 }
 function formatCell(v) {
-  if (v == null)
-    return "";
-  if (typeof v === "bigint")
-    return v.toString();
-  if (typeof v === "number")
-    return Number.isFinite(v) ? String(v) : "";
-  if (typeof v === "boolean")
-    return v ? "true" : "false";
-  if (typeof v === "string")
-    return v;
-  if (v instanceof Date)
-    return v.toISOString();
+  if (v == null) return "";
+  if (typeof v === "bigint") return v.toString();
+  if (typeof v === "number") return Number.isFinite(v) ? String(v) : "";
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "string") return v;
+  if (v instanceof Date) return v.toISOString();
   return String(v);
 }
 function escapeCsv(s) {
-  if (/[",\n\r]/.test(s))
-    return `"${s.replace(/"/g, '""')}"`;
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
-var duckdbPromise = null, dbInstance = null;
+var duckdbPromise, dbInstance;
+var init_duckdbSidecar = __esm({
+  "../../../runtime/src/duckdbSidecar.ts"() {
+    "use strict";
+    duckdbPromise = null;
+    dbInstance = null;
+  }
+});
 
-// ../runtime/src/wasmBridge.ts
+// ../../../runtime/src/wasmBridge.ts
 function createRuntimeClient(opts) {
   let wasmPromise = null;
   function ensureWasm() {
@@ -138,14 +134,12 @@ function createRuntimeClient(opts) {
       const wasm = await ensureWasm();
       const lang = req.cell.language;
       if (lang === "rhai") {
-        if (!wasm.runRhai)
-          throw new Error("runtime built without rhai-glue feature");
+        if (!wasm.runRhai) throw new Error("runtime built without rhai-glue feature");
         const outputs = wasm.runRhai(req.cell.source ?? "", req.params ?? {});
         return { outputs };
       }
       if (lang === "polars") {
-        if (!wasm.runPolarsSql)
-          throw new Error("runtime built without polars-frames feature");
+        if (!wasm.runPolarsSql) throw new Error("runtime built without polars-frames feature");
         const sql = req.cell.source ?? "";
         const csv = req.params?.csv ?? "";
         const outputs = wasm.runPolarsSql(sql, csv);
@@ -155,7 +149,7 @@ function createRuntimeClient(opts) {
         throw new Error("sqlite cell dispatcher not yet wired (P2.5)");
       }
       if (lang === "duckdb") {
-        const { runDuckdbSql: runDuckdbSql2 } = await Promise.resolve().then(() => exports_duckdbSidecar);
+        const { runDuckdbSql: runDuckdbSql2 } = await Promise.resolve().then(() => (init_duckdbSidecar(), duckdbSidecar_exports));
         const sql = req.cell.source ?? "";
         const csv = req.params?.csv ?? "";
         const outputs = await runDuckdbSql2(sql, csv);
@@ -163,7 +157,9 @@ function createRuntimeClient(opts) {
       }
       if (lang === "chat") {
         if (!opts.llmClient) {
-          throw new Error("chat cells require an llmClient — pass one to createRuntimeClient");
+          throw new Error(
+            "chat cells require an llmClient \u2014 pass one to createRuntimeClient"
+          );
         }
         const params = req.params ?? {};
         const userMessage = String(params.message ?? params.user ?? "");
@@ -177,14 +173,13 @@ function createRuntimeClient(opts) {
             messages.push(m);
           }
         }
-        if (userMessage)
-          messages.push({ role: "user", content: userMessage });
+        if (userMessage) messages.push({ role: "user", content: userMessage });
         const model = params.model ?? req.cell.spec?.model ?? "openai/gpt-4o-mini";
         const stream = opts.llmClient.generateChat({
           model,
           messages,
-          temperature: typeof params.temperature === "number" ? params.temperature : undefined,
-          maxOutputTokens: typeof params.maxOutputTokens === "number" ? params.maxOutputTokens : undefined
+          temperature: typeof params.temperature === "number" ? params.temperature : void 0,
+          maxOutputTokens: typeof params.maxOutputTokens === "number" ? params.maxOutputTokens : void 0
         });
         const outputs = [];
         for await (const ev of stream) {
@@ -234,7 +229,8 @@ function createRuntimeClient(opts) {
     }
   };
 }
-// ../runtime/src/cellAnalyzer.ts
+
+// ../../../runtime/src/cellAnalyzer.ts
 function analyzeCell(cell) {
   const provides = cell.provides && cell.provides.length > 0 ? cell.provides : defaultProvides(cell);
   const reads = cell.dependsOn && cell.dependsOn.length > 0 ? cell.dependsOn : extractReads(cell);
@@ -268,21 +264,17 @@ var SQL_JOIN_RE = /\bjoin\s+([a-zA-Z_][\w]*)/gi;
 var SQL_WITH_RE = /\bwith\s+([a-zA-Z_][\w]*)\s+as\s*\(/gi;
 var SQL_WITH_FOLLOW_RE = /,\s*([a-zA-Z_][\w]*)\s+as\s*\(/gi;
 function extractSqlReads(src) {
-  const reads = new Set;
-  for (const m of src.matchAll(SQL_FROM_RE))
-    reads.add(m[1]);
-  for (const m of src.matchAll(SQL_JOIN_RE))
-    reads.add(m[1]);
-  const ctes = new Set;
-  for (const m of src.matchAll(SQL_WITH_RE))
-    ctes.add(m[1]);
-  for (const m of src.matchAll(SQL_WITH_FOLLOW_RE))
-    ctes.add(m[1]);
+  const reads = /* @__PURE__ */ new Set();
+  for (const m of src.matchAll(SQL_FROM_RE)) reads.add(m[1]);
+  for (const m of src.matchAll(SQL_JOIN_RE)) reads.add(m[1]);
+  const ctes = /* @__PURE__ */ new Set();
+  for (const m of src.matchAll(SQL_WITH_RE)) ctes.add(m[1]);
+  for (const m of src.matchAll(SQL_WITH_FOLLOW_RE)) ctes.add(m[1]);
   return [...reads].filter((name) => !ctes.has(name));
 }
 var RHAI_LET_RE = /\blet\s+([a-zA-Z_][\w]*)/g;
 var RHAI_IDENT_RE = /\b([a-zA-Z_][\w]*)\b/g;
-var RHAI_KEYWORDS = new Set([
+var RHAI_KEYWORDS = /* @__PURE__ */ new Set([
   "let",
   "const",
   "if",
@@ -329,18 +321,14 @@ var RHAI_KEYWORDS = new Set([
 function extractRhaiReads(src) {
   const stripped = src.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
   const noStrings = stripped.replace(/"(?:[^"\\]|\\.)*"/g, '""');
-  const provides = new Set;
-  for (const m of noStrings.matchAll(RHAI_LET_RE))
-    provides.add(m[1]);
-  const reads = new Set;
+  const provides = /* @__PURE__ */ new Set();
+  for (const m of noStrings.matchAll(RHAI_LET_RE)) provides.add(m[1]);
+  const reads = /* @__PURE__ */ new Set();
   for (const m of noStrings.matchAll(RHAI_IDENT_RE)) {
     const name = m[1];
-    if (provides.has(name))
-      continue;
-    if (RHAI_KEYWORDS.has(name))
-      continue;
-    if (/^\d/.test(name))
-      continue;
+    if (provides.has(name)) continue;
+    if (RHAI_KEYWORDS.has(name)) continue;
+    if (/^\d/.test(name)) continue;
     reads.add(name);
   }
   return [...reads];
@@ -348,38 +336,47 @@ function extractRhaiReads(src) {
 function dedupe(xs) {
   return [...new Set(xs)];
 }
-// ../runtime/src/reactiveExecutor.ts
-class ReactiveExecutor {
-  client;
-  cells = new Map;
-  inputs = new Map;
-  states = new Map;
-  onCellState;
-  debounceMs;
-  workbookSlug;
-  runtimeId = null;
-  runtimePromise = null;
-  generation = 0;
-  debounceTimer = null;
+
+// ../../../runtime/src/reactiveExecutor.ts
+var ReactiveExecutor = class {
   constructor(opts) {
+    __publicField(this, "client");
+    __publicField(this, "cells", /* @__PURE__ */ new Map());
+    __publicField(this, "inputs", /* @__PURE__ */ new Map());
+    __publicField(this, "states", /* @__PURE__ */ new Map());
+    __publicField(this, "onCellState");
+    __publicField(this, "debounceMs");
+    __publicField(this, "workbookSlug");
+    __publicField(this, "runtimeId", null);
+    __publicField(this, "runtimePromise", null);
+    /** Generation counter — bumped on each run so stale runs short-circuit. */
+    __publicField(this, "generation", 0);
+    __publicField(this, "debounceTimer", null);
     this.client = opts.client;
-    this.onCellState = opts.onCellState ?? (() => {});
+    this.onCellState = opts.onCellState ?? (() => {
+    });
     this.debounceMs = opts.debounceMs ?? 200;
     this.workbookSlug = opts.workbookSlug ?? "live";
-    for (const cell of opts.cells)
-      this.cells.set(cell.id, cell);
+    for (const cell of opts.cells) this.cells.set(cell.id, cell);
     if (opts.inputs) {
-      for (const [k, v] of Object.entries(opts.inputs))
-        this.inputs.set(k, v);
+      for (const [k, v] of Object.entries(opts.inputs)) this.inputs.set(k, v);
     }
     for (const [id] of this.cells) {
       this.states.set(id, { cellId: id, status: "pending" });
     }
   }
+  /**
+   * Update an input value. Schedules a debounced re-execution of any cell
+   * that reads this input (and their downstream cascade).
+   */
   setInput(name, value) {
     this.inputs.set(name, value);
     this.scheduleRun([name]);
   }
+  /**
+   * Replace a cell's source/spec. Re-runs that cell and everything
+   * downstream of it.
+   */
   setCell(cell) {
     this.cells.set(cell.id, cell);
     if (!this.states.has(cell.id)) {
@@ -387,19 +384,20 @@ class ReactiveExecutor {
     }
     this.scheduleRun(analyzeCell(cell).provides);
   }
+  /** Execute all cells from scratch. */
   runAll() {
     return this.executeFrom(null);
   }
   destroy() {
-    if (this.debounceTimer)
-      clearTimeout(this.debounceTimer);
+    if (this.debounceTimer) clearTimeout(this.debounceTimer);
     if (this.runtimeId) {
-      this.client.destroyRuntime(this.runtimeId).catch(() => {});
+      this.client.destroyRuntime(this.runtimeId).catch(() => {
+      });
     }
   }
+  // --------------------------------------------------------------
   scheduleRun(changedProvides) {
-    if (this.debounceTimer)
-      clearTimeout(this.debounceTimer);
+    if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => {
       this.executeFrom(changedProvides).catch((err) => {
         for (const id of this.cells.keys()) {
@@ -409,10 +407,8 @@ class ReactiveExecutor {
     }, this.debounceMs);
   }
   async ensureRuntime() {
-    if (this.runtimeId)
-      return this.runtimeId;
-    if (this.runtimePromise)
-      return this.runtimePromise;
+    if (this.runtimeId) return this.runtimeId;
+    if (this.runtimePromise) return this.runtimePromise;
     this.runtimePromise = (async () => {
       const resp = await this.client.initRuntime({
         workbookSlug: this.workbookSlug,
@@ -423,6 +419,10 @@ class ReactiveExecutor {
     })();
     return this.runtimePromise;
   }
+  /**
+   * Execute the subgraph of cells reachable from `changedProvides`. If
+   * `changedProvides` is null, runs every cell (initial load / runAll).
+   */
   async executeFrom(changedProvides) {
     const gen = ++this.generation;
     const runtimeId = await this.ensureRuntime();
@@ -434,15 +434,12 @@ class ReactiveExecutor {
       }
     }
     for (const cell of order) {
-      if (gen !== this.generation)
-        return;
-      if (!dirty.has(cell.id))
-        continue;
+      if (gen !== this.generation) return;
+      if (!dirty.has(cell.id)) continue;
       const analysis = analyzeCell(cell);
       const upstreamErrored = analysis.reads.some((name) => {
         const provider = providerOf(name, [...this.cells.values()]);
-        if (!provider)
-          return false;
+        if (!provider) return false;
         return this.states.get(provider.id)?.status === "error";
       });
       if (upstreamErrored) {
@@ -475,6 +472,17 @@ class ReactiveExecutor {
       }
     }
   }
+  /**
+   * Collect param bindings for `cell` — workbook inputs + upstream cell
+   * outputs. Each name in `cell` reads (per cellAnalyzer) is resolved:
+   *   1. as a workbook input (`this.inputs`)
+   *   2. as the parsed scalar output of an upstream cell that `provides`
+   *      that name (using the cell that produced it most recently)
+   *
+   * Scalar coercion: text/plain outputs that parse as a number return a
+   * JS number; otherwise the raw string. Non-text outputs come through
+   * stringified (callers that want richer typing extend this in P3.11).
+   */
   collectParams(cell) {
     const a = analyzeCell(cell);
     const params = {};
@@ -484,12 +492,12 @@ class ReactiveExecutor {
         params[name] = this.inputs.get(name);
         continue;
       }
-      const provider = allCells.find((c) => analyzeCell(c).provides.includes(name));
-      if (!provider)
-        continue;
+      const provider = allCells.find(
+        (c) => analyzeCell(c).provides.includes(name)
+      );
+      if (!provider) continue;
       const state = this.states.get(provider.id);
-      if (state?.status !== "ok" || !state.outputs?.length)
-        continue;
+      if (state?.status !== "ok" || !state.outputs?.length) continue;
       params[name] = scalarFromOutputs(state.outputs);
     }
     return params;
@@ -500,106 +508,95 @@ class ReactiveExecutor {
     this.states.set(cellId, next);
     this.onCellState(next);
   }
-}
+};
 function topologicalOrder(cells) {
   const byId = new Map(cells.map((c) => [c.id, c]));
-  const providers = new Map;
+  const providers = /* @__PURE__ */ new Map();
   for (const cell of cells) {
     const a = analyzeCell(cell);
-    for (const name of a.provides)
-      providers.set(name, cell.id);
+    for (const name of a.provides) providers.set(name, cell.id);
   }
-  const visited = new Set;
-  const onStack = new Set;
+  const visited = /* @__PURE__ */ new Set();
+  const onStack = /* @__PURE__ */ new Set();
   const order = [];
   const visit = (cellId) => {
-    if (visited.has(cellId) || onStack.has(cellId))
-      return;
+    if (visited.has(cellId) || onStack.has(cellId)) return;
     onStack.add(cellId);
     const cell = byId.get(cellId);
     if (cell) {
       const a = analyzeCell(cell);
       for (const dep of a.reads) {
         const upstream = providers.get(dep);
-        if (upstream && upstream !== cellId)
-          visit(upstream);
+        if (upstream && upstream !== cellId) visit(upstream);
       }
       order.push(cell);
     }
     onStack.delete(cellId);
     visited.add(cellId);
   };
-  for (const cell of cells)
-    visit(cell.id);
+  for (const cell of cells) visit(cell.id);
   return order;
 }
 function computeDirtySet(order, seedNames) {
   const dirtyProvides = new Set(seedNames);
-  const dirtyCells = new Set;
+  const dirtyCells = /* @__PURE__ */ new Set();
   for (const cell of order) {
     const a = analyzeCell(cell);
     if (a.reads.some((name) => dirtyProvides.has(name))) {
       dirtyCells.add(cell.id);
-      for (const name of a.provides)
-        dirtyProvides.add(name);
+      for (const name of a.provides) dirtyProvides.add(name);
     }
   }
   return dirtyCells;
 }
 function providerOf(name, cells) {
   for (const cell of cells) {
-    if (analyzeCell(cell).provides.includes(name))
-      return cell;
+    if (analyzeCell(cell).provides.includes(name)) return cell;
   }
-  return;
+  return void 0;
 }
 function scalarFromOutputs(outputs) {
   for (const out of outputs) {
-    if (out.kind !== "text")
-      continue;
+    if (out.kind !== "text") continue;
     const trimmed = out.content.trim();
     const n = Number(trimmed);
-    if (!Number.isNaN(n) && Number.isFinite(n))
-      return n;
+    if (!Number.isNaN(n) && Number.isFinite(n)) return n;
     return trimmed;
   }
   return outputs[0];
 }
-// ../runtime/src/llmClient.ts
+
+// ../../../runtime/src/llmClient.ts
 var DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 function createBrowserLlmClient(opts) {
   const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
   const fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis);
   const defaultModel = opts.defaultModel ?? "openai/gpt-4o-mini";
   return {
-    async* generateChat(req) {
+    async *generateChat(req) {
       const start = performance.now();
       const body = {
         model: req.model || defaultModel,
         messages: req.messages.map(toOpenAiMessage),
         stream: true
       };
-      if (req.temperature !== undefined)
-        body.temperature = req.temperature;
-      if (req.maxOutputTokens !== undefined)
-        body.max_tokens = req.maxOutputTokens;
-      if (req.topP !== undefined)
-        body.top_p = req.topP;
-      if (req.stop?.length)
-        body.stop = req.stop;
+      if (req.temperature !== void 0) body.temperature = req.temperature;
+      if (req.maxOutputTokens !== void 0) body.max_tokens = req.maxOutputTokens;
+      if (req.topP !== void 0) body.top_p = req.topP;
+      if (req.stop?.length) body.stop = req.stop;
       if (req.tools?.length) {
         body.tools = req.tools.map((t) => ({
           type: "function",
           function: { name: t.name, description: t.description, parameters: t.parameters }
         }));
       }
-      if (req.providerOptions)
-        Object.assign(body, req.providerOptions);
+      if (req.providerOptions) Object.assign(body, req.providerOptions);
       const resp = await fetchImpl(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${opts.apiKey}`,
+          // OpenRouter ranking — encourages provider routing analytics.
           "HTTP-Referer": "https://github.com/zaius-labs/workbooks",
           "X-Title": "@workbook/runtime"
         },
@@ -619,36 +616,29 @@ function createBrowserLlmClient(opts) {
         return;
       }
       let finalText = "";
-      const toolCalls = new Map;
+      const toolCalls = /* @__PURE__ */ new Map();
       let usage;
       let stopReason = "end_turn";
       const reader = resp.body.getReader();
-      const decoder = new TextDecoder;
+      const decoder = new TextDecoder();
       let buf = "";
       try {
         while (true) {
           const { done, value } = await reader.read();
-          if (done)
-            break;
+          if (done) break;
           buf += decoder.decode(value, { stream: true });
           let nl;
-          while ((nl = buf.indexOf(`
-
-`)) >= 0) {
+          while ((nl = buf.indexOf("\n\n")) >= 0) {
             const event = buf.slice(0, nl);
             buf = buf.slice(nl + 2);
-            for (const line of event.split(`
-`)) {
-              if (!line.startsWith("data:"))
-                continue;
+            for (const line of event.split("\n")) {
+              if (!line.startsWith("data:")) continue;
               const payload = line.slice(5).trim();
-              if (!payload || payload === "[DONE]")
-                continue;
+              if (!payload || payload === "[DONE]") continue;
               try {
                 const ev = JSON.parse(payload);
                 const choice = ev.choices?.[0];
-                if (!choice)
-                  continue;
+                if (!choice) continue;
                 const delta = choice.delta ?? {};
                 if (typeof delta.content === "string" && delta.content.length > 0) {
                   finalText += delta.content;
@@ -662,12 +652,9 @@ function createBrowserLlmClient(opts) {
                       name: tc.function?.name ?? "",
                       argumentsJson: ""
                     };
-                    if (tc.id)
-                      existing.id = tc.id;
-                    if (tc.function?.name)
-                      existing.name = tc.function.name;
-                    if (tc.function?.arguments)
-                      existing.argumentsJson += tc.function.arguments;
+                    if (tc.id) existing.id = tc.id;
+                    if (tc.function?.name) existing.name = tc.function.name;
+                    if (tc.function?.arguments) existing.argumentsJson += tc.function.arguments;
                     toolCalls.set(idx, existing);
                   }
                 }
@@ -682,7 +669,8 @@ function createBrowserLlmClient(opts) {
                     reasoningTokens: ev.usage.completion_tokens_details?.reasoning_tokens
                   };
                 }
-              } catch {}
+              } catch {
+              }
             }
           }
         }
@@ -731,7 +719,7 @@ function createBrowserLlmClient(opts) {
         usage: json.usage ? {
           promptTokens: json.usage.prompt_tokens ?? 0,
           completionTokens: 0
-        } : undefined
+        } : void 0
       };
     },
     async describe() {
@@ -745,8 +733,8 @@ function createBrowserLlmClient(opts) {
           displayName: m.name ?? m.id,
           capabilities: inferCapabilities(m),
           contextWindow: m.context_length,
-          pricePerMillionInputTokens: m.pricing?.prompt ? Number(m.pricing.prompt) * 1e6 : undefined,
-          pricePerMillionOutputTokens: m.pricing?.completion ? Number(m.pricing.completion) * 1e6 : undefined
+          pricePerMillionInputTokens: m.pricing?.prompt ? Number(m.pricing.prompt) * 1e6 : void 0,
+          pricePerMillionOutputTokens: m.pricing?.completion ? Number(m.pricing.completion) * 1e6 : void 0
         }));
         return {
           transportName: baseUrl.includes("openrouter") ? "openrouter" : "openai-compatible",
@@ -766,7 +754,9 @@ function createBrowserLlmClient(opts) {
 function toOpenAiMessage(m) {
   const out = { role: m.role };
   if (m.contentParts?.length) {
-    out.content = m.contentParts.map((p) => p.kind === "text" ? { type: "text", text: p.text } : { type: "image_url", image_url: { url: p.url ?? `data:${p.mimeType};base64,${p.base64}` } });
+    out.content = m.contentParts.map(
+      (p) => p.kind === "text" ? { type: "text", text: p.text } : { type: "image_url", image_url: { url: p.url ?? `data:${p.mimeType};base64,${p.base64}` } }
+    );
   } else {
     out.content = m.content ?? "";
   }
@@ -777,8 +767,7 @@ function toOpenAiMessage(m) {
       function: { name: tc.name, arguments: tc.argumentsJson }
     }));
   }
-  if (m.toolCallId)
-    out.tool_call_id = m.toolCallId;
+  if (m.toolCallId) out.tool_call_id = m.toolCallId;
   return out;
 }
 function mapStopReason(r) {
@@ -799,13 +788,12 @@ function mapStopReason(r) {
 }
 function inferCapabilities(m) {
   const caps = ["chat"];
-  if (m.architecture?.modality?.includes("image"))
-    caps.push("vision");
-  if (m.supports_tool_calling)
-    caps.push("tool_use");
+  if (m.architecture?.modality?.includes("image")) caps.push("vision");
+  if (m.supports_tool_calling) caps.push("tool_use");
   return caps;
 }
-// ../runtime/src/agentLoop.ts
+
+// ../../../runtime/src/agentLoop.ts
 async function runAgentLoop(opts) {
   const tools = opts.tools ?? [];
   const maxIterations = opts.maxIterations ?? 8;
@@ -827,7 +815,7 @@ async function runAgentLoop(opts) {
     const stream = opts.llmClient.generateChat({
       model: opts.model,
       messages,
-      tools: toolDefs.length > 0 ? toolDefs : undefined
+      tools: toolDefs.length > 0 ? toolDefs : void 0
     });
     for await (const ev of stream) {
       if (ev.kind === "delta") {
@@ -839,11 +827,9 @@ async function runAgentLoop(opts) {
         stopReason = ev.stopReason;
         usage = ev.usage ?? usage;
         for (const c of ev.toolCalls) {
-          if (!calls.some((existing) => existing.id === c.id))
-            calls.push(c);
+          if (!calls.some((existing) => existing.id === c.id)) calls.push(c);
         }
-        if (ev.finalText)
-          turnText = ev.finalText;
+        if (ev.finalText) turnText = ev.finalText;
         if (ev.errorMessage) {
           finalText = ev.errorMessage;
           return { text: finalText, iterations, toolCalls, usage, stopReason: "error" };
@@ -851,8 +837,7 @@ async function runAgentLoop(opts) {
       }
     }
     finalText = turnText;
-    if (calls.length === 0)
-      break;
+    if (calls.length === 0) break;
     messages.push({
       role: "assistant",
       content: turnText,
@@ -883,8 +868,9 @@ async function runAgentLoop(opts) {
   }
   return { text: finalText, iterations, toolCalls, usage, stopReason };
 }
-// ../runtime/src/htmlBindings.ts
-var customCellRegistry = new Map;
+
+// ../../../runtime/src/htmlBindings.ts
+var customCellRegistry = /* @__PURE__ */ new Map();
 function registerWorkbookCell(language, impl) {
   customCellRegistry.set(language, impl);
 }
@@ -895,8 +881,7 @@ function parseWorkbookHtml(root) {
   const agents = [];
   for (const el of root.querySelectorAll("wb-input")) {
     const nm = el.getAttribute("name");
-    if (!nm)
-      continue;
+    if (!nm) continue;
     const type = el.getAttribute("type") ?? "text";
     const def = el.getAttribute("default") ?? el.textContent?.trim() ?? "";
     inputs[nm] = coerceValue(def, type);
@@ -904,8 +889,7 @@ function parseWorkbookHtml(root) {
   for (const el of root.querySelectorAll("wb-cell")) {
     const id = el.getAttribute("id");
     const language = el.getAttribute("language") ?? "rhai";
-    if (!id)
-      continue;
+    if (!id) continue;
     const reads = (el.getAttribute("reads") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
     const provides = (el.getAttribute("provides") ?? id).split(",").map((s) => s.trim()).filter(Boolean);
     const source = el.textContent?.trim() ?? "";
@@ -914,8 +898,7 @@ function parseWorkbookHtml(root) {
   }
   for (const el of root.querySelectorAll("wb-agent")) {
     const id = el.getAttribute("id");
-    if (!id)
-      continue;
+    if (!id) continue;
     const model = el.getAttribute("model") ?? "openai/gpt-4o-mini";
     const reads = (el.getAttribute("reads") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
     const systemEl = el.querySelector("wb-system");
@@ -930,15 +913,13 @@ function coerceValue(raw, type) {
     const n = Number(raw);
     return Number.isFinite(n) ? n : 0;
   }
-  if (type === "boolean")
-    return raw === "true" || raw === "1";
+  if (type === "boolean") return raw === "true" || raw === "1";
   return raw;
 }
 async function mountHtmlWorkbook(opts) {
   const doc = opts.doc ?? document;
   const root = doc.querySelector("wb-workbook");
-  if (!root)
-    throw new Error("mountHtmlWorkbook: no <wb-workbook> in document");
+  if (!root) throw new Error("mountHtmlWorkbook: no <wb-workbook> in document");
   const spec = parseWorkbookHtml(root);
   const wasmClient = createRuntimeClient({
     loadWasm: opts.loadWasm,
@@ -961,7 +942,7 @@ async function mountHtmlWorkbook(opts) {
     }
   };
   const ctxRef = { current: null };
-  const outputCache = new Map;
+  const outputCache = /* @__PURE__ */ new Map();
   const executor = new ReactiveExecutor({
     client,
     cells: spec.cells,
@@ -982,15 +963,12 @@ async function mountHtmlWorkbook(opts) {
     read: (cellId) => outputCache.get(cellId),
     runCell: async (cellId) => {
       const cell = spec.cells.find((c) => c.id === cellId);
-      if (!cell)
-        throw new Error(`runCell: unknown cell '${cellId}'`);
+      if (!cell) throw new Error(`runCell: unknown cell '${cellId}'`);
       const params = {};
       for (const dep of cell.dependsOn ?? []) {
         const out = outputCache.get(dep);
-        if (out?.[0]?.kind === "text")
-          params[dep] = out[0].content;
-        else if (spec.inputs[dep] !== undefined)
-          params[dep] = spec.inputs[dep];
+        if (out?.[0]?.kind === "text") params[dep] = out[0].content;
+        else if (spec.inputs[dep] !== void 0) params[dep] = spec.inputs[dep];
       }
       const resp = await client.runCell({
         runtimeId: "imperative",
@@ -1016,12 +994,10 @@ async function mountHtmlWorkbook(opts) {
 }
 function bindInputElement(el, executor) {
   const name = el.getAttribute("name");
-  if (!name)
-    return;
+  if (!name) return;
   const type = el.getAttribute("type") ?? "text";
   const def = el.getAttribute("default") ?? "";
-  if (el.querySelector("input, textarea, select"))
-    return;
+  if (el.querySelector("input, textarea, select")) return;
   const inputType = type === "number" ? "number" : type === "csv" ? "textarea" : "text";
   if (inputType === "textarea") {
     const ta = document.createElement("textarea");
@@ -1036,10 +1012,8 @@ function bindInputElement(el, executor) {
     input.type = inputType;
     input.value = def;
     input.classList.add("wb-input");
-    if (inputType === "number")
-      input.classList.add("num");
-    else
-      input.classList.add("text");
+    if (inputType === "number") input.classList.add("num");
+    else input.classList.add("text");
     input.addEventListener("input", () => {
       const v = inputType === "number" ? Number(input.value) : input.value;
       executor.setInput(name, v);
@@ -1049,8 +1023,7 @@ function bindInputElement(el, executor) {
 }
 function renderOutputElement(el, state, cells) {
   const cellId = el.getAttribute("for");
-  if (!cellId)
-    return;
+  if (!cellId) return;
   const cell = cells.find((c) => c.id === cellId);
   el.dataset.status = state.status;
   el.classList.toggle("wb-output-ok", state.status === "ok");
@@ -1058,15 +1031,14 @@ function renderOutputElement(el, state, cells) {
   el.classList.toggle("wb-output-error", state.status === "error");
   el.classList.toggle("wb-output-stale", state.status === "stale");
   if (state.status === "running") {
-    el.innerHTML = `<span class="wb-muted wb-mono" style="font-size: var(--t-sm);">running…</span>`;
+    el.innerHTML = `<span class="wb-muted wb-mono" style="font-size: var(--t-sm);">running\u2026</span>`;
     return;
   }
   if (state.status === "error") {
     el.innerHTML = `<div class="wb-out error">${escapeHtml(state.error ?? "(error)")}</div>`;
     return;
   }
-  if (state.status !== "ok" || !state.outputs)
-    return;
+  if (state.status !== "ok" || !state.outputs) return;
   if (cell) {
     const custom = customCellRegistry.get(cell.language);
     if (custom?.renderOutput) {
@@ -1108,8 +1080,7 @@ function renderOutput(o) {
   return pre;
 }
 function csvToTable(csv) {
-  const rows = csv.trim().split(`
-`).map(parseCsvRow);
+  const rows = csv.trim().split("\n").map(parseCsvRow);
   const t = document.createElement("table");
   t.className = "wb-table";
   const thead = document.createElement("thead");
@@ -1122,13 +1093,12 @@ function csvToTable(csv) {
   thead.appendChild(tr);
   t.appendChild(thead);
   const tbody = document.createElement("tbody");
-  for (let i = 1;i < rows.length; i++) {
+  for (let i = 1; i < rows.length; i++) {
     const r = document.createElement("tr");
     for (const c of rows[i]) {
       const td = document.createElement("td");
       td.textContent = c;
-      if (!isNaN(Number(c)) && c !== "")
-        td.className = "num";
+      if (!isNaN(Number(c)) && c !== "") td.className = "num";
       r.appendChild(td);
     }
     tbody.appendChild(r);
@@ -1140,7 +1110,7 @@ function parseCsvRow(row) {
   const out = [];
   let cur = "";
   let inQ = false;
-  for (let i = 0;i < row.length; i++) {
+  for (let i = 0; i < row.length; i++) {
     const ch = row[i];
     if (ch === '"') {
       inQ = !inQ;
@@ -1158,31 +1128,24 @@ function parseCsvRow(row) {
 }
 function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => {
-    if (c === "&")
-      return "&amp;";
-    if (c === "<")
-      return "&lt;";
-    if (c === ">")
-      return "&gt;";
-    if (c === '"')
-      return "&quot;";
+    if (c === "&") return "&amp;";
+    if (c === "<") return "&lt;";
+    if (c === ">") return "&gt;";
+    if (c === '"') return "&quot;";
     return "&#39;";
   });
 }
 function bindAgentElement(el, ctx, spec) {
   const id = el.getAttribute("id");
-  if (!id)
-    return;
+  if (!id) return;
   const agent = spec.agents.find((a) => a.id === id);
-  if (!agent)
-    return;
+  if (!agent) return;
   if (el.hasAttribute("auto") || el.hasAttribute("trigger") === false) {
     runAgentOnce(el, ctx, agent).catch((err) => console.warn("agent run", err));
   }
 }
 async function runAgentOnce(el, ctx, agent) {
-  if (!ctx.llmClient)
-    return;
+  if (!ctx.llmClient) return;
   const contextLines = [];
   for (const ref of agent.reads) {
     const out = ctx.read(ref);
@@ -1193,9 +1156,7 @@ ${out[0].content}`);
   }
   const userMessage = contextLines.length > 0 ? `Context:
 
-${contextLines.join(`
-
-`)}
+${contextLines.join("\n\n")}
 
 Provide your analysis.` : "Begin.";
   const result = await runAgentLoop({
@@ -1204,6 +1165,7 @@ Provide your analysis.` : "Begin.";
     systemPrompt: agent.systemPrompt,
     initialUserMessage: userMessage,
     tools: []
+    // tool-use agent layer comes next
   });
   const outputs = document.querySelectorAll(`wb-output[for="${agent.id}"]`);
   for (const o of outputs) {
@@ -1233,7 +1195,7 @@ function bindChatElement(el, ctx, spec) {
     <div class="wb-chat">
       <div class="wb-chat-history" data-history></div>
       <div class="wb-chat-compose">
-        <textarea class="wb-textarea" rows="2" data-input placeholder="Message ${escapeHtml(agentId)}…"></textarea>
+        <textarea class="wb-textarea" rows="2" data-input placeholder="Message ${escapeHtml(agentId)}\u2026"></textarea>
         <button class="wb-btn run" data-send>Send</button>
       </div>
     </div>
@@ -1250,7 +1212,7 @@ function bindChatElement(el, ctx, spec) {
       div.textContent = m.content;
       historyEl.appendChild(div);
     }
-    if (streamingText !== undefined) {
+    if (streamingText !== void 0) {
       const div = document.createElement("div");
       div.className = "wb-chat-msg wb-chat-msg-assistant streaming";
       div.textContent = streamingText;
@@ -1260,8 +1222,7 @@ function bindChatElement(el, ctx, spec) {
   }
   async function send() {
     const text = inputEl.value.trim();
-    if (!text)
-      return;
+    if (!text) return;
     history.push({ role: "user", content: text });
     inputEl.value = "";
     sendBtn.disabled = true;
@@ -1278,9 +1239,7 @@ ${out[0].content}`);
 
 Available context (cell outputs):
 
-${contextLines.join(`
-
-`)}` : agent.systemPrompt;
+${contextLines.join("\n\n")}` : agent.systemPrompt;
     let streamed = "";
     try {
       const it = ctx.llmClient.generateChat({
@@ -1321,13 +1280,118 @@ ${contextLines.join(`
     }
   });
 }
+
+// ../../../runtime/src/markdown.ts
+function escapeHtml2(s) {
+  return String(s ?? "").replace(
+    /[&<>"']/g,
+    (c) => c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;"
+  );
+}
+function renderMarkdown(src) {
+  const text = String(src ?? "");
+  const blocks = [];
+  const FENCE = /```([a-zA-Z0-9_+-]*)\n([\s\S]*?)(?:```|$)/g;
+  const withPlaceholders = text.replace(FENCE, (_m, lang, body) => {
+    const id = blocks.length;
+    const cls = lang ? ` class="language-${String(lang).toLowerCase()}"` : "";
+    blocks.push(`<pre><code${cls}>${escapeHtml2(body)}</code></pre>`);
+    return ` FENCE${id} `;
+  });
+  const escaped = escapeHtml2(withPlaceholders);
+  const lines = escaped.split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^\s*$/.test(line)) {
+      i++;
+      continue;
+    }
+    const fenceMatch = line.match(/^ FENCE(\d+) $/);
+    if (fenceMatch) {
+      out.push(blocks[Number(fenceMatch[1])]);
+      i++;
+      continue;
+    }
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) {
+      out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`);
+      i++;
+      continue;
+    }
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      out.push("<hr/>");
+      i++;
+      continue;
+    }
+    if (/^\s*&gt;\s?/.test(line)) {
+      const rows = [];
+      while (i < lines.length && /^\s*&gt;\s?/.test(lines[i])) {
+        rows.push(lines[i].replace(/^\s*&gt;\s?/, ""));
+        i++;
+      }
+      out.push(`<blockquote>${inline(rows.join("\n")).replace(/\n/g, "<br/>")}</blockquote>`);
+      continue;
+    }
+    if (/^\s*[-*+]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-*+]\s+/, ""));
+        i++;
+      }
+      out.push("<ul>" + items.map((t) => `<li>${inline(t)}</li>`).join("") + "</ul>");
+      continue;
+    }
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*\d+\.\s+/, ""));
+        i++;
+      }
+      out.push("<ol>" + items.map((t) => `<li>${inline(t)}</li>`).join("") + "</ol>");
+      continue;
+    }
+    const para = [];
+    while (i < lines.length && !/^\s*$/.test(lines[i]) && !/^(#{1,4})\s+/.test(lines[i]) && !/^\s*[-*+]\s+/.test(lines[i]) && !/^\s*\d+\.\s+/.test(lines[i]) && !/^\s*&gt;\s?/.test(lines[i]) && !/^\s*([-*_])(\s*\1){2,}\s*$/.test(lines[i]) && !/^ FENCE\d+ $/.test(lines[i])) {
+      para.push(lines[i]);
+      i++;
+    }
+    out.push(`<p>${inline(para.join("\n")).replace(/\n/g, "<br/>")}</p>`);
+  }
+  return out.join("");
+}
+function inline(s) {
+  const codes = [];
+  s = s.replace(/`([^`\n]+)`/g, (_m, body) => {
+    codes.push(`<code>${body}</code>`);
+    return ` CODE${codes.length - 1} `;
+  });
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/__([^_\n]+)__/g, "<strong>$1</strong>");
+  s = s.replace(/(?<![*\w])\*([^*\n]+)\*(?!\w)/g, "<em>$1</em>");
+  s = s.replace(/(?<![_\w])_([^_\n]+)_(?!\w)/g, "<em>$1</em>");
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"([^"]+)")?\)/g, (m, label, url, title) => {
+    if (!/^(https?:\/\/|\/|#)/.test(url)) return m;
+    const t = title ? ` title="${escapeHtml2(title)}"` : "";
+    return `<a href="${escapeHtml2(url)}" target="_blank" rel="noreferrer noopener"${t}>${label}</a>`;
+  });
+  s = s.replace(
+    /(^|[\s(])(https?:\/\/[^\s)<]+)/g,
+    (_m, lead, url) => `${lead}<a href="${escapeHtml2(url)}" target="_blank" rel="noreferrer noopener">${escapeHtml2(url)}</a>`
+  );
+  s = s.replace(/ CODE(\d+) /g, (_m, n) => codes[Number(n)]);
+  return s;
+}
 export {
-  runAgentLoop,
-  registerWorkbookCell,
-  parseWorkbookHtml,
-  mountHtmlWorkbook,
-  createRuntimeClient,
-  createBrowserLlmClient,
+  ReactiveExecutor,
   analyzeCell,
-  ReactiveExecutor
+  createBrowserLlmClient,
+  createRuntimeClient,
+  escapeHtml2 as escapeHtml,
+  mountHtmlWorkbook,
+  parseWorkbookHtml,
+  registerWorkbookCell,
+  renderMarkdown,
+  runAgentLoop
 };

@@ -1,5 +1,5 @@
 {
-  "name": "@workbook/cli",
+  "name": "@zaiusai/workbook-cli",
   "version": "0.1.0",
   "description": "Build tool for workbooks — compiles a multi-file source tree into a single, self-contained .workbook.html.",
   "type": "module",
@@ -10,7 +10,13 @@
     "directory": "packages/workbook-cli"
   },
   "homepage": "https://github.com/zaius-labs/workbooks",
-  "keywords": ["workbook", "build", "vite", "single-file", "portable"],
+  "keywords": [
+    "workbook",
+    "build",
+    "vite",
+    "single-file",
+    "portable"
+  ],
   "bin": {
     "workbook": "./bin/workbook.mjs"
   },
@@ -35,7 +41,14 @@
     "svelte": "^5.0.0"
   },
   "peerDependenciesMeta": {
-    "@sveltejs/vite-plugin-svelte": { "optional": true },
-    "svelte": { "optional": true }
+    "@sveltejs/vite-plugin-svelte": {
+      "optional": true
+    },
+    "svelte": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

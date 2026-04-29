@@ -1,6 +1,9 @@
 {
-  "name": "@workbook/runtime",
+  "name": "@zaiusai/workbook-runtime",
   "version": "0.1.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Workbook UI runtime — Svelte 5 components that render the workbook block tree. Used in live applications and embedded in portable .workbook files.",
   "type": "module",
   "license": "Apache-2.0",

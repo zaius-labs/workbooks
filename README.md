@@ -1,17 +1,41 @@
 # Workbooks
 
-> A document format and runtime for **executable, portable analytical artifacts.**
-> Real ML, real data work, real agents — running entirely in your browser, in
-> ~2 MB of WebAssembly, with no server.
+> A **portable runtime for browser apps.** Real ML, real data work, real
+> agents — packaged as a single HTML file that runs in any browser, with
+> no server, no install, no sign-up. Apps you can email.
 
 ```
-.workbook = an ordered tree of typed blocks + an embedded execution runtime
+.workbook.html = self-contained HTML + WebAssembly runtime + your code
 ```
 
-Notebooks, reports, dashboards, ML experiments, recurring monitors, agent
-harnesses — all expressed as a single canonical type. Author it as HTML or
-JSON. Run it in any browser. Carry it around as a single file. Compose
-it as a building block of larger workbooks.
+Notebooks. Documents. Full apps. All expressed as a single canonical
+format. Author it any way you want — hand-written HTML, a build pipeline
+with components, a framework like Svelte. Run it from `file://`, a USB
+stick, your inbox, or behind a CDN. Compose workbooks as building blocks
+of larger workbooks.
+
+## Three canonical types
+
+A workbook's `manifest.type` field declares which rendering profile a
+host should use. Same format, same runtime, same env contract across
+all three:
+
+- **`document`** — sdoc-style read-mostly artifact. Rendered prose
+  with embedded auto-rendered blocks (charts, tables, citations).
+  Hosts wrap the workbook in a paper-like reader chrome. No agent
+  loop or compute affordances surfaced to the reader.
+- **`notebook`** — Jupyter-style linear runner. Cells in a static
+  DAG, reactive execution. Reader edits inputs, re-runs cells, sees
+  outputs materialize. Hosts wrap the workbook in a notebook chrome
+  with run/restart/clear controls.
+- **`spa`** — full canvas application. The author renders whatever
+  UI they want; runtime is a service available on demand. Examples:
+  `examples/chat-app/` (multi-mode agent UI), `examples/svelte-app/`
+  (Svelte 5 + hash router multi-page app). Hosts render the
+  workbook as-is — no chrome.
+
+Type is a hint to consumers, not a build-path branch. The same
+`.workbook.html` file format produces all three.
 
 ---
 
