@@ -39,6 +39,10 @@
       "types": "./src/types.ts",
       "default": "./src/types.ts"
     },
+    "./wasmBridge": {
+      "types": "./src/wasmBridge.ts",
+      "default": "./src/wasmBridge.ts"
+    },
     "./blocks/*": {
       "svelte": "./src/blocks/*"
     },

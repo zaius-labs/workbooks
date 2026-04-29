@@ -53,3 +53,19 @@ export {
   getCitationContext,
   buildCitationContext,
 } from "./citationContext";
+
+// Runtime client (Tier 1 — in-page WASM execution).
+// Wraps the @workbook/runtime-wasm crate behind a Connect-shaped client
+// matching `proto/workbook/runtime/v1/runtime.proto > WorkbookRuntimeService`.
+export { createRuntimeClient } from "./wasmBridge";
+export type {
+  RuntimeClient,
+  RuntimeClientOptions,
+  WasmLoader,
+  WorkbookRuntimeWasm,
+  InitRuntimeRequest,
+  InitRuntimeResponse,
+  RunCellRequest,
+  RunCellResponse,
+  BuildInfo,
+} from "./wasmBridge";
