@@ -31,21 +31,33 @@ export async function runBuild({ project = ".", out, runtime, wasm } = {}) {
   const entryAbs = path.resolve(config.root, config.entry);
   const viteRoot = path.dirname(entryAbs);
 
+  // Merge user-supplied vite config last, but PREPEND any user plugins
+  // to ours so they get first crack (e.g. @tailwindcss/vite needs to
+  // see CSS before the workbook plugin or singlefile collapses it).
+  // Spread-overwriting `plugins` from config.vite would drop our own
+  // plugins entirely — explicit merge avoids that footgun.
+  const { plugins: userPlugins = [], build: userBuild = {}, ...userVite } =
+    config.vite ?? {};
+
   await viteBuild({
     root: viteRoot,
+    ...userVite,
+    plugins: [...userPlugins, ...plugins],
     build: {
+      ...userBuild,
       outDir,
       emptyOutDir: true,
       rollupOptions: {
+        ...(userBuild.rollupOptions ?? {}),
         input: entryAbs,
       },
       // Single-file output — no code splitting, no asset emission.
+      // These four MUST stay set; user-supplied build options can
+      // tweak everything else (target, minify, etc.) but not these.
       assetsInlineLimit: 100_000_000,
       cssCodeSplit: false,
       sourcemap: false,
     },
-    plugins,
-    ...config.vite,
     logLevel: "info",
   });
 

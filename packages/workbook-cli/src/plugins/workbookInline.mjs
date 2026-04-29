@@ -24,6 +24,101 @@ import { escapeForScript, makeSentinels, makeAssetTag, TRIGGER } from "../util/t
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ICON_PATH = path.resolve(HERE, "..", "..", "templates", "default-icon.svg");
 
+// ----------------------------------------------------------------------
+// Pure HTML transforms — used by both the Vite plugin (build path with
+// component compilation) and the singleFile build path (hand-written
+// HTML, no Vite). Keep these side-effect-free; callers handle I/O.
+// ----------------------------------------------------------------------
+
+/** Inject favicon link tags (data-URL inlined) and the workbook-spec
+ *  JSON script into the document head. Skips favicon injection if the
+ *  page already declares one. Idempotent — running twice is a no-op. */
+export async function injectSpecAndIcons(html, config) {
+  const hasUserIcon = /<link\s[^>]*rel\s*=\s*["']?(?:icon|shortcut icon)["']?/i.test(html);
+  const iconLinks = hasUserIcon ? "" : await buildIconLinks(config);
+
+  // Skip if already injected (singleFile re-builds).
+  if (/<script id="workbook-spec"[^>]*>/.test(html)) return html;
+
+  const spec = buildSpec(config);
+  const specJson = escapeForScript(JSON.stringify(spec));
+  const tagOpen = TRIGGER.TAG_SCRIPT_OPEN();
+  const tagEnd = TRIGGER.TAG_SCRIPT_END();
+  const specTag =
+    `${tagOpen} id="workbook-spec" type="application/json">${specJson}${tagEnd}`;
+  const injection = (iconLinks ? iconLinks + "\n" : "") + specTag;
+  const headClose = TRIGGER.HEAD_CLOSE();
+  if (html.toLowerCase().includes(headClose)) {
+    return html.replace(new RegExp(headClose, "i"), injection + "\n" + headClose);
+  }
+  return injection + "\n" + html;
+}
+
+/** Inline the wasm-bindgen JS, runtime bundle JS, and wasm bytes as
+ *  <script type="text/plain"> blocks in the head, between sentinels.
+ *  Replaces a prior block if present. */
+export async function inlinePortableAssets(html, runtime) {
+  const assets = await readRuntimeAssets(runtime);
+  const { BEGIN, END } = makeSentinels();
+  const block = [
+    makeAssetTag("wasm-b64", "text/plain", assets.wasmB64),
+    makeAssetTag("bindgen-src", "text/plain", escapeForScript(assets.bindgenJs)),
+    makeAssetTag("runtime-bundle-src", "text/plain", escapeForScript(assets.bundleSrc)),
+  ].join("\n");
+  const wrapped = `${BEGIN}\n${block}\n${END}`;
+
+  // Replace prior block if present (re-runs).
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const priorRe = new RegExp(
+    escapeRe(BEGIN) + "[\\s\\S]*?" + escapeRe(END),
+    "i",
+  );
+  if (priorRe.test(html)) return html.replace(priorRe, wrapped);
+
+  // Insert before </head>.
+  const headClose = TRIGGER.HEAD_CLOSE();
+  if (html.toLowerCase().includes(headClose)) {
+    return html.replace(new RegExp(headClose, "i"), wrapped + "\n" + headClose);
+  }
+  return wrapped + "\n" + html;
+}
+
+/** Replace <link rel="stylesheet" href="..."> tags with inlined
+ *  <style> blocks. href must be relative; absolute URLs are skipped.
+ *  Used by the singleFile build path so a hand-written example with
+ *  `<link href="../_shared/design.css">` produces a portable HTML
+ *  with that CSS inlined. */
+export async function inlineLinkedStylesheets(html, sourceDir) {
+  const re = /<link\b[^>]*rel\s*=\s*["']?stylesheet["']?[^>]*>/gi;
+  const matches = [...html.matchAll(re)];
+  if (!matches.length) return html;
+
+  const replacements = await Promise.all(matches.map(async (m) => {
+    const tag = m[0];
+    const hrefMatch = tag.match(/href\s*=\s*["']([^"']+)["']/i);
+    if (!hrefMatch) return { tag, replacement: tag };
+    const href = hrefMatch[1];
+    if (/^[a-z]+:\/\//i.test(href) || href.startsWith("//")) {
+      return { tag, replacement: tag }; // external URL — leave alone
+    }
+    const abs = path.resolve(sourceDir, href);
+    try {
+      const css = await fs.readFile(abs, "utf8");
+      const idMatch = tag.match(/id\s*=\s*["']([^"']+)["']/i);
+      const idAttr = idMatch ? ` id="${idMatch[1]}"` : "";
+      return { tag, replacement: `<style${idAttr}>${css}</style>` };
+    } catch {
+      return { tag, replacement: tag }; // unresolvable — leave alone
+    }
+  }));
+
+  let out = html;
+  for (const { tag, replacement } of replacements) {
+    if (tag !== replacement) out = out.replace(tag, replacement);
+  }
+  return out;
+}
+
 const VIRTUAL_RUNTIME_ID = "virtual:workbook-runtime";
 const RESOLVED_RUNTIME_ID = "\0" + VIRTUAL_RUNTIME_ID;
 

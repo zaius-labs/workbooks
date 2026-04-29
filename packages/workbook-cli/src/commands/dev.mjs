@@ -19,18 +19,24 @@ export async function runDev({ project = ".", port, runtime } = {}) {
   const entryAbs = path.resolve(config.root, config.entry);
   const viteRoot = path.dirname(entryAbs);
 
+  // Merge user-supplied vite config — see build.mjs for rationale.
+  const { plugins: userPlugins = [], server: userServer = {}, ...userVite } =
+    config.vite ?? {};
+
   const server = await createServer({
     root: viteRoot,
+    ...userVite,
+    plugins: [...userPlugins, ...plugins],
     server: {
-      port: port ? Number(port) : 5173,
+      ...userServer,
+      port: port ? Number(port) : (userServer.port ?? 5173),
       open: false,
       fs: {
+        ...(userServer.fs ?? {}),
         // Allow Vite to read sibling packages (runtime-wasm pkg etc.).
         allow: [config.root, path.resolve(config.root, "..", "..")],
       },
     },
-    plugins,
-    ...config.vite,
   });
   await server.listen();
   server.printUrls();
