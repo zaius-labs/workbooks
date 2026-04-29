@@ -1,0 +1,38 @@
+{
+  "name": "@work.books/runtime-wasm",
+  "version": "0.1.0",
+  "description": "Workbook execution runtime — Rust+WASM bindings for client-side Polars SQL, Loro CRDT, Prolly Tree history, Rhai scripting, Candle inference, Linfa training, and Plotters charts. Consumed by @work.books/cli at build time and by the workbook-runtime UI package at render time.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zaius-labs/workbooks.git",
+    "directory": "packages/runtime-wasm"
+  },
+  "homepage": "https://github.com/zaius-labs/workbooks",
+  "keywords": [
+    "workbook",
+    "wasm",
+    "polars",
+    "loro",
+    "prolly",
+    "notebook",
+    "single-file"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "pkg/workbook_runtime.js",
+    "pkg/workbook_runtime.d.ts",
+    "pkg/workbook_runtime_bg.wasm",
+    "pkg/workbook_runtime_bg.wasm.d.ts",
+    "pkg/package.json",
+    "pkg/README.md",
+    "examples/_shared/design.css",
+    "examples/_shared/portable.js",
+    "examples/_shared/chrome.js",
+    "examples/reactive-cells/runtime.bundle.js"
+  ],
+  "main": "pkg/workbook_runtime.js",
+  "types": "pkg/workbook_runtime.d.ts"
+}
