@@ -70,6 +70,32 @@ export async function loadConfig(projectDir) {
     throw new Error(`workbook.config: 'type' must be one of: ${[...VALID_TYPES].join(", ")} (got '${type}')`);
   }
 
+  // Icons — accept short form (single string path) or long form (array of
+  // { src, sizes?, type? }). Normalize to the long form. If neither is
+  // provided, the build plugin substitutes a default workbook glyph so
+  // every saved .workbook.html has a recognizable browser-tab icon.
+  let icons = null;
+  if (typeof cfg.icon === "string" && cfg.icon) {
+    icons = [{ src: cfg.icon }];
+  } else if (Array.isArray(cfg.icons)) {
+    icons = cfg.icons.map((entry, i) => {
+      if (typeof entry === "string") return { src: entry };
+      if (entry && typeof entry === "object" && typeof entry.src === "string") {
+        return { src: entry.src, sizes: entry.sizes, type: entry.type };
+      }
+      throw new Error(
+        `workbook.config: icons[${i}] must be a string path or { src, sizes?, type? }`,
+      );
+    });
+  }
+  if (icons) {
+    for (const icon of icons) {
+      const abs = path.resolve(root, icon.src);
+      try { await fs.access(abs); }
+      catch { throw new Error(`workbook.config: icon not found: ${icon.src} (resolved to ${abs})`); }
+    }
+  }
+
   return {
     root,
     configPath,
@@ -80,6 +106,7 @@ export async function loadConfig(projectDir) {
     entry: cfg.entry,
     entryAbs,
     env: cfg.env ?? {},
+    icons,                      // null means "use the default workbook glyph"
     runtimeFeatures: cfg.runtimeFeatures ?? [],
     vite: cfg.vite ?? {},
     // Inline assets unless explicitly disabled; --no-wasm flag flips this.

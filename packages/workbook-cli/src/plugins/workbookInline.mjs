@@ -17,8 +17,12 @@
 
 import path from "node:path";
 import fs from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { resolveRuntime, readRuntimeAssets } from "../util/runtime.mjs";
 import { escapeForScript, makeSentinels, makeAssetTag, TRIGGER } from "../util/triggerSafe.mjs";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_ICON_PATH = path.resolve(HERE, "..", "..", "templates", "default-icon.svg");
 
 const VIRTUAL_RUNTIME_ID = "virtual:workbook-runtime";
 const RESOLVED_RUNTIME_ID = "\0" + VIRTUAL_RUNTIME_ID;
@@ -145,27 +149,35 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
       });
     },
 
-    /** Inject the workbook-spec script + a body class. Runs in both
+    /** Inject the workbook-spec script + favicon links. Runs in both
      * dev and build. */
     transformIndexHtml: {
       order: "post",
       async handler(html) {
+        // Skip injection if the host page already has its own favicon
+        // links — let the author opt out by simply declaring them.
+        const hasUserIcon = /<link\s[^>]*rel\s*=\s*["']?(?:icon|shortcut icon)["']?/i.test(html);
+        const iconLinks = hasUserIcon
+          ? ""
+          : await buildIconLinks(config);
+
         const spec = buildSpec(config);
         const specJson = escapeForScript(JSON.stringify(spec));
         const tagOpen = TRIGGER.TAG_SCRIPT_OPEN();
         const tagEnd = TRIGGER.TAG_SCRIPT_END();
         const specTag =
           `${tagOpen} id="workbook-spec" type="application/json">${specJson}${tagEnd}`;
+        const injection = (iconLinks ? iconLinks + "\n" : "") + specTag;
         // Inject before </head>.
         const headClose = TRIGGER.HEAD_CLOSE();
         if (html.toLowerCase().includes(headClose)) {
           return html.replace(
             new RegExp(headClose, "i"),
-            specTag + "\n" + headClose,
+            injection + "\n" + headClose,
           );
         }
         // No <head>? Prepend.
-        return specTag + "\n" + html;
+        return injection + "\n" + html;
       },
     },
 
@@ -261,4 +273,50 @@ async function collectHtml(dir) {
   }
   await walk(dir);
   return out;
+}
+
+// Build <link rel="icon"> tags for the workbook. Always inlines as a
+// data: URL so the saved .workbook.html ships with the icon and a
+// file:// open shows the right glyph in the browser tab. The
+// ".workbook.html → OS file icon" association is a separate concern
+// that needs platform-level registration; see core-7fw.1.
+async function buildIconLinks(config) {
+  const icons = config.icons ?? [{ src: DEFAULT_ICON_PATH, _isDefault: true }];
+  const tags = [];
+  for (const icon of icons) {
+    const abs = icon._isDefault
+      ? icon.src
+      : path.resolve(config.root, icon.src);
+    let bytes;
+    try { bytes = await fs.readFile(abs); }
+    catch (e) {
+      process.stderr.write(`[workbook] icon not readable: ${abs}\n`);
+      continue;
+    }
+    const ext = path.extname(abs).toLowerCase().slice(1);
+    const mime = icon.type ?? extToMime(ext);
+    const dataUrl = `data:${mime};base64,${bytes.toString("base64")}`;
+    const sizes = icon.sizes ? ` sizes="${escapeAttr(icon.sizes)}"` : "";
+    const typeAttr = ` type="${escapeAttr(mime)}"`;
+    tags.push(`<link rel="icon"${typeAttr}${sizes} href="${dataUrl}">`);
+  }
+  return tags.join("\n");
+}
+
+function extToMime(ext) {
+  switch (ext) {
+    case "svg":  return "image/svg+xml";
+    case "png":  return "image/png";
+    case "ico":  return "image/x-icon";
+    case "gif":  return "image/gif";
+    case "webp": return "image/webp";
+    case "jpg":  case "jpeg": return "image/jpeg";
+    default: return "application/octet-stream";
+  }
+}
+
+function escapeAttr(s) {
+  return String(s).replace(/[&<>"]/g, (c) =>
+    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&quot;",
+  );
 }

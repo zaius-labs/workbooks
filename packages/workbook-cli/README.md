@@ -47,6 +47,25 @@ export default {
 };
 ```
 
+Optional icon — single path or array of `{ src, sizes?, type? }`. Inlined as a data URL so the saved `.workbook.html` ships with its own browser-tab icon:
+
+```js
+icon: "src/icon.svg",                              // short form
+// or
+icons: [
+  { src: "src/icon-32.png",  sizes: "32x32",   type: "image/png" },
+  { src: "src/icon-192.png", sizes: "192x192", type: "image/png" },
+],
+```
+
+If neither `icon` nor `icons` is provided, the build injects a default
+workbook glyph so every saved file has a recognizable favicon. Author
+HTML that already declares `<link rel="icon">` opts out automatically.
+
+Note: this only controls the **browser** icon (tab, bookmark). The OS
+file icon for `.workbook.html` files in Finder/Explorer requires
+platform-level registration and is intentionally out of scope here.
+
 ## Commands
 
 ```
