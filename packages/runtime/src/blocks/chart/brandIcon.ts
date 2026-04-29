@@ -6,10 +6,11 @@
  *
  * Surfaced two ways:
  *   - Static: faviconFor(brand) returns this when the URL can't parse.
- *   - Reactive: every brand <img> uses an onerror handler that swaps
- *     to this URI when the original load fails. The handler clears
- *     onerror first to avoid an infinite loop if the data URI itself
- *     somehow fails (it shouldn't — it's inline bytes).
+ *   - Reactive: every brand <img> gets a JS-attached `error` listener
+ *     (see Paragraph.svelte / Markdown.svelte $effect) that swaps to
+ *     this URI when the original load fails. Inline `onerror=` was
+ *     removed in core-0id.10 — its presence forced 'unsafe-inline' in
+ *     consumer CSP and defeated most of CSP's value.
  *
  * Stroke color is a fixed neutral grey (#9aa0a8) so it reads on both
  * light (#fafafa) and dark (#1a1a1f) surfaces. CSS `currentColor`
@@ -27,9 +28,3 @@ const SVG = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='n
 /** Data URI for an `<img src>` fallback. */
 export const DEFAULT_BRAND_ICON: string =
   "data:image/svg+xml;utf8," + encodeURIComponent(SVG);
-
-/** Inline `onerror` handler that swaps `<img src>` to the default
- *  briefcase. Clears its own onerror first so a hypothetical failure
- *  on the data URI doesn't loop. */
-export const BRAND_ICON_ONERROR: string =
-  "this.onerror=null;this.src='" + DEFAULT_BRAND_ICON.replace(/'/g, "%27") + "'";

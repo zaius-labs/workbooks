@@ -4,11 +4,38 @@
     CITE_ANCHOR_RE,
     getCitationContext,
   } from "../citationContext";
-  import { BRAND_ICON_ONERROR } from "./chart/brandIcon";
+  import { DEFAULT_BRAND_ICON } from "./chart/brandIcon";
   import { safeHref, safeImgSrc } from "../util/url";
 
   let { block }: { block: ParagraphBlock } = $props();
   const citations = getCitationContext();
+
+  let host = $state<HTMLElement | null>(null);
+
+  /** Wire a fallback-icon error listener to every brand <img> the
+   *  rendered HTML produces. Inline `onerror=` would force
+   *  'unsafe-inline' in the host CSP — closes core-0id.10 by
+   *  attaching the handler from JS instead. Re-runs whenever the
+   *  derived `html` changes (Svelte re-renders into the same host). */
+  $effect(() => {
+    void html; // dependency
+    if (!host) return;
+    queueMicrotask(() => {
+      if (!host) return;
+      for (const img of host.querySelectorAll<HTMLImageElement>("img.sd-brand-icon")) {
+        if (img.dataset.wbBrandWired === "1") continue;
+        img.dataset.wbBrandWired = "1";
+        img.addEventListener(
+          "error",
+          function onerr() {
+            this.removeEventListener("error", onerr);
+            this.src = DEFAULT_BRAND_ICON;
+          },
+          { once: true },
+        );
+      }
+    });
+  });
 
   function escapeHtml(s: string): string {
     return s
@@ -71,13 +98,13 @@
           return `<span class="sd-brand sd-brand-disabled" data-brand-id="${escapeHtml(id)}">${escapeHtml(r.brand.name)}</span>`;
         }
         const iconSrc = safeImgSrc(r.faviconUrl) ?? "";
-        return `<a class="sd-brand" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" data-brand-id="${escapeHtml(id)}"><img class="sd-brand-icon" src="${escapeHtml(iconSrc)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="${escapeHtml(BRAND_ICON_ONERROR)}" /><span class="sd-brand-name">${escapeHtml(r.brand.name)}</span></a>`;
+        return `<a class="sd-brand" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" data-brand-id="${escapeHtml(id)}"><img class="sd-brand-icon" src="${escapeHtml(iconSrc)}" alt="" loading="lazy" referrerpolicy="no-referrer" /><span class="sd-brand-name">${escapeHtml(r.brand.name)}</span></a>`;
       },
     );
     return t;
   });
 </script>
 
-<p class="text-[14px] leading-relaxed text-fg">
+<p class="text-[14px] leading-relaxed text-fg" bind:this={host}>
   {@html html}
 </p>

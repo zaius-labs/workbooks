@@ -4,11 +4,36 @@
     CITE_ANCHOR_RE,
     getCitationContext,
   } from "../citationContext";
-  import { BRAND_ICON_ONERROR } from "./chart/brandIcon";
+  import { DEFAULT_BRAND_ICON } from "./chart/brandIcon";
   import { safeHref, safeImgSrc } from "../util/url";
 
   let { block }: { block: MarkdownBlock } = $props();
   const citations = getCitationContext();
+
+  let host = $state<HTMLElement | null>(null);
+
+  /** Wire fallback-icon error listeners to brand <img>s after each
+   *  render. Inline `onerror=` would force 'unsafe-inline' in CSP —
+   *  closes core-0id.10 by attaching from JS. */
+  $effect(() => {
+    void tokens; // re-wire when content changes
+    if (!host) return;
+    queueMicrotask(() => {
+      if (!host) return;
+      for (const img of host.querySelectorAll<HTMLImageElement>("img.sd-brand-icon")) {
+        if (img.dataset.wbBrandWired === "1") continue;
+        img.dataset.wbBrandWired = "1";
+        img.addEventListener(
+          "error",
+          function onerr() {
+            this.removeEventListener("error", onerr);
+            this.src = DEFAULT_BRAND_ICON;
+          },
+          { once: true },
+        );
+      }
+    });
+  });
 
   /**
    * Minimal, safe Markdown renderer. Supports:
@@ -164,7 +189,7 @@
           return `<span class="sd-brand sd-brand-disabled" data-brand-id="${escapeHtml(id)}">${escapeHtml(r.brand.name)}</span>`;
         }
         const iconSrc = safeImgSrc(r.faviconUrl) ?? "";
-        return `<a class="sd-brand" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" data-brand-id="${escapeHtml(id)}"><img class="sd-brand-icon" src="${escapeHtml(iconSrc)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="${escapeHtml(BRAND_ICON_ONERROR)}" /><span class="sd-brand-name">${escapeHtml(r.brand.name)}</span></a>`;
+        return `<a class="sd-brand" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" data-brand-id="${escapeHtml(id)}"><img class="sd-brand-icon" src="${escapeHtml(iconSrc)}" alt="" loading="lazy" referrerpolicy="no-referrer" /><span class="sd-brand-name">${escapeHtml(r.brand.name)}</span></a>`;
       },
     );
   }
@@ -183,7 +208,7 @@
   const tokens = $derived(tokenize(block.text));
 </script>
 
-<div class="flex flex-col gap-3 text-[14px] leading-relaxed text-fg">
+<div class="flex flex-col gap-3 text-[14px] leading-relaxed text-fg" bind:this={host}>
   {#each tokens as tok, i (i)}
     {#if tok.kind === "p"}
       <p>{@html inline(tok.text)}</p>
