@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  --color-page:     #0c0a09;
+  --color-surface:  #1c1917;
+  --color-surface-2:#292524;
+  --color-fg:       #fafaf9;
+  --color-fg-muted: #a8a29e;
+  --color-fg-faint: #57534e;
+  --color-border:   #292524;
+  --color-border-2: #44403c;
+  --color-accent:   #fed7aa;
+  --color-accent-fg:#7c2d12;
+
+  /* Timeline editor — single source for clip / ruler / gutter visual
+   * states. Mirrors HyperFrames Studio's `jg` theme object so we can
+   * be skinned to match. Reference everywhere via var(--studio-*). */
+  --color-studio-accent:        #fed7aa;
+  --color-studio-clip-bg:       color-mix(in srgb, #fed7aa 14%, transparent);
+  --color-studio-clip-bg-hover: color-mix(in srgb, #fed7aa 24%, transparent);
+  --color-studio-clip-bg-active:color-mix(in srgb, #fed7aa 36%, transparent);
+  --color-studio-clip-bg-drag:  color-mix(in srgb, #fed7aa 44%, transparent);
+  --color-studio-clip-border:   color-mix(in srgb, #fed7aa 50%, transparent);
+  --color-studio-clip-border-hover: color-mix(in srgb, #fed7aa 70%, transparent);
+  --color-studio-clip-border-active:#fed7aa;
+  --color-studio-clip-shadow:   0 1px 0 0 rgba(0,0,0,0.3), 0 0 0 0 transparent;
+  --color-studio-clip-shadow-hover: 0 2px 6px rgba(0,0,0,0.35);
+  --color-studio-clip-shadow-drag:  0 6px 16px rgba(0,0,0,0.45);
+  --color-studio-row-bg:        #1c1917;
+  --color-studio-gutter-bg:     #100e0d;
+  --color-studio-ruler-border:  #292524;
+  --color-studio-resize-seam:   #292524;
+  --color-studio-resize-active: #fed7aa;
+
+  /* HyperFrames' distinctive non-FCP organic clip silhouette. */
+  --studio-clip-radius: 11px 15px 13px 9px / 10px 14px 12px 10px;
+
+  --font-sans: "Inter", -apple-system, "SF Pro Text", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, "Menlo", monospace;
+}
