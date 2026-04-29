@@ -1,8 +1,14 @@
 # Workbook as App
 
-Reference for the SPA workbook type. Notebooks and documents are
-covered in `SPEC.md` and `OPERATIONS.md`; this page is specifically
-about packaging a real browser app as a single `.workbook.html`.
+Deep dive on the SPA workbook type — packaging a real browser app
+as a single `.workbook.html`.
+
+> See **`WORKBOOK_AUTHORING.md`** for the umbrella authoring guide
+> covering all shapes (document / notebook / spa) and all authoring
+> styles (vanilla / Svelte / Tailwind / mdsvex / raw HTML). This page
+> is the SPA-lane chapter — the chat-app pattern, the hand-rolled
+> save flow, the env contract details. Other shapes are covered in
+> `SPEC.md` and `OPERATIONS.md`.
 
 ## What an "app workbook" is
 

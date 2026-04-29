@@ -208,6 +208,8 @@ python3 -m http.server 8000
 
 Click through the nav: each demo proves a different layer of the runtime.
 
+**Runtime building blocks** (concept demos, single-file, view-source pedagogy):
+
 | Demo | Proves | Verified |
 |---|---|---|
 | `hello-cell/` | The wasm bridge round-trip works | Rhai eval in browser |
@@ -217,23 +219,63 @@ Click through the nav: each demo proves a different layer of the runtime.
 | `vector-knn/` | HNSW index in browser | 2K × 128-dim corpus, sub-ms query |
 | `sentence-search/` | Real BERT model runs | all-MiniLM-L6-v2 (~90 MB), 110 ms/query embed, semantic match correctness ✓ |
 | `chat-cell/` | LLM service typed contract | OpenRouter streaming via proto-typed client |
-| `chat-app/` | Multi-mode agent app on top of the runtime | Hamburger / left nav / right inspector |
 | `html-workbook/` | HTML *is* the workbook | View Source = workbook source |
 | `html-agent/` | Agent grounded on cell outputs | Polars table → GPT-4o-mini quotes exact numbers in chat |
-| `notebook-agent/` | Agent reads + writes cells in a live notebook | list_cells / read_cell / append_cell / edit_cell tools wired to ReactiveExecutor |
-| `svelte-app/` | Multi-page SPA via the build tool | Hash-routed Svelte 5 app, lazy wasm runtime |
 | `runner/` | `.workbook` files run via drag-drop | Generic player |
+
+**SPA exemplars** (interactive apps, single-file or built):
+
+| Demo | Authoring | Highlight |
+|---|---|---|
+| `chat-app/` | vanilla JS, single-file | 1400-line full agent SPA, view-source works, in-browser save-as-portable |
+| `svelte-app/` | Svelte multi-file, CLI build | Hash-routed Svelte 5 app, three pages, lazy wasm runtime |
+| `notebook-agent/` | Svelte multi-file, CLI build | Agent reads + writes cells in a live notebook (list_cells / append_cell / edit_cell) |
+| `tailwind-app/` | Svelte + Tailwind v4, CLI build | Analyst dashboard with sidebar filters + reactive Polars queries |
+
+**Document + notebook exemplars** (markdown authoring, mdsvex, CLI build):
+
+| Demo | Type | Authoring | Highlight |
+|---|---|---|---|
+| `document-mdx/` | document | mdsvex (.svx) | Q4 customer revenue report — markdown + auto-rendered cells + embedded ChurnScenario widget |
+| `notebook-mdx/` | notebook | mdsvex (.svx) + standardized chrome | Analyst churn notebook — Run All, per-cell ▶, status indicators auto-attached |
+| `dependency-chain/` | notebook | mdsvex (.svx) | Five-cell rhai chain with error propagation demo |
 
 ---
 
-## Build your own — `@work.books/cli`
+## Build your own
 
-For SPA workbooks (multi-file, framework-based), use the published
-build tool. Lives at `packages/workbook-cli/`; the `examples/svelte-app/`
-project is the reference consumer.
+Two axes: pick a **shape** and an **authoring style**. Both are open;
+the same `.workbook.html` artifact comes out the other end either way.
+
+### 1. Pick a shape
+
+```
+What is the reader supposed to do?
+├── read it (prose, charts) ──→  type: "document"
+├── re-run cells, edit inputs ──→  type: "notebook"
+└── interact with a custom UI ──→  type: "spa"
+```
+
+### 2. Pick an authoring style
+
+| Style | When | Example |
+|---|---|---|
+| **Vanilla single-file** — one `index.html`, inline `<script>`, no toolchain | small concept demos, view-source pedagogy, <500 lines | `chat-app/`, `hello-cell/` |
+| **Raw HTML + cells** — `<wb-cell>` / `<wb-input>` / `<wb-output>` declared in HTML | declarative cells, no framework | `html-agent/` |
+| **Svelte multi-file** — components, scoped CSS, runes | real apps, multi-page nav | `svelte-app/`, `notebook-agent/` |
+| **Svelte + Tailwind v4** — utility CSS + `@tailwindcss/vite` | utility-first design systems | `tailwind-app/` |
+| **mdsvex** — markdown + Svelte components, fenced code → cells | prose-heavy artifacts (documents, notebooks) | `document-mdx/`, `notebook-mdx/`, `dependency-chain/` |
+
+### 3. Build with `@work.books/cli`
+
+For everything except vanilla single-file (which has no build step):
 
 ```bash
 npm install -D @work.books/cli @sveltejs/vite-plugin-svelte svelte
+# add mdsvex if you want markdown authoring:
+npm install -D mdsvex
+# add tailwind if you want it:
+npm install -D @tailwindcss/vite tailwindcss
 ```
 
 ```js
@@ -242,8 +284,10 @@ export default {
   name: "my workbook",
   slug: "my-workbook",
   type: "spa",                  // document | notebook | spa
-  entry: "src/index.html",
-  env: { OPENROUTER_API_KEY: { required: true, secret: true } },
+  entry: "src/index.html",      // .svx for mdsvex authoring
+  env: {
+    OPENROUTER_API_KEY: { required: true, secret: true },
+  },
 };
 ```
 
@@ -252,13 +296,19 @@ npx workbook dev      # http://localhost:5173 with HMR
 npx workbook build    # → dist/<slug>.workbook.html (single file)
 ```
 
-See `docs/WORKBOOK_AS_APP.md` for the full pattern: env contract,
-markdown rendering, runtime loader, trigger-substring discipline,
-persistence choices.
+For vanilla single-file: just open the HTML in a browser. The CLI
+isn't involved; the workbook ships its own runtime via `<script>`
+imports of `pkg/workbook_runtime.js` and the bundled JS.
 
-For document/notebook workbooks (cells + reactive DAG), keep using
-the existing path — author HTML directly with `<wb-cell>` /
-`<wb-input>` / `<wb-output>` elements, no build tool needed.
+### Full guide
+
+`docs/WORKBOOK_AUTHORING.md` walks every lane end-to-end: code
+samples for each, when to choose, the standardized notebook chrome
+SDK (`@work.books/runtime/notebook`), widgets, env contract, icons,
+and the trigger-substring discipline rules.
+
+`docs/WORKBOOK_AS_APP.md` is the SPA-lane deep dive — chat-app
+pattern, hand-rolled save flow, varlock env contract details.
 
 ---
 
