@@ -1,0 +1,1569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>chat · workbook</title>
+<link rel="stylesheet" href="../_shared/design.css" id="workbook-design-css" />
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); }
+  .app {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr) 320px;
+    grid-template-rows: 44px minmax(0, 1fr);
+    grid-template-areas: "header header header" "leftnav main rightpanel";
+    height: 100vh; min-height: 0;
+    transition: grid-template-columns var(--t-mid) var(--ease-out);
+  }
+  .app[data-left-open="false"]  { grid-template-columns: 0 minmax(0, 1fr) 320px; }
+  .app[data-right-open="false"] { grid-template-columns: 280px minmax(0, 1fr) 0; }
+  .app[data-left-open="false"][data-right-open="false"] { grid-template-columns: 0 minmax(0, 1fr) 0; }
+  .leftnav, .rightpanel { overflow: hidden; }
+
+  .app-header {
+    grid-area: header;
+    display: flex; align-items: center; gap: var(--s-3);
+    padding: 0 var(--s-4); border-bottom: 1px solid var(--line);
+    background: var(--bg);
+  }
+  .brand { font-family: var(--font-mono); font-size: var(--t-sm); font-weight: 600; letter-spacing: 0.04em; color: var(--ink); }
+  .brand .accent { color: var(--accent); }
+  .grow { flex: 1; }
+  .icon-btn { background: transparent; border: 1px solid transparent; color: var(--ink-2); padding: 4px 8px; border-radius: var(--radius); cursor: pointer; font-size: var(--t-base); }
+  .icon-btn:hover { background: var(--bg-soft); color: var(--ink); }
+  .icon-btn[aria-pressed="true"] { color: var(--ink); }
+
+  .mode-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-2); }
+  .mode-pill .glyph { color: var(--accent); }
+  .key-state { font-family: var(--font-mono); font-size: var(--t-xs); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); }
+  .key-state.set   { color: var(--ok);  border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+  .key-state.unset { color: var(--err); border-color: color-mix(in srgb, var(--err) 35%, transparent); }
+
+  .leftnav {
+    grid-area: leftnav;
+    border-right: 1px solid var(--line);
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    min-width: 0;
+  }
+  .leftnav-section {
+    font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: var(--s-4) var(--s-5) var(--s-2);
+  }
+  .leftnav-item {
+    display: grid; grid-template-columns: 20px 1fr; align-items: baseline; gap: 8px;
+    width: 100%; text-align: left;
+    background: transparent; border: 0; border-left: 2px solid transparent;
+    padding: 8px var(--s-5);
+    font-family: var(--font-sans); font-size: var(--t-sm); color: var(--ink-2);
+    cursor: pointer;
+  }
+  .leftnav-item:hover { background: var(--bg-soft); color: var(--ink); }
+  .leftnav-item.active { background: var(--bg-soft); color: var(--ink); border-left-color: var(--accent); }
+  .leftnav-item .glyph { font-size: var(--t-base); color: var(--accent); }
+  .leftnav-item .name  { display: block; }
+  .leftnav-item .desc  { display: block; grid-column: 2; font-size: var(--t-xs); color: var(--ink-3); margin-top: 2px; }
+  .key-input { padding: 0 var(--s-5) var(--s-4); }
+  .key-input .hint { font-size: var(--t-xs); color: var(--ink-3); margin-bottom: 4px; }
+  .key-input input {
+    width: 100%; box-sizing: border-box;
+    padding: 6px 8px; font-family: var(--font-mono); font-size: var(--t-xs);
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg);
+    color: var(--ink);
+  }
+  .key-input input:focus { outline: 1px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+  .small-btn {
+    width: 100%; padding: 6px 8px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink-2);
+    border-radius: var(--radius); font-family: var(--font-mono); font-size: var(--t-xs);
+  }
+  .small-btn:hover { background: var(--bg-soft); color: var(--ink); border-color: var(--line-2); }
+
+  .main { grid-area: main; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .chat-scroll { flex: 1; overflow-y: auto; }
+  .chat-inner { max-width: 760px; margin: 0 auto; padding: var(--s-6) var(--s-5); }
+
+  .turn { margin: 0 0 var(--s-6); }
+  .turn-meta {
+    font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;
+  }
+  .turn.msg-user .turn-meta { color: var(--ink-2); }
+  .turn.msg-assistant .turn-meta { color: var(--accent); }
+  .turn-text { line-height: 1.55; font-size: var(--t-base); color: var(--ink); }
+  .turn-text.raw { white-space: pre-wrap; }
+  .turn.msg-user .turn-text { color: var(--ink); white-space: pre-wrap; }
+  .turn.streaming .turn-text:last-of-type::after {
+    content: "▍"; color: var(--accent); margin-left: 1px;
+    animation: wb-pulse 0.9s var(--ease-out) infinite;
+  }
+
+  /* Markdown rendering inside assistant text segments. Keep tight
+     vertical rhythm — chat density matters more than print spacing. */
+  .turn-text > *:first-child { margin-top: 0; }
+  .turn-text > *:last-child  { margin-bottom: 0; }
+  .turn-text p   { margin: 0 0 8px; }
+  .turn-text h1, .turn-text h2, .turn-text h3, .turn-text h4 {
+    margin: 12px 0 6px; font-weight: 600; line-height: 1.3;
+  }
+  .turn-text h1 { font-size: var(--t-xl); }
+  .turn-text h2 { font-size: var(--t-lg); }
+  .turn-text h3 { font-size: var(--t-base); color: var(--ink-2); }
+  .turn-text h4 { font-size: var(--t-sm); color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.04em; }
+  .turn-text ul, .turn-text ol { margin: 0 0 8px; padding-left: 22px; }
+  .turn-text li { margin: 2px 0; }
+  .turn-text code {
+    font-family: var(--font-mono); font-size: 0.92em;
+    background: var(--bg-soft); border: 1px solid var(--line);
+    border-radius: 3px; padding: 1px 5px; color: var(--ink);
+  }
+  .turn-text pre {
+    margin: 8px 0; padding: 10px 12px; overflow: auto;
+    background: var(--bg-soft); border: 1px solid var(--line);
+    border-radius: var(--radius);
+    font-family: var(--font-mono); font-size: var(--t-sm);
+    line-height: 1.5; color: var(--ink);
+  }
+  .turn-text pre code { background: transparent; border: 0; padding: 0; }
+  .turn-text a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  .turn-text a:hover { text-decoration-thickness: 2px; }
+  .turn-text strong { font-weight: 600; }
+  .turn-text em { font-style: italic; }
+  .turn-text blockquote {
+    margin: 8px 0; padding: 4px 12px; color: var(--ink-2);
+    border-left: 2px solid var(--line);
+  }
+  .turn-text hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+  .turn-text table {
+    border-collapse: collapse; margin: 8px 0; font-size: var(--t-sm);
+  }
+  .turn-text th, .turn-text td {
+    border: 1px solid var(--line); padding: 4px 8px; text-align: left;
+  }
+  .turn-text th { background: var(--bg-soft); font-weight: 600; }
+
+  .tool-step {
+    margin: 8px 0; border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--bg-soft); font-family: var(--font-mono); font-size: var(--t-xs);
+    overflow: hidden;
+  }
+  .tool-step-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; cursor: pointer; color: var(--ink-2);
+    border-bottom: 1px solid transparent;
+  }
+  .tool-step.open .tool-step-head { border-bottom-color: var(--line); }
+  .tool-step-head .arrow { color: var(--ink-3); transition: transform var(--t-fast) var(--ease-out); }
+  .tool-step.open .tool-step-head .arrow { transform: rotate(90deg); }
+  .tool-step-head .name { color: var(--ink); font-weight: 600; }
+  .tool-step-head .args-preview { color: var(--ink-3); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tool-step-body { padding: 8px 10px; display: none; }
+  .tool-step.open .tool-step-body { display: block; }
+  .tool-step .label { color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; margin-bottom: 4px; }
+  .tool-step pre { margin: 0 0 8px; white-space: pre-wrap; word-break: break-all; color: var(--ink); }
+  .tool-step pre.result { color: var(--ink-2); max-height: 280px; overflow: auto; background: var(--bg); padding: 6px 8px; border-radius: var(--radius); border: 1px solid var(--line); }
+
+  .compose {
+    border-top: 1px solid var(--line); padding: var(--s-4) var(--s-5) var(--s-5); background: var(--bg);
+  }
+  .compose-inner { max-width: 760px; margin: 0 auto; display: flex; align-items: end; gap: 8px; }
+  .compose textarea {
+    flex: 1; resize: none; min-height: 36px; max-height: 192px;
+    padding: 8px 12px; box-sizing: border-box;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    font-family: var(--font-sans); font-size: var(--t-base); color: var(--ink);
+    background: var(--bg);
+  }
+  .compose textarea:focus { outline: 1px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+  .send-btn, .stop-btn {
+    width: 36px; height: 36px; border-radius: var(--radius); cursor: pointer;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+    font-size: var(--t-base);
+  }
+  .send-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
+  .stop-btn:hover { background: var(--err); color: white; border-color: var(--err); }
+
+  .rightpanel {
+    grid-area: rightpanel; border-left: 1px solid var(--line); background: var(--bg);
+    overflow-y: auto;
+  }
+  .panel-section { padding: var(--s-4) var(--s-5); border-bottom: 1px solid var(--line); }
+  .panel-section h3 { font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 var(--s-2); font-weight: 600; }
+  .panel-meta { display: grid; gap: 4px; font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-2); }
+  .panel-meta strong { color: var(--ink); font-weight: 600; }
+  .panel-system { font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-2); white-space: pre-wrap; line-height: 1.5; }
+  .tool-list { display: grid; gap: 4px; font-family: var(--font-mono); font-size: var(--t-xs); }
+  .tool-list .t-name { color: var(--ink); font-weight: 600; }
+  .tool-list .t-desc { color: var(--ink-3); margin-left: 8px; }
+
+  .vfs-tree { font-family: var(--font-mono); font-size: var(--t-xs); }
+  .vfs-tree .empty { color: var(--ink-4); font-style: italic; padding: 4px 0; }
+  .vfs-row {
+    display: flex; justify-content: space-between; gap: 8px;
+    padding: 3px 6px; border-radius: var(--radius);
+    color: var(--ink-2); cursor: pointer;
+  }
+  .vfs-row:hover { background: var(--bg-soft); color: var(--ink); }
+  .vfs-row .size { color: var(--ink-4); font-feature-settings: "tnum"; }
+
+  .boot-status {
+    position: fixed; left: 50%; top: 40%; transform: translateX(-50%);
+    font-family: var(--font-mono); font-size: var(--t-sm); color: var(--ink-3);
+    padding: var(--s-3) var(--s-4); background: var(--bg-soft);
+    border: 1px solid var(--line); border-radius: var(--radius);
+    max-width: 80%;
+  }
+  .boot-status.error { color: var(--err); border-color: color-mix(in srgb, var(--err) 35%, transparent); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <div id="bootStatus" class="boot-status">booting…</div>
+
+  <div class="app" id="app" data-left-open="true" data-right-open="true" hidden>
+    <header class="app-header">
+      <button class="icon-btn" id="toggleLeft" aria-label="Toggle modes" title="Toggle modes">☰</button>
+      <span class="brand">workbook<span class="accent">/</span>chat</span>
+      <span class="mode-pill" id="modePill"><span class="glyph">●</span><span id="modeName">…</span></span>
+      <span class="grow"></span>
+      <span class="key-state unset" id="keyState">no key</span>
+      <button class="icon-btn" id="toggleRight" aria-label="Toggle inspector" title="Toggle inspector">ⓘ</button>
+    </header>
+
+    <aside class="leftnav">
+      <div class="leftnav-section">modes</div>
+      <div id="modeList"></div>
+
+      <div class="leftnav-section">provider</div>
+      <div class="key-input">
+        <div class="hint">openrouter api key</div>
+        <input id="apiKey" type="password" placeholder="sk-or-…" autocomplete="off"/>
+      </div>
+
+      <div class="leftnav-section">workbook</div>
+      <div class="key-input">
+        <button id="saveWb" class="small-btn">save .workbook.html</button>
+        <button id="clearWb" class="small-btn" style="margin-top:6px;">reset vfs + history</button>
+      </div>
+
+      <div class="leftnav-section">about</div>
+      <div style="padding: 0 var(--s-5) var(--s-5);">
+        <div style="font-size: var(--t-xs); color: var(--ink-3); line-height: 1.5;">
+          <a href="../runner/" style="color: var(--ink-2);">runner</a> ·
+          <a href="../html-agent/" style="color: var(--ink-2);">html agent</a> ·
+          <a href="../sentence-search/" style="color: var(--ink-2);">embeddings</a><br/>
+          <a href="https://github.com/zaius-labs/workbooks" target="_blank" style="color: var(--ink-3);">github</a>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="chat-scroll" id="chatScroll">
+        <div class="chat-inner" id="chatInner"></div>
+      </div>
+      <div class="compose">
+        <div class="compose-inner">
+          <textarea id="input" rows="1" placeholder="message…"></textarea>
+          <button class="send-btn" id="send" aria-label="Send" title="Send (⌘↩)">↑</button>
+          <button class="stop-btn" id="stop" aria-label="Stop" title="Stop" style="display:none;">■</button>
+        </div>
+      </div>
+    </main>
+
+    <aside class="rightpanel" id="rightpanel">
+      <div class="panel-section">
+        <h3>mode</h3>
+        <div class="panel-meta">
+          <span><strong id="panelModeName">—</strong></span>
+          <span>model · <strong id="panelModel">—</strong></span>
+          <span>iter cap · <strong>20</strong></span>
+        </div>
+      </div>
+      <div class="panel-section">
+        <h3>system prompt</h3>
+        <div class="panel-system" id="panelSystem">—</div>
+      </div>
+      <div class="panel-section">
+        <h3>tools</h3>
+        <div class="tool-list" id="panelTools"></div>
+      </div>
+      <div class="panel-section">
+        <h3>vfs · <span id="vfsStats" style="color: var(--ink-4); font-weight: 400; text-transform: none; letter-spacing: 0;">0 files</span></h3>
+        <div class="vfs-tree" id="vfsTree"><div class="empty">empty</div></div>
+      </div>
+    </aside>
+  </div>
+
+  <!--
+    Optional inlined assets: present in the .workbook.html portable
+    build, absent in source-tree mode. Boot script branches on
+    presence. Type=text/plain so the browser doesn't try to execute
+    these or treat them as JSON.
+  -->
+  <!-- <script id="wasm-b64" type="text/plain"></script> -->
+  <!-- <script id="bindgen-src" type="text/plain"></script> -->
+  <!-- <script id="runtime-bundle-src" type="text/plain"></script> -->
+
+  <script type="module">
+    // ─── Boot: dual-mode loader ────────────────────────────────
+    // Source-tree mode: dynamic-import wasm pkg + reactive-cells bundle
+    // via relative URLs.
+    // Portable mode (.workbook.html): inlined script tags carry the
+    // wasm bytes (base64) + bindgen JS source + bundle source. Decode
+    // and import via blob: URLs. Same downstream surface either way.
+    const bootEl = document.getElementById("bootStatus");
+    const setBoot = (msg, isErr = false) => {
+      bootEl.textContent = msg;
+      bootEl.classList.toggle("error", !!isErr);
+    };
+
+    function base64ToBytes(b64) {
+      const s = b64.trim();
+      const bin = atob(s);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return bytes;
+    }
+
+    let wasm, bundle;
+    try {
+      const wasmB64El = document.getElementById("wasm-b64");
+      const bindgenSrcEl = document.getElementById("bindgen-src");
+      const bundleSrcEl = document.getElementById("runtime-bundle-src");
+      const portable = !!(wasmB64El && bindgenSrcEl && bundleSrcEl
+        && wasmB64El.textContent.trim().length > 0);
+
+      if (portable) {
+        setBoot("portable mode · decoding wasm…");
+        const wasmBytes = base64ToBytes(wasmB64El.textContent);
+        const bindgenUrl = URL.createObjectURL(new Blob([bindgenSrcEl.textContent], { type: "application/javascript" }));
+        wasm = await import(bindgenUrl);
+        await wasm.default(wasmBytes);
+        URL.revokeObjectURL(bindgenUrl);
+        const bundleUrl = URL.createObjectURL(new Blob([bundleSrcEl.textContent], { type: "application/javascript" }));
+        bundle = await import(bundleUrl);
+        URL.revokeObjectURL(bundleUrl);
+      } else {
+        setBoot("loading wasm…");
+        wasm = await import("../../pkg/workbook_runtime.js");
+        await wasm.default();
+        setBoot("loading runtime bundle…");
+        bundle = await import("../reactive-cells/runtime.bundle.js");
+      }
+    } catch (err) {
+      setBoot("boot failed: " + (err?.stack || err?.message || String(err)), true);
+      throw err;
+    }
+
+    const { runAgentLoop, createBrowserLlmClient } = bundle;
+
+    // ─── Slug + embedded-spec hydration ────────────────────────
+    // Saved .workbook.html files carry a JSON blob in a script tag
+    // with id "workbook-spec" — vfs + threads + currentMode + env decls.
+    // Never carries secret values — see stripSecrets() in the saver.
+    const SLUG = "chat-app";
+    const EMBEDDED_SPEC = (() => {
+      const el = document.getElementById("workbook-spec");
+      if (!el) return null;
+      try { return JSON.parse(el.textContent || "{}"); } catch { return null; }
+    })();
+
+    // ─── Inline VFS (localStorage-backed) ──────────────────────
+    // Small files only; quota ~5 MB across the origin. Sync API for
+    // simple reads from tools; snapshot/restore for portability.
+    function makeVfs() {
+      const KEY_PREFIX = `${SLUG}.vfs.`;
+      const META_PREFIX = `${SLUG}.vfs-meta.`;
+      const listeners = new Set();
+      const emit = () => { for (const l of listeners) try { l(); } catch {} };
+
+      function normalize(p) {
+        if (!p) return "/";
+        if (!p.startsWith("/")) p = "/" + p;
+        // collapse "//" and "/./" and trailing "/" (except root)
+        p = p.replace(/\/+/g, "/").replace(/\/\.\//g, "/");
+        if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+        return p;
+      }
+
+      function exists(path) {
+        return localStorage.getItem(KEY_PREFIX + normalize(path)) !== null;
+      }
+      function readText(path) {
+        const v = localStorage.getItem(KEY_PREFIX + normalize(path));
+        if (v === null) throw new Error(`no such file: ${path}`);
+        return v;
+      }
+      function writeText(path, content) {
+        const p = normalize(path);
+        const text = String(content ?? "");
+        localStorage.setItem(KEY_PREFIX + p, text);
+        localStorage.setItem(META_PREFIX + p, JSON.stringify({ mtime: Date.now(), size: text.length }));
+        emit();
+        return text.length;
+      }
+      function remove(path) {
+        const p = normalize(path);
+        if (!exists(p)) return false;
+        localStorage.removeItem(KEY_PREFIX + p);
+        localStorage.removeItem(META_PREFIX + p);
+        emit();
+        return true;
+      }
+      function listFiles() {
+        const out = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith(KEY_PREFIX)) {
+            const path = k.slice(KEY_PREFIX.length);
+            const meta = (() => {
+              try { return JSON.parse(localStorage.getItem(META_PREFIX + path) ?? "{}"); }
+              catch { return {}; }
+            })();
+            const v = localStorage.getItem(k) ?? "";
+            out.push({ path, size: meta.size ?? v.length, mtime: meta.mtime ?? 0 });
+          }
+        }
+        out.sort((a, b) => a.path.localeCompare(b.path));
+        return out;
+      }
+      function clear() {
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && (k.startsWith(KEY_PREFIX) || k.startsWith(META_PREFIX))) keys.push(k);
+        }
+        for (const k of keys) localStorage.removeItem(k);
+        emit();
+      }
+      function snapshot() {
+        // Plain JSON: paths + UTF-16 string contents. Workbook spec
+        // serialization, not OPFS-bytes.
+        return {
+          version: 1,
+          createdAt: new Date().toISOString(),
+          files: listFiles().map(({ path, mtime }) => ({
+            path,
+            content: readText(path),
+            mtime,
+          })),
+        };
+      }
+      function restore(snap) {
+        clear();
+        for (const f of snap?.files ?? []) {
+          if (typeof f?.path === "string" && typeof f?.content === "string") {
+            writeText(f.path, f.content);
+          }
+        }
+      }
+      function onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
+
+      return { exists, readText, writeText, remove, listFiles, clear, snapshot, restore, onChange, normalize };
+    }
+    const vfs = makeVfs();
+
+    // ─── Inline bash (minimal) ─────────────────────────────────
+    // Small subset of POSIX-y commands operating on the VFS. Supports
+    // && chaining and > / >> redirection. cwd is shell-local state.
+    function makeShell(vfs) {
+      let cwd = "/workspace";
+
+      function resolve(p) {
+        if (!p) return cwd;
+        if (p.startsWith("/")) return vfs.normalize(p);
+        // Join cwd + p, then normalize.
+        const joined = (cwd === "/" ? "" : cwd) + "/" + p;
+        // collapse ".." segments
+        const parts = joined.split("/").filter(Boolean);
+        const out = [];
+        for (const seg of parts) {
+          if (seg === ".") continue;
+          if (seg === "..") { out.pop(); continue; }
+          out.push(seg);
+        }
+        return "/" + out.join("/");
+      }
+
+      function listDir(dir) {
+        const d = resolve(dir);
+        const prefix = d === "/" ? "/" : d + "/";
+        const direct = new Set();
+        for (const { path } of vfs.listFiles()) {
+          if (!path.startsWith(prefix)) continue;
+          const rest = path.slice(prefix.length);
+          const slash = rest.indexOf("/");
+          direct.add(slash === -1 ? rest : rest.slice(0, slash) + "/");
+        }
+        return [...direct].sort();
+      }
+
+      function tokenize(line) {
+        // Minimal tokenizer: respects single + double quotes; no var
+        // expansion. Operators: > >> && treated as separate tokens.
+        const tokens = [];
+        let cur = ""; let inS = false; let inD = false;
+        const flush = () => { if (cur.length) { tokens.push(cur); cur = ""; } };
+        for (let i = 0; i < line.length; i++) {
+          const c = line[i];
+          if (inS) { if (c === "'") inS = false; else cur += c; continue; }
+          if (inD) { if (c === '"') inD = false; else cur += c; continue; }
+          if (c === "'") { inS = true; continue; }
+          if (c === '"') { inD = true; continue; }
+          if (c === " " || c === "\t") { flush(); continue; }
+          if (c === ">" && line[i+1] === ">") { flush(); tokens.push(">>"); i++; continue; }
+          if (c === ">") { flush(); tokens.push(">"); continue; }
+          if (c === "&" && line[i+1] === "&") { flush(); tokens.push("&&"); i++; continue; }
+          cur += c;
+        }
+        flush();
+        return tokens;
+      }
+
+      function splitOn(tokens, sep) {
+        const out = [[]]; for (const t of tokens) { if (t === sep) out.push([]); else out[out.length-1].push(t); }
+        return out;
+      }
+
+      function runOne(tokens) {
+        // Pull off any redirection at the end.
+        let redir = null;
+        for (let i = tokens.length - 2; i >= 0; i--) {
+          if (tokens[i] === ">" || tokens[i] === ">>") {
+            const target = tokens[i+1];
+            redir = { mode: tokens[i] === ">>" ? "append" : "write", path: target };
+            tokens = tokens.slice(0, i);
+            break;
+          }
+        }
+        if (tokens.length === 0) return "";
+        const [cmd, ...args] = tokens;
+        const out = dispatch(cmd, args);
+        if (redir) {
+          const p = resolve(redir.path);
+          const prev = vfs.exists(p) && redir.mode === "append" ? vfs.readText(p) : "";
+          vfs.writeText(p, prev + (out ?? ""));
+          return "";
+        }
+        return out ?? "";
+      }
+
+      function dispatch(cmd, args) {
+        switch (cmd) {
+          case "pwd": return cwd;
+          case "cd": { cwd = resolve(args[0] ?? "/workspace"); return ""; }
+          case "ls": {
+            const target = args[0] ?? cwd;
+            return listDir(target).join("\n");
+          }
+          case "cat": {
+            return args.map((a) => {
+              const p = resolve(a);
+              return vfs.exists(p) ? vfs.readText(p) : `cat: ${a}: no such file`;
+            }).join("");
+          }
+          case "echo": return args.join(" ") + "\n";
+          case "mkdir": return ""; // VFS is path-flat; directories implicit
+          case "touch": { for (const a of args) { const p = resolve(a); if (!vfs.exists(p)) vfs.writeText(p, ""); } return ""; }
+          case "rm": {
+            const lines = [];
+            for (const a of args) {
+              if (a.startsWith("-")) continue; // ignore flags
+              const p = resolve(a);
+              if (!vfs.remove(p)) lines.push(`rm: ${a}: no such file`);
+            }
+            return lines.join("\n");
+          }
+          case "find": {
+            const root = resolve(args[0] ?? cwd);
+            const prefix = root === "/" ? "/" : root + "/";
+            return vfs.listFiles().map((f) => f.path).filter((p) => p === root || p.startsWith(prefix)).join("\n");
+          }
+          case "grep": {
+            if (args.length < 2) return "grep: usage: grep PATTERN PATH";
+            const [pat, ...paths] = args;
+            const re = new RegExp(pat);
+            const lines = [];
+            for (const a of paths) {
+              const p = resolve(a);
+              if (!vfs.exists(p)) { lines.push(`grep: ${a}: no such file`); continue; }
+              const txt = vfs.readText(p);
+              for (const ln of txt.split("\n")) if (re.test(ln)) lines.push(paths.length > 1 ? `${a}:${ln}` : ln);
+            }
+            return lines.join("\n");
+          }
+          case "head": case "tail": {
+            let n = 10; let path = args[0];
+            if (args[0] === "-n") { n = parseInt(args[1] ?? "10", 10) || 10; path = args[2]; }
+            if (!path) return `${cmd}: usage: ${cmd} [-n N] PATH`;
+            const p = resolve(path);
+            if (!vfs.exists(p)) return `${cmd}: ${path}: no such file`;
+            const lines = vfs.readText(p).split("\n");
+            return (cmd === "head" ? lines.slice(0, n) : lines.slice(-n)).join("\n");
+          }
+          case "wc": {
+            const path = args[0]; if (!path) return "wc: usage: wc PATH";
+            const p = resolve(path);
+            if (!vfs.exists(p)) return `wc: ${path}: no such file`;
+            const txt = vfs.readText(p);
+            const lines = txt.split("\n").length;
+            const words = txt.split(/\s+/).filter(Boolean).length;
+            const chars = txt.length;
+            return `${lines} ${words} ${chars} ${path}`;
+          }
+          case "cp": case "mv": {
+            const [src, dst] = args; if (!src || !dst) return `${cmd}: usage: ${cmd} SRC DST`;
+            const sp = resolve(src), dp = resolve(dst);
+            if (!vfs.exists(sp)) return `${cmd}: ${src}: no such file`;
+            vfs.writeText(dp, vfs.readText(sp));
+            if (cmd === "mv") vfs.remove(sp);
+            return "";
+          }
+          default: return `${cmd}: command not found`;
+        }
+      }
+
+      function exec(line) {
+        const tokens = tokenize(String(line || "").trim());
+        if (!tokens.length) return "";
+        const groups = splitOn(tokens, "&&");
+        const out = [];
+        for (const g of groups) {
+          const r = runOne(g);
+          if (r) out.push(r);
+        }
+        return out.join("\n");
+      }
+
+      return { exec, get cwd() { return cwd; } };
+    }
+    const shell = makeShell(vfs);
+
+    // Hydrate VFS from embedded spec, else seed defaults.
+    if (EMBEDDED_SPEC?.manifest?.vfs) {
+      try { vfs.restore(EMBEDDED_SPEC.manifest.vfs); }
+      catch (e) { console.warn("vfs restore failed:", e); }
+    }
+    const SAMPLE_CSV = `region,revenue,churn
+us,12000,0.04
+us,8400,0.11
+eu,15600,0.02
+eu,3200,0.18
+apac,21000,0.05
+apac,4400,0.22`;
+    if (!vfs.exists("/workspace/customers.csv")) {
+      vfs.writeText("/workspace/customers.csv", SAMPLE_CSV);
+      vfs.writeText("/workspace/notes.md", "# Notes\n\nThis workbook tracks customer revenue + churn by region.\n");
+    }
+
+    // ─── Modes ──────────────────────────────────────────────────
+    const MODES = {
+      general: {
+        name: "general",
+        glyph: "●",
+        desc: "chat",
+        model: "minimax/minimax-m2.7",
+        system:
+          "You are a precise assistant. Answer concisely (3-5 sentences). " +
+          "When asked the time, use the `now` tool. When asked for a calculation, use the `math` tool.",
+        tools: ["now", "math"],
+      },
+      analyst: {
+        name: "data analyst",
+        glyph: "▦",
+        desc: "polars",
+        model: "minimax/minimax-m2.7",
+        system:
+          "You analyze data files in the workbook VFS. Default file: /workspace/customers.csv " +
+          "(columns: region, revenue, churn). " +
+          "Use `query_data` to run Polars-SQL when the user asks for aggregates, filters, or comparisons. " +
+          "Cite numbers from query output. Never hedge.",
+        tools: ["query_data", "math", "list_files"],
+      },
+      sql: {
+        name: "sql helper",
+        glyph: "⊞",
+        desc: "polars",
+        model: "minimax/minimax-m2.7",
+        system:
+          "You write Polars SQL queries. The default table `data` lives in /workspace/customers.csv " +
+          "(columns: region, revenue, churn). Reply with: (1) the SQL inside a fenced ```sql block, " +
+          "(2) one sentence explanation. Then call `query_data` to verify, and include the result.",
+        tools: ["query_data", "list_files"],
+      },
+      agent: {
+        name: "agent",
+        glyph: "✱",
+        desc: "full toolkit",
+        model: "minimax/minimax-m2.7",
+        system:
+          "You are an autonomous agent operating inside a workbook. " +
+          "You have a virtual filesystem and a bash shell. The workspace lives at /workspace. " +
+          "Plan and execute tasks step by step. Use `bash` for navigation and quick file ops, " +
+          "`read_file`/`write_file` for explicit reads and structured edits, `query_data` for SQL " +
+          "against CSV files, `math` for calculations, `now` for the current time. " +
+          "When the user gives you a multi-step task, do it without asking permission for each step. " +
+          "Show your work: explain what you're doing in 1 short sentence, then call the tool. " +
+          "When the task is complete, summarize what was done.",
+        tools: ["bash", "read_file", "write_file", "list_files", "query_data", "math", "now"],
+      },
+    };
+
+    // ─── Env contract (varlock-style) ───────────────────────────
+    // Declarations only; values resolve at runtime from
+    // window.WORKBOOK_ENV → namespaced localStorage. The saver
+    // strips any key flagged secret:true from the serialized spec.
+    const MANIFEST_ENV = {
+      OPENROUTER_API_KEY: {
+        label: "openrouter api key",
+        prompt: "sk-or-…",
+        required: true,
+        secret: true,
+      },
+    };
+    const envStorageKey = (key) => `wb.env.${SLUG}.${key}`;
+    function getEnv(key) {
+      const injected = (typeof window !== "undefined" && window.WORKBOOK_ENV) || null;
+      if (injected && typeof injected[key] === "string" && injected[key]) return injected[key];
+      return localStorage.getItem(envStorageKey(key)) ?? "";
+    }
+    function setEnv(key, value) {
+      const v = (value ?? "").trim();
+      if (v) localStorage.setItem(envStorageKey(key), v);
+      else localStorage.removeItem(envStorageKey(key));
+    }
+    {
+      // One-time migration from the legacy single-key storage.
+      const legacy = localStorage.getItem("workbook.openrouter.api_key");
+      if (legacy && !localStorage.getItem(envStorageKey("OPENROUTER_API_KEY"))) {
+        localStorage.setItem(envStorageKey("OPENROUTER_API_KEY"), legacy);
+      }
+    }
+
+    // ─── State ──────────────────────────────────────────────────
+    const hydratedThreads = EMBEDDED_SPEC?.manifest?.thread ?? null;
+    const hydratedMode = EMBEDDED_SPEC?.manifest?.currentMode ?? null;
+    const state = {
+      apiKey: getEnv("OPENROUTER_API_KEY"),
+      currentMode: (hydratedMode && MODES[hydratedMode]) ? hydratedMode : "agent",
+      llmClient: null,
+      threads: Object.fromEntries(
+        Object.keys(MODES).map((k) => [
+          k,
+          (hydratedThreads && Array.isArray(hydratedThreads[k]))
+            ? hydratedThreads[k]
+            : JSON.parse(localStorage.getItem(`thread.${SLUG}.${k}`) ?? "[]"),
+        ]),
+      ),
+      activeAbort: null,
+    };
+
+    // ─── DOM refs ───────────────────────────────────────────────
+    const $ = (id) => document.getElementById(id);
+    const els = {
+      app: $("app"), modeList: $("modeList"),
+      modePill: $("modePill"), modeName: $("modeName"),
+      apiKey: $("apiKey"), keyState: $("keyState"),
+      chatInner: $("chatInner"), chatScroll: $("chatScroll"),
+      input: $("input"), send: $("send"), stop: $("stop"),
+      panelModeName: $("panelModeName"), panelModel: $("panelModel"),
+      panelSystem: $("panelSystem"), panelTools: $("panelTools"),
+      vfsStats: $("vfsStats"), vfsTree: $("vfsTree"),
+      toggleLeft: $("toggleLeft"), toggleRight: $("toggleRight"),
+      saveWb: $("saveWb"), clearWb: $("clearWb"),
+    };
+
+    function syncPanelButtons() {
+      els.toggleLeft.setAttribute("aria-pressed", els.app.dataset.leftOpen === "true" ? "true" : "false");
+      els.toggleRight.setAttribute("aria-pressed", els.app.dataset.rightOpen === "true" ? "true" : "false");
+    }
+    els.toggleLeft.addEventListener("click", () => {
+      els.app.dataset.leftOpen = els.app.dataset.leftOpen === "true" ? "false" : "true";
+      syncPanelButtons();
+    });
+    els.toggleRight.addEventListener("click", () => {
+      els.app.dataset.rightOpen = els.app.dataset.rightOpen === "true" ? "false" : "true";
+      syncPanelButtons();
+    });
+    if (window.innerWidth < 880) {
+      els.app.dataset.leftOpen = "false";
+      els.app.dataset.rightOpen = "false";
+    }
+    syncPanelButtons();
+
+    function renderModeList() {
+      els.modeList.innerHTML = "";
+      for (const [id, mode] of Object.entries(MODES)) {
+        const btn = document.createElement("button");
+        btn.className = "leftnav-item" + (id === state.currentMode ? " active" : "");
+        btn.dataset.mode = id;
+        btn.innerHTML = `<span class="glyph">${mode.glyph}</span><span class="name">${escapeHtml(mode.name)}</span><span class="desc">${escapeHtml(mode.desc)}</span>`;
+        btn.addEventListener("click", () => switchMode(id));
+        els.modeList.appendChild(btn);
+      }
+    }
+    function switchMode(id) {
+      if (!MODES[id]) return;
+      state.currentMode = id;
+      renderModeList();
+      renderHeader();
+      renderInspector();
+      renderHistory();
+    }
+    function renderHeader() {
+      const mode = MODES[state.currentMode];
+      els.modeName.textContent = mode.name;
+      const missing = [];
+      for (const [key, spec] of Object.entries(MANIFEST_ENV)) {
+        if (!spec.required) continue;
+        const val = key === "OPENROUTER_API_KEY" ? state.apiKey : getEnv(key);
+        if (!val.trim()) missing.push(key);
+      }
+      const ok = missing.length === 0;
+      els.keyState.classList.toggle("set", ok);
+      els.keyState.classList.toggle("unset", !ok);
+      els.keyState.textContent = ok
+        ? "env ok"
+        : missing.length === 1 ? `missing: ${missing[0].toLowerCase()}` : `missing ${missing.length}`;
+    }
+    function renderInspector() {
+      const mode = MODES[state.currentMode];
+      els.panelModeName.textContent = mode.name;
+      els.panelModel.textContent = mode.model;
+      els.panelSystem.textContent = mode.system;
+      els.panelTools.innerHTML = "";
+      for (const tname of mode.tools) {
+        const t = allTools[tname];
+        if (!t) continue;
+        const row = document.createElement("div");
+        row.innerHTML = `<span class="t-name">${escapeHtml(tname)}</span><span class="t-desc">${escapeHtml(truncate(t.definition.description, 60))}</span>`;
+        els.panelTools.appendChild(row);
+      }
+    }
+    function renderVfs() {
+      const files = vfs.listFiles();
+      els.vfsStats.textContent = `${files.length} file${files.length === 1 ? "" : "s"}`;
+      els.vfsTree.innerHTML = "";
+      if (!files.length) {
+        els.vfsTree.innerHTML = '<div class="empty">empty</div>';
+        return;
+      }
+      for (const f of files) {
+        const row = document.createElement("div");
+        row.className = "vfs-row";
+        row.innerHTML = `<span class="path">${escapeHtml(f.path)}</span><span class="size">${formatBytes(f.size)}</span>`;
+        row.addEventListener("click", () => {
+          // Insert path into compose box at cursor.
+          const cur = els.input.value;
+          const insert = (cur && !cur.endsWith(" ") ? " " : "") + f.path + " ";
+          els.input.value = cur + insert;
+          els.input.focus();
+          autoResize();
+        });
+        els.vfsTree.appendChild(row);
+      }
+    }
+    vfs.onChange(renderVfs);
+
+    // ─── Tools ──────────────────────────────────────────────────
+    const allTools = {
+      now: {
+        definition: { name: "now", description: "Get the current date and time as ISO 8601.",
+          parameters: { type: "object", properties: {} } },
+        invoke: () => new Date().toISOString(),
+      },
+      math: {
+        definition: { name: "math", description: "Evaluate a Rhai expression like '40 + 2' or 'let n = 10; n * n'.",
+          parameters: { type: "object", properties: { expr: { type: "string" } }, required: ["expr"] } },
+        invoke: ({ expr }) => {
+          try {
+            const outputs = wasm.runRhai(String(expr), {});
+            const txt = outputs.find((o) => o.kind === "text");
+            return txt ? txt.content : JSON.stringify(outputs);
+          } catch (e) { return `error: ${e.message ?? e}`; }
+        },
+      },
+      query_data: {
+        definition: {
+          name: "query_data",
+          description: "Run a Polars-SQL query against a CSV file in the VFS. The CSV is loaded as table `data`.",
+          parameters: {
+            type: "object",
+            properties: {
+              sql: { type: "string", description: "SQL string. Table is named `data`." },
+              csv_path: { type: "string", description: "VFS path to CSV. Default /workspace/customers.csv." },
+            },
+            required: ["sql"],
+          },
+        },
+        invoke: ({ sql, csv_path }) => {
+          if (!wasm.runPolarsSql) return "polars feature not available";
+          const path = csv_path || "/workspace/customers.csv";
+          if (!vfs.exists(path)) return `error: ${path} not found in VFS`;
+          try {
+            const csv = vfs.readText(path);
+            const outputs = wasm.runPolarsSql(String(sql), csv);
+            const csvOut = outputs.find((o) => o.kind === "text" && o.mime_type === "text/csv");
+            return csvOut ? csvOut.content : JSON.stringify(outputs);
+          } catch (e) { return `error: ${e.message ?? e}`; }
+        },
+      },
+      bash: {
+        definition: {
+          name: "bash",
+          description: "Run a bash command line in the workbook's virtual shell. Supports pwd / cd / ls / cat / echo / mkdir / touch / rm / find / grep / head / tail / wc / cp / mv. Chain with && and redirect with > / >>. Working directory persists between calls.",
+          parameters: { type: "object", properties: { cmd: { type: "string" } }, required: ["cmd"] },
+        },
+        invoke: ({ cmd }) => {
+          try { return shell.exec(String(cmd)) || "(no output)"; }
+          catch (e) { return `error: ${e.message ?? e}`; }
+        },
+      },
+      read_file: {
+        definition: { name: "read_file", description: "Read a file from the VFS by absolute path.",
+          parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+        invoke: ({ path }) => {
+          try { return vfs.readText(String(path)); }
+          catch (e) { return `error: ${e.message ?? e}`; }
+        },
+      },
+      write_file: {
+        definition: {
+          name: "write_file",
+          description: "Write text to a file in the VFS. Creates or overwrites. Returns bytes written.",
+          parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
+        },
+        invoke: ({ path, content }) => {
+          try { return `wrote ${vfs.writeText(String(path), String(content ?? ""))} bytes to ${path}`; }
+          catch (e) { return `error: ${e.message ?? e}`; }
+        },
+      },
+      list_files: {
+        definition: { name: "list_files", description: "List all files in the workbook VFS with sizes.",
+          parameters: { type: "object", properties: {} } },
+        invoke: () => {
+          const files = vfs.listFiles();
+          if (!files.length) return "(empty)";
+          return files.map((f) => `${f.path}\t${f.size}`).join("\n");
+        },
+      },
+    };
+
+    // ─── History rendering ──────────────────────────────────────
+    // Each assistant turn stores a chronologically-ordered `segments`
+    // array: { kind: "text", text } | { kind: "tool", name, argumentsJson, result }.
+    // Old { content, toolSteps } format is still rendered for back-compat.
+    function renderToolStep(step) {
+      const wrap = document.createElement("div");
+      wrap.className = "tool-step";
+      let argsPretty = "";
+      try { argsPretty = JSON.stringify(JSON.parse(step.argumentsJson || "{}"), null, 2); }
+      catch { argsPretty = String(step.argumentsJson || ""); }
+      const argsPreview = argsPretty.replace(/\s+/g, " ").trim();
+      wrap.innerHTML = `
+        <div class="tool-step-head">
+          <span class="arrow">▸</span>
+          <span class="name">${escapeHtml(step.name)}</span>
+          <span class="args-preview">${escapeHtml(argsPreview)}</span>
+        </div>
+        <div class="tool-step-body">
+          <div class="label">arguments</div>
+          <pre>${escapeHtml(argsPretty)}</pre>
+          <div class="label">result</div>
+          <pre class="result">${escapeHtml(String(step.result ?? ""))}</pre>
+        </div>`;
+      wrap.querySelector(".tool-step-head").addEventListener("click", () => {
+        wrap.classList.toggle("open");
+      });
+      return wrap;
+    }
+
+    function buildAssistantTurnNode(turn) {
+      const node = document.createElement("div");
+      node.className = "turn msg-assistant";
+      node.innerHTML = `<div class="turn-meta">assistant</div>`;
+      const segments = Array.isArray(turn.segments)
+        ? turn.segments
+        // Back-compat: old { content, toolSteps } format. Steps go
+        // before the final text by default.
+        : [
+            ...(turn.toolSteps ?? []).map((s) => ({ kind: "tool", ...s })),
+            { kind: "text", text: turn.content ?? "" },
+          ];
+      for (const seg of segments) {
+        if (seg.kind === "text") {
+          if (!seg.text) continue;
+          const t = document.createElement("div");
+          t.className = "turn-text";
+          t.innerHTML = renderMarkdown(seg.text);
+          node.appendChild(t);
+        } else if (seg.kind === "tool") {
+          node.appendChild(renderToolStep(seg));
+        }
+      }
+      return node;
+    }
+
+    function buildUserTurnNode(turn) {
+      const node = document.createElement("div");
+      node.className = "turn msg-user";
+      node.innerHTML = `<div class="turn-meta">you</div>`;
+      const t = document.createElement("div");
+      t.className = "turn-text";
+      t.textContent = turn.content ?? "";
+      node.appendChild(t);
+      return node;
+    }
+
+    function renderHistory(extraNode) {
+      const thread = state.threads[state.currentMode];
+      els.chatInner.innerHTML = "";
+      if (!thread.length && !extraNode) {
+        const hint = document.createElement("div");
+        hint.className = "turn";
+        hint.style.color = "var(--ink-3)";
+        hint.style.fontSize = "var(--t-sm)";
+        hint.textContent = modeStarter(state.currentMode);
+        els.chatInner.appendChild(hint);
+      }
+      for (const m of thread) {
+        const node = m.role === "user" ? buildUserTurnNode(m) : buildAssistantTurnNode(m);
+        els.chatInner.appendChild(node);
+      }
+      if (extraNode) els.chatInner.appendChild(extraNode);
+      els.chatScroll.scrollTop = els.chatScroll.scrollHeight;
+    }
+    function modeStarter(id) {
+      return {
+        general: "try: what time is it?  ·  what is 17 × 23?",
+        analyst: "try: which region has the highest revenue?  ·  what's the average churn rate?",
+        sql: "try: write a query that returns regions where avg churn > 0.10",
+        agent: "try: write a haiku to /workspace/poem.md and then read it back  ·  list all files",
+      }[id] ?? "type below to start a conversation";
+    }
+
+    // ─── API key wiring ─────────────────────────────────────────
+    els.apiKey.value = state.apiKey;
+    els.apiKey.addEventListener("input", () => {
+      state.apiKey = els.apiKey.value.trim();
+      setEnv("OPENROUTER_API_KEY", state.apiKey);
+      renderHeader();
+      rebuildClient();
+    });
+    function rebuildClient() {
+      state.llmClient = state.apiKey ? createBrowserLlmClient({ apiKey: state.apiKey }) : null;
+    }
+    rebuildClient();
+
+    // ─── Send ───────────────────────────────────────────────────
+    async function send() {
+      const text = els.input.value.trim();
+      if (!text) return;
+      if (!state.llmClient) { flashKeyHint(); return; }
+      const mode = MODES[state.currentMode];
+      const thread = state.threads[state.currentMode];
+      thread.push({ role: "user", content: text });
+      els.input.value = "";
+      autoResize();
+      els.send.style.display = "none";
+      els.stop.style.display = "";
+
+      // Streaming turn lives outside the persisted thread until done.
+      // Segments are appended in chronological order: each tool call
+      // closes the current text segment so subsequent deltas open a
+      // new text node *after* the tool card. That gives the user a
+      // true running narrative instead of clumped text + cards.
+      const streamingTurn = document.createElement("div");
+      streamingTurn.className = "turn msg-assistant streaming";
+      streamingTurn.innerHTML = `<div class="turn-meta">assistant</div>`;
+      const segments = [];
+      let currentTextEl = null;
+      function ensureTextSeg() {
+        if (currentTextEl) return currentTextEl;
+        const el = document.createElement("div");
+        el.className = "turn-text";
+        streamingTurn.appendChild(el);
+        currentTextEl = el;
+        const seg = { kind: "text", text: "", _el: el };
+        segments.push(seg);
+        return el;
+      }
+      function appendDelta(delta) {
+        const el = ensureTextSeg();
+        const seg = segments[segments.length - 1];
+        if (seg && seg.kind === "text") {
+          seg.text += delta;
+          // Re-render the whole segment each delta. O(n²) total in
+          // segment length; chat-sized text it's fine and lets
+          // partial markdown (e.g. an unclosed code fence) recover
+          // cleanly when later tokens arrive.
+          el.innerHTML = renderMarkdown(seg.text);
+        }
+        els.chatScroll.scrollTop = els.chatScroll.scrollHeight;
+      }
+      function appendTool(step) {
+        currentTextEl = null;
+        streamingTurn.appendChild(renderToolStep(step));
+        segments.push({ kind: "tool", name: step.name, argumentsJson: step.argumentsJson, result: step.result });
+        els.chatScroll.scrollTop = els.chatScroll.scrollHeight;
+      }
+
+      renderHistory(streamingTurn);
+      const tools = mode.tools.map((tn) => allTools[tn]).filter(Boolean);
+
+      try {
+        const result = await runAgentLoop({
+          llmClient: state.llmClient,
+          model: mode.model,
+          systemPrompt: mode.system,
+          initialUserMessage: buildPromptWithHistory(thread, mode),
+          tools,
+          maxIterations: 20,
+          onDelta: appendDelta,
+          onToolCall: (call, result) => appendTool({
+            name: call.name, argumentsJson: call.argumentsJson, result,
+          }),
+        });
+        // If runAgentLoop returned text we never streamed (tool-only
+        // turn ending in a final synthesis), make sure it lands in
+        // the last text segment.
+        const lastSeg = segments[segments.length - 1];
+        if (result?.text && (!lastSeg || lastSeg.kind !== "text" || !lastSeg.text)) {
+          appendDelta(result.text);
+        }
+        // Strip the live DOM refs before persisting.
+        const clean = segments.map((s) => s.kind === "text"
+          ? { kind: "text", text: s.text }
+          : { kind: "tool", name: s.name, argumentsJson: s.argumentsJson, result: s.result });
+        thread.push({ role: "assistant", segments: clean });
+        persistThread();
+      } catch (err) {
+        appendDelta(`\n[error] ${err instanceof Error ? err.message : String(err)}`);
+        const clean = segments.map((s) => s.kind === "text"
+          ? { kind: "text", text: s.text }
+          : { kind: "tool", name: s.name, argumentsJson: s.argumentsJson, result: s.result });
+        thread.push({ role: "assistant", segments: clean });
+      } finally {
+        els.send.style.display = "";
+        els.stop.style.display = "none";
+        renderHistory();
+        renderVfs();
+        els.input.focus();
+      }
+    }
+
+    function buildPromptWithHistory(thread, mode) {
+      // The runtime's runAgentLoop accepts a single `initialUserMessage`,
+      // so we flatten prior turns into a single rolling prompt. Tool
+      // segments collapse to a one-line marker since the model already
+      // saw their results in earlier turns.
+      const flatten = (m) => {
+        if (m.role === "user") return `User: ${m.content}`;
+        if (Array.isArray(m.segments)) {
+          return "Assistant: " + m.segments.map((s) =>
+            s.kind === "text" ? s.text
+              : `[used tool ${s.name}]`
+          ).join("").trim();
+        }
+        return `Assistant: ${m.content ?? ""}`;
+      };
+      if (thread.length === 1) return thread[0].content;
+      const hist = thread.slice(0, -1).map(flatten).join("\n\n");
+      const last = thread[thread.length - 1].content;
+      return `Earlier conversation:\n\n${hist}\n\nCurrent message:\n\n${last}`;
+    }
+
+    function persistThread() {
+      try {
+        localStorage.setItem(`thread.${SLUG}.${state.currentMode}`, JSON.stringify(state.threads[state.currentMode]));
+      } catch { /* quota; non-fatal */ }
+    }
+
+    function flashKeyHint() {
+      els.keyState.textContent = "paste an api key →";
+      els.app.dataset.leftOpen = "true";
+      syncPanelButtons();
+      els.apiKey.focus();
+      setTimeout(() => renderHeader(), 1800);
+    }
+
+    els.send.addEventListener("click", send);
+    els.stop.addEventListener("click", () => state.activeAbort?.abort());
+    els.input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
+    });
+    els.input.addEventListener("input", autoResize);
+    function autoResize() {
+      els.input.style.height = "auto";
+      els.input.style.height = Math.min(els.input.scrollHeight, 192) + "px";
+    }
+
+    // ─── Save / Reset ──────────────────────────────────────────
+    // Discipline boundary for serialization. Drops any field declared
+    // secret:true. Today MANIFEST_ENV declarations don't carry .value
+    // at all, but stripSecrets is the single point that future env
+    // additions have to clear before going to disk.
+    function stripSecrets(spec) {
+      const out = JSON.parse(JSON.stringify(spec));
+      const env = out.manifest?.env;
+      if (env) {
+        for (const decl of Object.values(env)) {
+          if (decl && decl.secret) delete decl.value;
+        }
+      }
+      return out;
+    }
+
+    function escapeScript(s) {
+      // Prevent a literal closing-script tag in JSON or asset bodies
+      // from terminating the script we inject them into. The HTML
+      // parser scans raw source for that substring even inside JS
+      // strings, so the only safe form is the escaped one we
+      // produce here.
+      return String(s).replace(/<\/script/gi, "<\\/script");
+    }
+
+    function uint8ToBase64(arr) {
+      const CHUNK = 0x8000;
+      let s = "";
+      for (let i = 0; i < arr.length; i += CHUNK) {
+        s += String.fromCharCode.apply(null, arr.subarray(i, i + CHUNK));
+      }
+      return btoa(s);
+    }
+    async function fetchText(p) {
+      const r = await fetch(p, { cache: "no-store" });
+      if (!r.ok) throw new Error(`fetch ${p} → ${r.status}`);
+      return r.text();
+    }
+    async function fetchBytes(p) {
+      const r = await fetch(p, { cache: "no-store" });
+      if (!r.ok) throw new Error(`fetch ${p} → ${r.status}`);
+      return new Uint8Array(await r.arrayBuffer());
+    }
+
+    // Build HTML-parser-state-machine trigger substrings at runtime.
+    // Writing them literally in source — even inside a JS comment or
+    // string — puts the page's own parser into the "script data
+    // escaped" state and can prematurely close the script. The
+    // triggers we keep out of source are: HTML-comment open / close,
+    // and script / style open / close tag substrings.
+    const COM_OPEN  = "<" + "!" + "--";
+    const COM_CLOSE = "--" + ">";
+    const STYLE_CLOSE      = "<" + "/style>";
+    const HEAD_CLOSE       = "<" + "/head>";
+    const TAG_SCRIPT_OPEN  = "<" + "script";
+    const TAG_SCRIPT_CLOSE = "<" + "/script>";
+    const BEGIN = COM_OPEN + " portable-assets-begin " + COM_CLOSE;
+    const END   = COM_OPEN + " portable-assets-end "   + COM_CLOSE;
+
+    function injectAssets(html, assets, spec) {
+      // Replace <link rel="stylesheet" href="../_shared/design.css">
+      // with an inlined <style>.
+      html = html.replace(
+        /<link[^>]+id=["']workbook-design-css["'][^>]*>/i,
+        `<style id="workbook-design-css">${assets.designCss}${STYLE_CLOSE}`,
+      );
+      // Strip wasm-bindgen's `new URL(..., import.meta.url)` because
+      // import.meta.url is opaque inside a blob: module. We pass
+      // bytes directly to init() so the URL line never executes —
+      // but it does parse, and that's the failure mode.
+      const safeBindgen = assets.bindgenJs.replace(
+        /new URL\([\s\S]*?import\.meta\.url\)/g,
+        "undefined /* stripped: caller supplies bytes */",
+      );
+      const tagSpec = `${TAG_SCRIPT_OPEN} id="workbook-spec" type="application/json">${escapeScript(JSON.stringify(spec))}${TAG_SCRIPT_CLOSE}`;
+      const tagWasm = `${TAG_SCRIPT_OPEN} id="wasm-b64" type="text/plain">${assets.wasmB64}${TAG_SCRIPT_CLOSE}`;
+      const tagBindgen = `${TAG_SCRIPT_OPEN} id="bindgen-src" type="text/plain">${escapeScript(safeBindgen)}${TAG_SCRIPT_CLOSE}`;
+      const tagBundle = `${TAG_SCRIPT_OPEN} id="runtime-bundle-src" type="text/plain">${escapeScript(assets.bundleSrc)}${TAG_SCRIPT_CLOSE}`;
+      const block = [tagSpec, tagWasm, tagBindgen, tagBundle].join("\n");
+      // Replace any prior portable block, else insert before the
+      // close-head tag. We build the regex from the same runtime-
+      // assembled substrings so this source code never contains a
+      // literal HTML-comment-open or close-script substring (which
+      // would otherwise fight the page's own parser; see COM_OPEN).
+      const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const existing = new RegExp(escapeRe(BEGIN) + "[\\s\\S]*?" + escapeRe(END), "i");
+      const wrapped = `${BEGIN}\n${block}\n${END}`;
+      if (existing.test(html)) return html.replace(existing, wrapped);
+      return html.replace(new RegExp(escapeRe(HEAD_CLOSE), "i"), wrapped + "\n" + HEAD_CLOSE);
+    }
+
+    function showHint(text, isErr) {
+      const id = "wb-hint";
+      const prev = document.getElementById(id);
+      if (prev) prev.remove();
+      const div = document.createElement("div");
+      div.id = id;
+      div.className = "boot-status";
+      if (isErr) div.classList.add("error");
+      div.style.position = "fixed";
+      div.style.left = "50%";
+      div.style.bottom = "32px";
+      div.style.top = "auto";
+      div.style.transform = "translateX(-50%)";
+      div.textContent = text;
+      document.body.appendChild(div);
+      setTimeout(() => div.remove(), 4000);
+    }
+
+    els.saveWb.addEventListener("click", async () => {
+      const envDecls = {};
+      for (const [k, v] of Object.entries(MANIFEST_ENV)) envDecls[k] = { ...v };
+      const spec = stripSecrets({
+        manifest: {
+          name: "chat-app",
+          slug: SLUG,
+          version: "0.1",
+          env: envDecls,
+          vfs: vfs.snapshot(),
+          thread: state.threads,
+          currentMode: state.currentMode,
+        },
+        cells: [],
+        inputs: {},
+      });
+
+      showHint("building portable html — fetching wasm + bundle…");
+      try {
+        // In source-tree mode the assets sit at known relative paths.
+        // In portable mode, the page already has them inlined — just
+        // re-use what's in the DOM so re-saves work without network.
+        let assets;
+        const wasmB64El = document.getElementById("wasm-b64");
+        const bindgenSrcEl = document.getElementById("bindgen-src");
+        const bundleSrcEl = document.getElementById("runtime-bundle-src");
+        const designCssEl = document.querySelector("style#workbook-design-css");
+        const inDom = wasmB64El && bindgenSrcEl && bundleSrcEl && designCssEl
+          && wasmB64El.textContent.trim().length > 0;
+
+        if (inDom) {
+          assets = {
+            wasmB64: wasmB64El.textContent,
+            bindgenJs: bindgenSrcEl.textContent,
+            bundleSrc: bundleSrcEl.textContent,
+            designCss: designCssEl.textContent,
+          };
+        } else {
+          const [designCss, bindgenJs, bundleSrc, wasmBytes] = await Promise.all([
+            fetchText("../_shared/design.css"),
+            fetchText("../../pkg/workbook_runtime.js"),
+            fetchText("../reactive-cells/runtime.bundle.js"),
+            fetchBytes("../../pkg/workbook_runtime_bg.wasm"),
+          ]);
+          assets = {
+            wasmB64: uint8ToBase64(wasmBytes),
+            bindgenJs,
+            bundleSrc,
+            designCss,
+          };
+        }
+
+        // Pull a clean copy of our own HTML (no captured DOM state).
+        let html;
+        try {
+          html = await fetchText(location.href);
+        } catch {
+          html = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
+        }
+        const out = injectAssets(html, assets, spec);
+        const blob = new Blob([out], { type: "text/html;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "chat-app.workbook.html";
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        const sizeMb = (out.length / 1024 / 1024).toFixed(1);
+        showHint(`saved · ${sizeMb} MB · double-click the file to run.`);
+      } catch (e) {
+        showHint(`save failed: ${e?.message ?? e}`, true);
+      }
+    });
+
+    els.clearWb.addEventListener("click", async () => {
+      if (!confirm("Reset VFS and chat history? Files in /workspace will be deleted.")) return;
+      vfs.clear();
+      vfs.writeText("/workspace/customers.csv", SAMPLE_CSV);
+      vfs.writeText("/workspace/notes.md", "# Notes\n\nThis workbook tracks customer revenue + churn by region.\n");
+      for (const k of Object.keys(state.threads)) {
+        state.threads[k] = [];
+        localStorage.removeItem(`thread.${SLUG}.${k}`);
+      }
+      renderHistory();
+      renderVfs();
+    });
+
+    // ─── Helpers ────────────────────────────────────────────────
+    function escapeHtml(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => (
+        c === "&" ? "&amp;"
+          : c === "<" ? "&lt;"
+            : c === ">" ? "&gt;"
+              : c === '"' ? "&quot;"
+                : "&#39;"
+      ));
+    }
+
+    // Minimal CommonMark-ish renderer. Handles fences, inline code,
+    // headings, lists (ordered/unordered), blockquotes, hr, bold,
+    // italic, links, autolinks, paragraphs. Escapes HTML first; only
+    // tags this function emits make it into the output. Tradeoffs:
+    // - No nested lists, no tables — keep small.
+    // - Streaming-friendly: an unclosed fence renders as a code block
+    //   and recovers cleanly when the closing ``` arrives on the next
+    //   delta. No expensive AST.
+    // - Returns trusted HTML; callers use innerHTML.
+    function renderMarkdown(src) {
+      const text = String(src ?? "");
+      // 1. Pull out fenced code blocks first so their contents skip
+      //    inline transforms. Placeholders are sentinels nothing in
+      //    the user text can reasonably collide with.
+      const blocks = [];
+      const FENCE = /```([a-zA-Z0-9_+-]*)\n([\s\S]*?)(?:```|$)/g;
+      let withPlaceholders = text.replace(FENCE, (_m, lang, body) => {
+        const id = blocks.length;
+        const cls = lang ? ` class="language-${lang.toLowerCase()}"` : "";
+        blocks.push(`<pre><code${cls}>${escapeHtml(body)}</code></pre>`);
+        return ` FENCE${id} `;
+      });
+
+      // 2. Escape everything else, then re-introduce inline syntax.
+      const escaped = escapeHtml(withPlaceholders);
+
+      // 3. Block parsing: split into "groups" separated by blank lines.
+      //    Each group is a single block (paragraph, list, heading,
+      //    blockquote, hr, fence-placeholder).
+      const lines = escaped.split("\n");
+      const out = [];
+      let i = 0;
+      while (i < lines.length) {
+        const line = lines[i];
+
+        // Blank
+        if (/^\s*$/.test(line)) { i++; continue; }
+
+        // Fence placeholder
+        const fenceMatch = line.match(/^ FENCE(\d+) $/);
+        if (fenceMatch) {
+          out.push(blocks[Number(fenceMatch[1])]);
+          i++; continue;
+        }
+
+        // Heading
+        const h = line.match(/^(#{1,4})\s+(.*)$/);
+        if (h) {
+          out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`);
+          i++; continue;
+        }
+
+        // HR
+        if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+          out.push("<hr/>");
+          i++; continue;
+        }
+
+        // Blockquote group
+        if (/^\s*&gt;\s?/.test(line)) {
+          const rows = [];
+          while (i < lines.length && /^\s*&gt;\s?/.test(lines[i])) {
+            rows.push(lines[i].replace(/^\s*&gt;\s?/, ""));
+            i++;
+          }
+          out.push(`<blockquote>${inline(rows.join("\n")).replace(/\n/g, "<br/>")}</blockquote>`);
+          continue;
+        }
+
+        // Unordered list
+        if (/^\s*[-*+]\s+/.test(line)) {
+          const items = [];
+          while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+            items.push(lines[i].replace(/^\s*[-*+]\s+/, ""));
+            i++;
+          }
+          out.push("<ul>" + items.map((t) => `<li>${inline(t)}</li>`).join("") + "</ul>");
+          continue;
+        }
+
+        // Ordered list
+        if (/^\s*\d+\.\s+/.test(line)) {
+          const items = [];
+          while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+            items.push(lines[i].replace(/^\s*\d+\.\s+/, ""));
+            i++;
+          }
+          out.push("<ol>" + items.map((t) => `<li>${inline(t)}</li>`).join("") + "</ol>");
+          continue;
+        }
+
+        // Paragraph: collect contiguous non-blank, non-special lines.
+        const para = [];
+        while (
+          i < lines.length
+          && !/^\s*$/.test(lines[i])
+          && !/^(#{1,4})\s+/.test(lines[i])
+          && !/^\s*[-*+]\s+/.test(lines[i])
+          && !/^\s*\d+\.\s+/.test(lines[i])
+          && !/^\s*&gt;\s?/.test(lines[i])
+          && !/^\s*([-*_])(\s*\1){2,}\s*$/.test(lines[i])
+          && !/^ FENCE\d+ $/.test(lines[i])
+        ) {
+          para.push(lines[i]); i++;
+        }
+        out.push(`<p>${inline(para.join("\n")).replace(/\n/g, "<br/>")}</p>`);
+      }
+
+      return out.join("");
+
+      // Inline pass: backtick code, bold, italic, links, autolinks.
+      // Order matters: code spans first so `*` inside code isn't bold.
+      function inline(s) {
+        const codes = [];
+        s = s.replace(/`([^`\n]+)`/g, (_, body) => {
+          codes.push(`<code>${body}</code>`);
+          return ` CODE${codes.length - 1} `;
+        });
+        // Bold (** or __), then italic (* or _).
+        s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+        s = s.replace(/__([^_\n]+)__/g, "<strong>$1</strong>");
+        s = s.replace(/(?<![*\w])\*([^*\n]+)\*(?!\w)/g, "<em>$1</em>");
+        s = s.replace(/(?<![_\w])_([^_\n]+)_(?!\w)/g, "<em>$1</em>");
+        // Links [text](url) — url must be http(s), or root-relative,
+        // or anchor. Anything else is rendered as plain text to keep
+        // javascript: / data: URLs out.
+        s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"([^"]+)")?\)/g, (m, label, url, title) => {
+          if (!/^(https?:\/\/|\/|#)/.test(url)) return m;
+          const t = title ? ` title="${escapeHtml(title)}"` : "";
+          return `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer noopener"${t}>${label}</a>`;
+        });
+        // Autolinks for bare http(s) URLs.
+        s = s.replace(/(^|[\s(])(https?:\/\/[^\s)<]+)/g,
+          (_m, lead, url) => `${lead}<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(url)}</a>`);
+        // Restore code spans.
+        s = s.replace(/ CODE(\d+) /g, (_m, n) => codes[Number(n)]);
+        return s;
+      }
+    }
+    function truncate(s, n) {
+      const str = String(s ?? "");
+      return str.length > n ? str.slice(0, n - 1) + "…" : str;
+    }
+    function formatBytes(n) {
+      if (n < 1024) return `${n} B`;
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+      return `${(n / 1024 / 1024).toFixed(2)} MB`;
+    }
+
+    // ─── Boot finish ───────────────────────────────────────────
+    bootEl.remove();
+    els.app.hidden = false;
+    renderModeList();
+    renderHeader();
+    renderInspector();
+    renderHistory();
+    renderVfs();
+    els.input.focus();
+  </script>
+</body>
+</html>
