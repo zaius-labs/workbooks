@@ -18,11 +18,13 @@
 interface LoroMap {
   set(key: string, value: unknown): void;
   delete(key: string): void;
+  get(key: string): unknown;
 }
 interface LoroList {
   push(value: unknown): void;
   insert(index: number, value: unknown): void;
   delete(index: number, count: number): void;
+  get(index: number): unknown;
 }
 interface LoroText {
   insert(index: number, text: string): void;
@@ -44,24 +46,64 @@ interface LoroModule {
 }
 
 /**
- * Structured op patch for top-level container mutations. Cells +
- * agent tools emit these via the host's docMutate API; the sidecar
- * applies them and commits a single op-log entry per call.
+ * One step in a path through nested containers. Each step navigates
+ * Map.get(key) or List.get(index); the value at each step must be
+ * another container (Map / List / Text) for the walk to continue.
+ */
+export type LoroPathStep =
+  | { kind: "map"; key: string }
+  | { kind: "list"; index: number };
+
+/**
+ * Path from doc root to a target container. `root` declares the
+ * top-level container's kind + name (Loro's API requires this
+ * up-front via getMap / getList / getText). `steps` descend through
+ * nested containers; an empty / omitted `steps` means the root is
+ * itself the target.
  *
- * Scoped to top-level containers in this ship — nested-path
- * mutations (e.g. `getMap("a").get("b").set(...)`) require a path
- * walker that lands later. Most agent-scratchpad use cases fit:
- * a top-level Map for keyed state, a top-level List for an event
- * trail, a top-level Text for a streamed transcript.
+ * Examples:
+ *   { root: { kind: "map", name: "agentState" } }
+ *     → top-level Map "agentState"
+ *
+ *   { root: { kind: "map", name: "agentState" },
+ *     steps: [{ kind: "map", key: "users" }, { kind: "list", index: 3 }] }
+ *     → agentState.users[3]
+ */
+export interface LoroPath {
+  root: { kind: "map" | "list" | "text"; name: string };
+  steps?: LoroPathStep[];
+}
+
+/**
+ * Structured op patch for container mutations. Cells + agent tools
+ * emit these via the host's docMutate API; the sidecar walks the
+ * path, applies the op on the target container, and commits a
+ * single op-log entry per call.
+ *
+ * Each op's kind asserts the FINAL container's type — `map_set`
+ * requires the path to resolve to a Map, `list_push` to a List,
+ * etc. Mismatch surfaces as a runtime error from Loro.
  */
 export type DocOp =
-  | { kind: "map_set"; container: string; key: string; value: unknown }
-  | { kind: "map_delete"; container: string; key: string }
-  | { kind: "list_push"; container: string; value: unknown }
-  | { kind: "list_insert"; container: string; index: number; value: unknown }
-  | { kind: "list_delete"; container: string; index: number; count: number }
-  | { kind: "text_insert"; container: string; index: number; text: string }
-  | { kind: "text_delete"; container: string; index: number; count: number };
+  | { kind: "map_set"; target: LoroPath; key: string; value: unknown }
+  | { kind: "map_delete"; target: LoroPath; key: string }
+  | { kind: "list_push"; target: LoroPath; value: unknown }
+  | { kind: "list_insert"; target: LoroPath; index: number; value: unknown }
+  | { kind: "list_delete"; target: LoroPath; index: number; count: number }
+  | { kind: "text_insert"; target: LoroPath; index: number; text: string }
+  | { kind: "text_delete"; target: LoroPath; index: number; count: number };
+
+/**
+ * Convenience constructor for the common case: a top-level container
+ * with no nested descent. `topLevel("map", "agentState")` is shorthand
+ * for `{ root: { kind: "map", name: "agentState" } }`.
+ */
+export function topLevel(
+  kind: "map" | "list" | "text",
+  name: string,
+): LoroPath {
+  return { root: { kind, name } };
+}
 
 let loroPromise: Promise<LoroModule> | null = null;
 
@@ -120,28 +162,69 @@ export interface LoroDispatcher {
 export function createLoroDispatcher(): LoroDispatcher {
   const handles = new Map<string, LoroDocHandle>();
 
+  /** Walk a LoroPath from doc root to the target container. Each step
+   *  must yield a container — a primitive value mid-path errors. */
+  function walkPath(doc: LoroDoc, path: LoroPath): unknown {
+    let cur: unknown;
+    if (path.root.kind === "map") cur = doc.getMap(path.root.name);
+    else if (path.root.kind === "list") cur = doc.getList(path.root.name);
+    else cur = doc.getText(path.root.name);
+
+    const steps = path.steps ?? [];
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i]!;
+      // Loro returns container handles for nested containers; primitives
+      // come back as plain JS values. Either is an `unknown` from our
+      // perspective; we duck-type by calling .get next iteration.
+      if (step.kind === "map") {
+        const m = cur as LoroMap;
+        if (typeof m.get !== "function") {
+          throw new Error(
+            `docMutate: path step ${i} expected Map, got non-Map value`,
+          );
+        }
+        cur = m.get(step.key);
+      } else {
+        const l = cur as LoroList;
+        if (typeof l.get !== "function") {
+          throw new Error(
+            `docMutate: path step ${i} expected List, got non-List value`,
+          );
+        }
+        cur = l.get(step.index);
+      }
+      if (cur === null || typeof cur !== "object") {
+        throw new Error(
+          `docMutate: path step ${i} yielded a primitive — can't descend further`,
+        );
+      }
+    }
+    return cur;
+  }
+
   function applyOp(doc: LoroDoc, op: DocOp): void {
+    const target = walkPath(doc, op.target);
     switch (op.kind) {
       case "map_set":
-        doc.getMap(op.container).set(op.key, op.value);
+        (target as LoroMap).set(op.key, op.value);
         return;
       case "map_delete":
-        doc.getMap(op.container).delete(op.key);
+        (target as LoroMap).delete(op.key);
         return;
       case "list_push":
-        doc.getList(op.container).push(op.value);
+        (target as LoroList).push(op.value);
         return;
       case "list_insert":
-        doc.getList(op.container).insert(op.index, op.value);
+        (target as LoroList).insert(op.index, op.value);
         return;
       case "list_delete":
-        doc.getList(op.container).delete(op.index, op.count);
+        (target as LoroList).delete(op.index, op.count);
         return;
       case "text_insert":
-        doc.getText(op.container).insert(op.index, op.text);
+        (target as LoroText).insert(op.index, op.text);
         return;
       case "text_delete":
-        doc.getText(op.container).delete(op.index, op.count);
+        (target as LoroText).delete(op.index, op.count);
         return;
     }
   }

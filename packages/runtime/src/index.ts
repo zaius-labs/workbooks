@@ -202,8 +202,14 @@ export type {
   WorkbookDocResolver,
   WorkbookDocResolverOptions,
 } from "./workbookDocResolver";
-export { createLoroDispatcher } from "./loroSidecar";
-export type { LoroDispatcher, LoroDocHandle, DocOp } from "./loroSidecar";
+export { createLoroDispatcher, topLevel } from "./loroSidecar";
+export type {
+  LoroDispatcher,
+  LoroDocHandle,
+  DocOp,
+  LoroPath,
+  LoroPathStep,
+} from "./loroSidecar";
 
 // Workbook history resolver — content-addressed Merkle commit chain
 // of the workbook itself. Parser + types are live; the Prolly Tree
