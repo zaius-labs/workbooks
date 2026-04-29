@@ -202,7 +202,7 @@ export type {
   WorkbookDocResolverOptions,
 } from "./workbookDocResolver";
 export { createLoroDispatcher } from "./loroSidecar";
-export type { LoroDispatcher, LoroDocHandle } from "./loroSidecar";
+export type { LoroDispatcher, LoroDocHandle, DocOp } from "./loroSidecar";
 
 // SQLite cell dispatcher — JS-side sidecar around @sqlite.org/sqlite-wasm.
 // Hosts that need to evict cached DB handles (e.g. on workbook unmount)

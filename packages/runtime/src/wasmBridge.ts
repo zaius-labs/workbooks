@@ -173,6 +173,24 @@ export interface RuntimeClient {
    * for re-saving into the workbook HTML.
    */
   exportMemory?(id: string): Promise<Uint8Array>;
+  /**
+   * Register a CRDT doc handle by id. Called once per <wb-doc> at
+   * mount; subsequent docMutate calls dispatch by id.
+   */
+  registerDoc?(id: string, handle: import("./loroSidecar").LoroDocHandle): Promise<void>;
+  /**
+   * Apply structured ops to a registered doc as a single op-log
+   * entry. Returns the new snapshot bytes + sha256 + length so the
+   * host can persist on save.
+   */
+  docMutate?(
+    id: string,
+    ops: import("./loroSidecar").DocOp[],
+  ): Promise<{ sha256: string; bytes: number; snapshot: Uint8Array }>;
+  /** Export the current state of a doc as snapshot bytes for save. */
+  exportDoc?(id: string): Promise<Uint8Array>;
+  /** Read the current JSON projection of a doc. */
+  readDoc?(id: string): Promise<unknown>;
 }
 
 export interface RuntimeClientOptions {
@@ -214,6 +232,9 @@ export function createRuntimeClient(opts: RuntimeClientOptions): RuntimeClient {
   // wasm-bindgen exports, this becomes a thin shim that delegates
   // to WASM linear memory; the JS-side contract is unchanged.
   const memoryBuffers = new Map<string, Uint8Array>();
+  // CRDT doc handles registered at mount. The handle owns the live
+  // LoroDoc; the client just routes mutate / export / read calls to it.
+  const docHandles = new Map<string, import("./loroSidecar").LoroDocHandle>();
 
   function ensureWasm(): Promise<WorkbookRuntimeWasm> {
     if (!wasmPromise) {
@@ -458,6 +479,35 @@ export function createRuntimeClient(opts: RuntimeClientOptions): RuntimeClient {
       const bytes = memoryBuffers.get(id);
       if (!bytes) throw new Error(`memory id not registered: ${id}`);
       return bytes;
+    },
+
+    async registerDoc(id, handle) {
+      if (docHandles.has(id)) {
+        throw new Error(`doc id already registered: ${id}`);
+      }
+      docHandles.set(id, handle);
+    },
+
+    async docMutate(id, ops) {
+      const handle = docHandles.get(id);
+      if (!handle) {
+        throw new Error(`doc id not registered: ${id}`);
+      }
+      const snapshot = handle.mutate(ops);
+      const sha256 = await sha256HexFromBytes(snapshot);
+      return { sha256, bytes: snapshot.byteLength, snapshot };
+    },
+
+    async exportDoc(id) {
+      const handle = docHandles.get(id);
+      if (!handle) throw new Error(`doc id not registered: ${id}`);
+      return handle.exportSnapshot();
+    },
+
+    async readDoc(id) {
+      const handle = docHandles.get(id);
+      if (!handle) throw new Error(`doc id not registered: ${id}`);
+      return handle.toJSON();
     },
   };
 }

@@ -765,13 +765,17 @@ export async function mountHtmlWorkbook(opts: MountOptions): Promise<{
     }
   }
 
-  // Resolve <wb-doc> CRDT blocks. First-ship contract is read-only:
-  // cells receive a JSON projection of the doc state via the input
-  // map. Mutation API (host-driven LoroDoc.getMap.set + commit +
-  // export-and-persist) lands in a follow-up.
+  // Resolve <wb-doc> CRDT blocks. The resolved handle is registered
+  // on the runtime client so host code (agent tools, custom cells)
+  // can mutate via client.docMutate(id, ops). Cells continue to
+  // receive a JSON projection in the executor input map for cheap
+  // read access; live mutation goes through the client.
   const docResolver = opts.docResolver ?? createWorkbookDocResolver();
   const resolvedDocs = await docResolver.resolveAll(spec.docs);
   for (const [id, resolved] of resolvedDocs) {
+    if (client.registerDoc) {
+      await client.registerDoc(id, resolved.handle);
+    }
     mergedInputs[id] = resolved.handle.toJSON();
   }
 

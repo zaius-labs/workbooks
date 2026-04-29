@@ -13,16 +13,55 @@
  * dispatcher surfaces a clear error if the package is missing.
  */
 
-/** Subset of the loro-crdt JS API we depend on. */
+/** Subset of the loro-crdt JS API we depend on. Each container type
+ *  has its own signatures — Map keys by string, List/Text by index. */
+interface LoroMap {
+  set(key: string, value: unknown): void;
+  delete(key: string): void;
+}
+interface LoroList {
+  push(value: unknown): void;
+  insert(index: number, value: unknown): void;
+  delete(index: number, count: number): void;
+}
+interface LoroText {
+  insert(index: number, text: string): void;
+  delete(index: number, count: number): void;
+}
 interface LoroDoc {
   import(bytes: Uint8Array): void;
   toJSON(): unknown;
+  getMap(name: string): LoroMap;
+  getList(name: string): LoroList;
+  getText(name: string): LoroText;
+  /** Commit accumulated changes as a single op-log entry. */
+  commit(): void;
   /** Export the current state as bytes for re-saving. */
   export(mode: { mode: "snapshot" } | { mode: "shallow-snapshot"; frontiers: unknown } | { mode: "updates"; from: unknown }): Uint8Array;
 }
 interface LoroModule {
   LoroDoc: new () => LoroDoc;
 }
+
+/**
+ * Structured op patch for top-level container mutations. Cells +
+ * agent tools emit these via the host's docMutate API; the sidecar
+ * applies them and commits a single op-log entry per call.
+ *
+ * Scoped to top-level containers in this ship — nested-path
+ * mutations (e.g. `getMap("a").get("b").set(...)`) require a path
+ * walker that lands later. Most agent-scratchpad use cases fit:
+ * a top-level Map for keyed state, a top-level List for an event
+ * trail, a top-level Text for a streamed transcript.
+ */
+export type DocOp =
+  | { kind: "map_set"; container: string; key: string; value: unknown }
+  | { kind: "map_delete"; container: string; key: string }
+  | { kind: "list_push"; container: string; value: unknown }
+  | { kind: "list_insert"; container: string; index: number; value: unknown }
+  | { kind: "list_delete"; container: string; index: number; count: number }
+  | { kind: "text_insert"; container: string; index: number; text: string }
+  | { kind: "text_delete"; container: string; index: number; count: number };
 
 let loroPromise: Promise<LoroModule> | null = null;
 
@@ -52,7 +91,13 @@ export interface LoroDocHandle {
   toJSON(): unknown;
   /** Export current state as Loro snapshot bytes for re-saving. */
   exportSnapshot(): Uint8Array;
-  /** Internal handle — exposed for the future mutation API. */
+  /**
+   * Apply one or more structured ops as a single op-log entry.
+   * Returns the new snapshot bytes after commit so the host can
+   * re-encode and persist.
+   */
+  mutate(ops: DocOp[]): Uint8Array;
+  /** Internal handle — exposed for advanced host integrations. */
   inner(): LoroDoc;
 }
 
@@ -75,10 +120,41 @@ export interface LoroDispatcher {
 export function createLoroDispatcher(): LoroDispatcher {
   const handles = new Map<string, LoroDocHandle>();
 
+  function applyOp(doc: LoroDoc, op: DocOp): void {
+    switch (op.kind) {
+      case "map_set":
+        doc.getMap(op.container).set(op.key, op.value);
+        return;
+      case "map_delete":
+        doc.getMap(op.container).delete(op.key);
+        return;
+      case "list_push":
+        doc.getList(op.container).push(op.value);
+        return;
+      case "list_insert":
+        doc.getList(op.container).insert(op.index, op.value);
+        return;
+      case "list_delete":
+        doc.getList(op.container).delete(op.index, op.count);
+        return;
+      case "text_insert":
+        doc.getText(op.container).insert(op.index, op.text);
+        return;
+      case "text_delete":
+        doc.getText(op.container).delete(op.index, op.count);
+        return;
+    }
+  }
+
   function wrapHandle(doc: LoroDoc): LoroDocHandle {
     return {
       toJSON: () => doc.toJSON(),
       exportSnapshot: () => doc.export({ mode: "snapshot" }),
+      mutate(ops) {
+        for (const op of ops) applyOp(doc, op);
+        doc.commit();
+        return doc.export({ mode: "snapshot" });
+      },
       inner: () => doc,
     };
   }
