@@ -89,7 +89,7 @@ ORDER BY total_revenue DESC</textarea>
   <pre id="info">loading…</pre>
 
   <script type="module">
-    import init, { runPolarsSql, build_info } from "../../pkg/workbook_runtime.js";
+    import init, { runPolarsSql, runChart, build_info } from "../../pkg/workbook_runtime.js";
 
     const t0 = performance.now();
     await init();
@@ -132,7 +132,19 @@ ORDER BY total_revenue DESC</textarea>
       out.innerHTML = "";
       for (const output of outputs) {
         if (output.kind === "text" && output.mime_type === "text/csv") {
-          out.appendChild(csvToTable(output.content));
+          const rows = parseCsvRows(output.content);
+          out.appendChild(buildTable(rows));
+          const chartSvg = autoChart(rows);
+          if (chartSvg) {
+            const wrap = document.createElement("div");
+            wrap.style.marginTop = "1rem";
+            wrap.innerHTML = chartSvg;
+            out.appendChild(wrap);
+          }
+        } else if (output.kind === "image" && output.mime_type === "image/svg+xml") {
+          const wrap = document.createElement("div");
+          wrap.innerHTML = output.content;
+          out.appendChild(wrap);
         } else if (output.kind === "error") {
           const div = document.createElement("div");
           div.className = "err";
@@ -146,8 +158,11 @@ ORDER BY total_revenue DESC</textarea>
       }
     }
 
-    function csvToTable(csv) {
-      const rows = csv.trim().split("\n").map((r) => parseCsvRow(r));
+    function parseCsvRows(csv) {
+      return csv.trim().split("\n").map((r) => parseCsvRow(r));
+    }
+
+    function buildTable(rows) {
       const table = document.createElement("table");
       const thead = document.createElement("thead");
       const headerRow = document.createElement("tr");
@@ -170,6 +185,34 @@ ORDER BY total_revenue DESC</textarea>
       }
       table.appendChild(tbody);
       return table;
+    }
+
+    function autoChart(rows) {
+      // Heuristic: first column = categories, second column = values (if numeric).
+      // Calls runChart() with a bar spec and returns the resulting SVG string.
+      // Returns null if no numeric second column.
+      if (rows.length < 2) return null;
+      const headers = rows[0];
+      if (headers.length < 2) return null;
+      const categories = rows.slice(1).map((r) => r[0]);
+      const values = rows.slice(1).map((r) => Number(r[1]));
+      if (values.some((v) => !Number.isFinite(v))) return null;
+      const spec = {
+        kind: "bar",
+        title: `${headers[1]} by ${headers[0]}`,
+        x_label: headers[0],
+        y_label: headers[1],
+        categories,
+        values,
+      };
+      try {
+        const outputs = runChart(JSON.stringify(spec));
+        const img = outputs.find((o) => o.kind === "image" && o.mime_type === "image/svg+xml");
+        return img?.content ?? null;
+      } catch (e) {
+        console.warn("autoChart failed:", e);
+        return null;
+      }
     }
 
     function parseCsvRow(row) {
