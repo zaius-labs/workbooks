@@ -51,6 +51,14 @@
       "types": "./src/reactiveExecutor.ts",
       "default": "./src/reactiveExecutor.ts"
     },
+    "./duckdbSidecar": {
+      "types": "./src/duckdbSidecar.ts",
+      "default": "./src/duckdbSidecar.ts"
+    },
+    "./urlParamBinding": {
+      "types": "./src/urlParamBinding.ts",
+      "default": "./src/urlParamBinding.ts"
+    },
     "./blocks/*": {
       "svelte": "./src/blocks/*"
     },

@@ -95,3 +95,17 @@ export type {
 // SQL features dynamic-import this module; the ~7 MB chunk doesn't
 // download for workbooks that only use Polars/Rhai/charts.
 export { runDuckdbSql } from "./duckdbSidecar";
+
+// URL parameter binding (P3.6) — input names ↔ ?name=value query params.
+// Sharing a URL = sharing a parameterized workbook snapshot.
+export {
+  bindExecutorToUrl,
+  readUrlParams,
+  writeUrlParam,
+  coerce as coerceUrlParam,
+} from "./urlParamBinding";
+export type {
+  UrlParamSpec,
+  UrlParamValue,
+  UrlBinding,
+} from "./urlParamBinding";
