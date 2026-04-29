@@ -78,6 +78,10 @@
       "types": "./src/modelArtifactResolver.ts",
       "default": "./src/modelArtifactResolver.ts"
     },
+    "./workbookDataResolver": {
+      "types": "./src/workbookDataResolver.ts",
+      "default": "./src/workbookDataResolver.ts"
+    },
     "./loopBlock": {
       "types": "./src/loopBlock.ts",
       "default": "./src/loopBlock.ts"

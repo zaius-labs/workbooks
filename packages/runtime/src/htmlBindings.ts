@@ -41,6 +41,10 @@ import type { CellState } from "./reactiveExecutor";
 import type { LlmClient } from "./llmClient";
 import { runAgentLoop } from "./agentLoop";
 import { sanitizeSvg } from "./util/sanitize";
+import {
+  createWorkbookDataResolver,
+  type WorkbookDataResolver,
+} from "./workbookDataResolver";
 
 // ----------------------------------------------------------------------
 // Plugin registry — third parties can register cell languages.
@@ -440,6 +444,13 @@ export interface MountOptions {
    * mounts. (core-0id.11)
    */
   cellRegistry?: WorkbookCellRegistry;
+  /**
+   * Override the resolver used to materialize `<wb-data>` blocks.
+   * Default builds one with no `allowedHosts` (external blocks throw
+   * unless the host is opted in). Pass a pre-configured resolver to
+   * extend the allowlist or wire a custom fetch.
+   */
+  dataResolver?: WorkbookDataResolver;
 }
 
 export async function mountHtmlWorkbook(opts: MountOptions): Promise<{
@@ -489,10 +500,23 @@ export async function mountHtmlWorkbook(opts: MountOptions): Promise<{
   // Track latest output per cell so agents/tools can read.
   const outputCache = new Map<string, CellOutput[]>();
 
+  // Materialize <wb-data> blocks into the executor's input map. Cells
+  // join the same `reads=` namespace, so a `reads="orders"` resolves
+  // identically whether `orders` is a <wb-input>, a <wb-data>, or an
+  // upstream cell output. Order: data > inputs > cell outputs (data
+  // wins on collision; collisions discouraged but not parser-rejected
+  // today).
+  const dataResolver = opts.dataResolver ?? createWorkbookDataResolver();
+  const resolvedData = await dataResolver.resolveAll(spec.data);
+  const mergedInputs: Record<string, unknown> = { ...spec.inputs };
+  for (const [id, resolved] of resolvedData) {
+    mergedInputs[id] = resolved.value;
+  }
+
   const executor = new ReactiveExecutor({
     client,
     cells: spec.cells,
-    inputs: spec.inputs,
+    inputs: mergedInputs,
     workbookSlug: spec.name,
     onCellState: (state: CellState) => {
       if (state.status === "ok" && state.outputs) {

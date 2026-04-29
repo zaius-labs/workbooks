@@ -169,6 +169,16 @@ export type {
   ModelArtifactResolver,
 } from "./modelArtifactResolver";
 
+// Workbook data resolver — materializes <wb-data> blocks (CSV, JSON,
+// SQLite, parquet, …) into the bytes/strings cells consume via reads=.
+// Inline + external (host-allowlist + sha256 verified) storage forms.
+export { createWorkbookDataResolver } from "./workbookDataResolver";
+export type {
+  ResolvedData,
+  WorkbookDataResolver,
+  WorkbookDataResolverOptions,
+} from "./workbookDataResolver";
+
 // Worker-isolated runtime client (core-0id.6) — wraps the in-page WASM
 // client in a Worker with a wall-clock budget. On overrun the Worker is
 // terminated and respawned, killing runaway Polars / Linfa / Candle cells
