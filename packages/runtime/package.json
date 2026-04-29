@@ -1,5 +1,5 @@
 {
-  "name": "@zaiusai/workbook-runtime",
+  "name": "@work.books/runtime",
   "version": "0.1.0",
   "publishConfig": {
     "access": "public"
@@ -120,19 +120,45 @@
     "three": "^0.160.0 || ^0.170.0 || ^0.180.0"
   },
   "peerDependenciesMeta": {
-    "convex-svelte": { "optional": true },
-    "@duckdb/duckdb-wasm": { "optional": true },
-    "@deck.gl/aggregation-layers": { "optional": true },
-    "@deck.gl/core": { "optional": true },
-    "@deck.gl/layers": { "optional": true },
-    "@observablehq/plot": { "optional": true },
-    "cytoscape": { "optional": true },
-    "cytoscape-dagre": { "optional": true },
-    "echarts": { "optional": true },
-    "maplibre-gl": { "optional": true },
-    "mermaid": { "optional": true },
-    "plotly.js-dist-min": { "optional": true },
-    "three": { "optional": true }
+    "convex-svelte": {
+      "optional": true
+    },
+    "@duckdb/duckdb-wasm": {
+      "optional": true
+    },
+    "@deck.gl/aggregation-layers": {
+      "optional": true
+    },
+    "@deck.gl/core": {
+      "optional": true
+    },
+    "@deck.gl/layers": {
+      "optional": true
+    },
+    "@observablehq/plot": {
+      "optional": true
+    },
+    "cytoscape": {
+      "optional": true
+    },
+    "cytoscape-dagre": {
+      "optional": true
+    },
+    "echarts": {
+      "optional": true
+    },
+    "maplibre-gl": {
+      "optional": true
+    },
+    "mermaid": {
+      "optional": true
+    },
+    "plotly.js-dist-min": {
+      "optional": true
+    },
+    "three": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

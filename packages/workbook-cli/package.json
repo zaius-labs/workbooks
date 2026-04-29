@@ -1,5 +1,5 @@
 {
-  "name": "@zaiusai/workbook-cli",
+  "name": "@work.books/cli",
   "version": "0.1.0",
   "description": "Build tool for workbooks — compiles a multi-file source tree into a single, self-contained .workbook.html.",
   "type": "module",
