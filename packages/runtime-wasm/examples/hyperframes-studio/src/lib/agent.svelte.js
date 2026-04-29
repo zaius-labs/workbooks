@@ -261,24 +261,51 @@ export function buildTools() {
   ];
 }
 
-const AGENT_PERSIST_ID = "agentThread";
-
 class AgentStore {
   thread = $state([]);            // [{ role, segments }]
   streaming = $state(null);       // { segments } during a turn, else null
   busy = $state(false);
   hydrated = $state(false);
 
+  // Track which turns have already been persisted so we only append
+  // newly-completed ones rather than re-encoding the whole thread on
+  // every mutation. A monotonically-increasing index into thread[].
+  _persistedThrough = 0;
+
   constructor() {
-    // Lazy-import to break the cycle and to avoid pulling persistence
-    // into agent.svelte.js's static init order.
-    import("./persistence.svelte.js").then(({ loadState }) => {
-      return loadState(AGENT_PERSIST_ID).then((saved) => {
-        if (saved && Array.isArray(saved.thread)) {
-          this.thread = saved.thread;
+    // Lazy-import to break the cycle. memoryBackend itself lazy-loads
+    // the runtime wasm, so this doesn't trigger heavy work eagerly —
+    // first turn append is what actually pulls runtime-wasm in.
+    import("./memoryBackend.svelte.js").then(({ readAllTurns }) => {
+      return readAllTurns().then((turns) => {
+        if (turns.length > 0) {
+          this.thread = turns;
+          this._persistedThrough = turns.length;
         }
         this.hydrated = true;
       });
+    });
+  }
+
+  /** Append every turn at index >= _persistedThrough into the
+   *  Arrow IPC memory stream. Tracks how far we've persisted so a
+   *  burst of turns becomes a sequence of appends, not a full rewrite. */
+  _persistNewTurns() {
+    if (this._persistedThrough >= this.thread.length) return;
+    const pending = this.thread.slice(this._persistedThrough);
+    const baseline = this._persistedThrough;
+    this._persistedThrough = this.thread.length;
+    import("./memoryBackend.svelte.js").then(async ({ appendTurn }) => {
+      for (const t of pending) {
+        try {
+          await appendTurn(t);
+        } catch (e) {
+          // On failure, rewind the pointer so the next call retries.
+          this._persistedThrough = Math.min(this._persistedThrough, baseline);
+          console.warn("hf agent: turn persist failed:", e?.message ?? e);
+          return;
+        }
+      }
     });
   }
 
@@ -286,9 +313,7 @@ class AgentStore {
     // Only persist completed turns — `streaming` is in-flight UI state
     // and is intentionally not saved (a partial turn would rehydrate
     // confusingly on reload mid-flight).
-    import("./persistence.svelte.js").then(({ markDirty }) => {
-      markDirty(AGENT_PERSIST_ID, () => ({ thread: this.thread }));
-    });
+    this._persistNewTurns();
   }
 
   /** Reset the thread — useful after a context-overflow error or
@@ -298,7 +323,8 @@ class AgentStore {
     if (this.busy) return;
     this.thread = [];
     this.streaming = null;
-    this._persist();
+    this._persistedThrough = 0;
+    import("./memoryBackend.svelte.js").then(({ clearTurns }) => clearTurns());
   }
 
   async send(text) {

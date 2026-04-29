@@ -147,6 +147,17 @@ export interface WorkbookRuntimeWasm {
    * truncate at the first EOS marker. Throws if schemas differ.
    */
   appendArrowIpc?: (existing: Uint8Array, new_batch: Uint8Array) => Uint8Array;
+  /**
+   * Generic JSON-to-Arrow encoder. `schemaJson` describes columns
+   * (`{fields:[{name,type:"utf8"|"i64",nullable?}]}`); `rowsJson` is
+   * an array of objects with matching keys. Returns a complete Arrow
+   * IPC stream containing one batch. Lets host code emit memory
+   * batches without an Arrow JS dep.
+   */
+  arrowEncodeJsonRows?: (schemaJson: string, rowsJson: string) => Uint8Array;
+  /** Inverse of arrowEncodeJsonRows. Walks every batch in the IPC
+   *  stream, returns rows as a JSON-encoded array string. */
+  arrowDecodeToJsonRows?: (bytes: Uint8Array) => string;
   // ----- Prolly Tree (<wb-history>) primitives -----
   /** Initialize an empty history with a single root commit. */
   prollyInit?: (message: string) => Uint8Array;

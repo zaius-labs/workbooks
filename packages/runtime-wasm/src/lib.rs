@@ -44,6 +44,7 @@ pub mod bridge;
 pub mod runtime;
 pub mod outputs;
 pub mod prolly;
+pub mod arrow_json;
 
 #[cfg(feature = "polars-frames")]
 pub mod frames;
