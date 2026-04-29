@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ImageBlock } from "@shinymono/shared";
+  import type { ImageBlock } from "../types";
   import { getWorkbookResolver } from "../workbookContext";
 
   let { block }: { block: ImageBlock } = $props();

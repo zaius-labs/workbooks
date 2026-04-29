@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { WorkbookDocument, RunState } from "@shinymono/shared";
+  import type { WorkbookDocument, RunState } from "./types";
   import WorkbookBlock from "./WorkbookBlock.svelte";
   import CitationReport from "./CitationReport.svelte";
   import {

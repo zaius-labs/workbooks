@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ChartBlock, ChartSeries } from "@shinymono/shared";
+  import type { ChartBlock, ChartSeries } from "../types";
   import { onMount } from "svelte";
   import { getCitationContext } from "../citationContext";
   import ChartLegend from "./chart/ChartLegend.svelte";

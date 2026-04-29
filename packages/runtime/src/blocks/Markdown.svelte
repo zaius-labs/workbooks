@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { MarkdownBlock } from "@shinymono/shared";
+  import type { MarkdownBlock } from "../types";
   import {
     CITE_ANCHOR_RE,
     getCitationContext,

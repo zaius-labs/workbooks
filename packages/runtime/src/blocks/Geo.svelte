@@ -8,7 +8,7 @@
    *  required). Future: switch to a host-managed Mapbox token (env
    *  SIGNAL_MAPBOX_TOKEN) for richer styling.
    */
-  import type { GeoBlock } from "@shinymono/shared";
+  import type { GeoBlock } from "../types";
   import { onMount } from "svelte";
   import { PALETTE } from "./chart/palette";
 

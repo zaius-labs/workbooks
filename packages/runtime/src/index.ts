@@ -7,6 +7,11 @@
  * input/concept) and pass the combined registry as a `Workbook` prop.
  */
 
+// Canonical types (re-exported from ./types) — host apps import workbook
+// data shapes (WorkbookDocument, WorkbookBlock, HeadingBlock, …) from here
+// rather than maintaining their own copy.
+export * from "./types";
+
 // Root + dispatcher
 export { default as Workbook } from "./Workbook.svelte";
 export { default as WorkbookBlock } from "./WorkbookBlock.svelte";

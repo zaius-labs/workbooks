@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { DiagramBlock } from "@shinymono/shared";
+  import type { DiagramBlock } from "../types";
   import { onMount } from "svelte";
 
   let { block }: { block: DiagramBlock } = $props();

@@ -18,7 +18,7 @@
     GlossaryEntry,
     Reference,
     WorkbookDocument,
-  } from "@shinymono/shared";
+  } from "./types";
   import type { CitationContext } from "./citationContext";
 
   let {

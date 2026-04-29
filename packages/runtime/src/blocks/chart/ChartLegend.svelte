@@ -11,7 +11,7 @@
    *     (otherwise it's a non-interactive label)
    *   - layout is a wrapping flex strip with consistent gaps
    */
-  import type { ChartSeries } from "@shinymono/shared";
+  import type { ChartSeries } from "../../types";
   import {
     colorForSeries,
     type BrandResolver,

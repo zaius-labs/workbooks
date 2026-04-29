@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { HeadingBlock } from "@shinymono/shared";
+  import type { HeadingBlock } from "../types";
   let { block }: { block: HeadingBlock } = $props();
   const klass = $derived(
     block.level === 1

@@ -7,7 +7,7 @@
    * are no-op until then; the button just stops looking dormant for
    * states where action is meaningful. */
 
-  import type { StepBlock, RunState } from "@shinymono/shared";
+  import type { StepBlock, RunState } from "../types";
 
   let {
     block,

@@ -6,7 +6,7 @@
    *  scene per block; the declarative Svelte component layer Threlte
    *  provides is overkill here and would add ~150KB of wrapping for
    *  no architectural payoff. */
-  import type { Embedding3DBlock } from "@shinymono/shared";
+  import type { Embedding3DBlock } from "../types";
   import { onMount } from "svelte";
   import { PALETTE } from "./chart/palette";
 

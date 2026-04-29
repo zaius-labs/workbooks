@@ -28,7 +28,7 @@ import type {
   Scatter3DChartData,
   ShapBeeswarmChartData,
   ShapWaterfallChartData,
-} from "@shinymono/shared";
+} from "../../types";
 import { PALETTE } from "./palette";
 
 type PlotlyApi = {

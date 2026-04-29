@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { MetricBlock } from "@shinymono/shared";
+  import type { MetricBlock } from "../types";
 
   let { block }: { block: MetricBlock } = $props();
 

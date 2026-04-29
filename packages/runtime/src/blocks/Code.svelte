@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { CodeBlock } from "@shinymono/shared";
+  import type { CodeBlock } from "../types";
   let { block }: { block: CodeBlock } = $props();
 </script>
 

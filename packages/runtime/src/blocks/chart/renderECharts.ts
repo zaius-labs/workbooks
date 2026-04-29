@@ -11,7 +11,7 @@ import type {
   SankeyChartData,
   SunburstChartData,
   TreemapChartData,
-} from "@shinymono/shared";
+} from "../../types";
 import {
   PALETTE,
   resolveChartPalette,

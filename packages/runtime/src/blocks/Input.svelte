@@ -14,7 +14,7 @@
    * picker's options-list integration lands in Phase C alongside step
    * actions that consume the chosen connection. */
 
-  import type { InputBlock } from "@shinymono/shared";
+  import type { InputBlock } from "../types";
   import { getWorkbookResolver } from "../workbookContext";
 
   let { block, blockId }: { block: InputBlock; blockId?: string } = $props();

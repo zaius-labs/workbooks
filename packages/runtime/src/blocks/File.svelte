@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FileBlock } from "@shinymono/shared";
+  import type { FileBlock } from "../types";
   import { getWorkbookResolver } from "../workbookContext";
 
   let { block }: { block: FileBlock } = $props();

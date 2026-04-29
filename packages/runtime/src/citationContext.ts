@@ -20,7 +20,7 @@ import type {
   Entity,
   Reference,
   WorkbookDocument,
-} from "@shinymono/shared";
+} from "./types";
 import { DEFAULT_BRAND_ICON } from "./blocks/chart/brandIcon";
 
 const KEY = Symbol("sdoc:citations");

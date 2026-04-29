@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ParagraphBlock } from "@shinymono/shared";
+  import type { ParagraphBlock } from "../types";
   import {
     CITE_ANCHOR_RE,
     getCitationContext,

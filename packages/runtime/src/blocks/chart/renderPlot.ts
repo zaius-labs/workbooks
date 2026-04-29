@@ -9,7 +9,7 @@ import type {
   HistogramChartData,
   LineChartData,
   ScatterChartData,
-} from "@shinymono/shared";
+} from "../../types";
 import { color, colorForSeries, PALETTE } from "./palette";
 
 const PLOT_DEFAULTS = {

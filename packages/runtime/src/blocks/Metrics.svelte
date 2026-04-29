@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { MetricGroupBlock } from "@shinymono/shared";
+  import type { MetricGroupBlock } from "../types";
   import Metric from "./Metric.svelte";
 
   let { block }: { block: MetricGroupBlock } = $props();

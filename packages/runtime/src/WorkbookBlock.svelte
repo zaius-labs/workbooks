@@ -12,7 +12,7 @@
    * placeholder is plain text describing what's missing — readable but
    * non-interactive.
    */
-  import type { WorkbookBlock as WorkbookBlockT, RunState } from "@shinymono/shared";
+  import type { WorkbookBlock as WorkbookBlockT, RunState } from "./types";
   import {
     defaultBlockRegistry,
     type BlockRegistry,

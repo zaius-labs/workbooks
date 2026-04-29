@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildCitationContext } from "./citationContext";
-import type { WorkbookDocument } from "@shinymono/shared";
+import type { WorkbookDocument } from "./types";
 
 const sampleDoc: WorkbookDocument = {
   blocks: [],

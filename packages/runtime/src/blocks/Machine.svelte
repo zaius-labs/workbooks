@@ -7,7 +7,7 @@
    * actions that share the same machineInfer ingress + binding
    * resolver. */
 
-  import type { MachineBlock, Binding } from "@shinymono/shared";
+  import type { MachineBlock, Binding } from "../types";
 
   let { block }: { block: MachineBlock } = $props();
 

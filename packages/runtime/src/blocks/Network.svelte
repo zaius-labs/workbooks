@@ -2,7 +2,7 @@
   /** Network graph block — Cytoscape default. The 'sigma' engine is
    *  reserved on the schema for >1K nodes but not yet wired; falls
    *  back to Cytoscape for now with a warning. */
-  import type { NetworkBlock } from "@shinymono/shared";
+  import type { NetworkBlock } from "../types";
   import { onMount } from "svelte";
   import { PALETTE } from "./chart/palette";
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { TableBlock } from "@shinymono/shared";
+  import type { TableBlock } from "../types";
   let { block }: { block: TableBlock } = $props();
   const numeric = $derived(new Set(block.numericColumns ?? []));
 

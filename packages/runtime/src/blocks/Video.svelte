@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { VideoBlock } from "@shinymono/shared";
+  import type { VideoBlock } from "../types";
   import { getWorkbookResolver } from "../workbookContext";
 
   let { block }: { block: VideoBlock } = $props();

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { CalloutBlock } from "@shinymono/shared";
+  import type { CalloutBlock } from "../types";
   let { block }: { block: CalloutBlock } = $props();
 
   /* bg-X-50, text-X-700/800/900 already have global dark overrides

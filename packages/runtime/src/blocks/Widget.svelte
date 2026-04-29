@@ -6,7 +6,7 @@
    * Mounting + binding resolution lands in Phase C alongside the shared
    * binding-resolver helper that step actions also use. */
 
-  import type { WidgetBlock } from "@shinymono/shared";
+  import type { WidgetBlock } from "../types";
 
   let { block }: { block: WidgetBlock } = $props();
 
