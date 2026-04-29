@@ -193,6 +193,39 @@ export interface WorkbookMemory {
     | { kind: "external"; src: string; sha256: string; bytes?: number };
 }
 
+/**
+ * A `<wb-doc>` block — hierarchical mergeable state via a CRDT.
+ * Where `<wb-memory>` is tabular and append-shaped, `<wb-doc>` is
+ * document-shaped and mutable: nested maps, lists, text, hierarchies
+ * that fork-and-merge cleanly.
+ *
+ * First supported format is Loro (Rust+WASM, shallow snapshots).
+ * Automerge / Yjs may follow as additional `format=` values; the
+ * resolver dispatches by format. Loro-crdt is an optional peer dep
+ * lazy-loaded only when a workbook contains a <wb-doc>.
+ *
+ *   <wb-doc id="agent-state" format="loro" history-horizon="100"
+ *           encoding="base64" sha256="...">AQEBAAhz...</wb-doc>
+ *
+ * Initial ship is read-only: cells read the doc as a JSON projection
+ * via reads=. Mutation API (host-driven, mirrors appendMemory) lands
+ * in a follow-up.
+ */
+export interface WorkbookDoc {
+  id: string;
+  format: "loro";
+  /**
+   * Optional shallow-snapshot history horizon — the number of
+   * recent ops to retain in full DAG form before older history is
+   * collapsed into a frozen baseline. Format-specific; today only
+   * Loro honors it. UI hint only at parse time.
+   */
+  historyHorizon?: number;
+  source:
+    | { kind: "inline-base64"; base64: string; sha256: string }
+    | { kind: "external"; src: string; sha256: string; bytes?: number };
+}
+
 interface WorkbookHtmlSpec {
   name: string;
   cells: Cell[];
@@ -200,6 +233,7 @@ interface WorkbookHtmlSpec {
   agents: AgentSpec[];
   data: WorkbookData[];
   memory: WorkbookMemory[];
+  docs: WorkbookDoc[];
 }
 
 /**
@@ -304,6 +338,11 @@ const MAX_EXTERNAL_DECLARED_BYTES = 500 * 1024 * 1024; // 500 MB declared size
  */
 const MAX_MEMORY_BLOCKS = 16;
 
+/** `<wb-doc>` caps. Even tighter — a workbook with many CRDT docs is
+ *  unusual, and each doc carries hierarchical state that scales fast. */
+const MAX_DOC_BLOCKS = 8;
+const ALLOWED_DOC_FORMATS = new Set<WorkbookDoc["format"]>(["loro"]);
+
 function clipString(raw: string, maxBytes: number): string {
   if (raw.length <= maxBytes) return raw;
   return raw.slice(0, maxBytes);
@@ -337,6 +376,7 @@ export function parseWorkbookHtml(root: Element): WorkbookHtmlSpec {
   const agents: AgentSpec[] = [];
   const data: WorkbookData[] = [];
   const memory: WorkbookMemory[] = [];
+  const docs: WorkbookDoc[] = [];
   let aggregateInlineBytes = 0;
 
   // Inputs.
@@ -520,7 +560,64 @@ export function parseWorkbookHtml(root: Element): WorkbookHtmlSpec {
     if (entry) memory.push(entry);
   }
 
-  return { name, cells, inputs, agents, data, memory };
+  // CRDT docs. Hierarchical mergeable state. Reuses the binary-only
+  // storage shapes from <wb-memory> (inline-base64 or external),
+  // plus a `format=` allowlist so non-Loro CRDTs can be added later
+  // without breaking existing parsers.
+  for (const el of root.querySelectorAll("wb-doc")) {
+    if (docs.length >= MAX_DOC_BLOCKS) break;
+    const id = validId(el.getAttribute("id"));
+    if (!id) continue;
+    if (usedIds.has(id)) continue;
+    usedIds.add(id);
+
+    const formatAttr = el.getAttribute("format") as WorkbookDoc["format"] | null;
+    if (!formatAttr || !ALLOWED_DOC_FORMATS.has(formatAttr)) continue;
+
+    const sha256Attr = (el.getAttribute("sha256") ?? "").toLowerCase();
+    const sha256 = VALID_SHA256.test(sha256Attr) ? sha256Attr : null;
+    if (!sha256) continue;
+
+    const horizonAttr = Number(el.getAttribute("history-horizon"));
+    const historyHorizon =
+      Number.isFinite(horizonAttr) && horizonAttr >= 0 ? horizonAttr : undefined;
+
+    const srcAttr = el.getAttribute("src");
+    const encoding = (el.getAttribute("encoding") ?? "").toLowerCase();
+
+    let entry: WorkbookDoc | null = null;
+
+    if (srcAttr) {
+      if (!isFetchableUrl(srcAttr)) continue;
+      const bytes = parseBytesAttr(el.getAttribute("bytes"));
+      entry = {
+        id,
+        format: formatAttr,
+        historyHorizon,
+        source: { kind: "external", src: srcAttr, sha256, bytes },
+      };
+    } else if (encoding === "base64") {
+      const raw = el.textContent ?? "";
+      const base64 = raw.replace(/\s+/g, "");
+      if (!base64) continue;
+      if (base64.length > MAX_INLINE_BASE64_CHARS) continue;
+      const approxBytes = Math.floor((base64.length * 3) / 4);
+      if (aggregateInlineBytes + approxBytes > MAX_AGGREGATE_INLINE_BYTES) continue;
+      aggregateInlineBytes += approxBytes;
+      entry = {
+        id,
+        format: formatAttr,
+        historyHorizon,
+        source: { kind: "inline-base64", base64, sha256 },
+      };
+    } else {
+      continue;
+    }
+
+    if (entry) docs.push(entry);
+  }
+
+  return { name, cells, inputs, agents, data, memory, docs };
 }
 
 function coerceValue(raw: string, type: string): unknown {
