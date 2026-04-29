@@ -65,9 +65,32 @@ export async function runBuild({ project = ".", out, runtime, wasm } = {}) {
 }
 
 async function tryLoadSveltePlugin(root) {
+  // Mirror dev.mjs — autoload mdsvex as a preprocessor when present.
   try {
-    const mod = await import("@sveltejs/vite-plugin-svelte");
-    return mod.svelte();
+    const sveltePlugin = await import("@sveltejs/vite-plugin-svelte");
+    const mdsvex = await tryLoadMdsvex();
+    if (mdsvex) {
+      return sveltePlugin.svelte({
+        extensions: [".svelte", ".svx"],
+        preprocess: [mdsvex],
+      });
+    }
+    return sveltePlugin.svelte();
+  } catch {
+    return null;
+  }
+}
+
+async function tryLoadMdsvex() {
+  try {
+    const mod = await import("mdsvex");
+    const { remarkWorkbookCells } = await import(
+      "../plugins/remarkWorkbookCells.mjs"
+    );
+    return mod.mdsvex({
+      extensions: [".svx"],
+      remarkPlugins: [remarkWorkbookCells],
+    });
   } catch {
     return null;
   }

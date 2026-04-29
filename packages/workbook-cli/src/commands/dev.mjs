@@ -45,10 +45,35 @@ export async function runDev({ project = ".", port, runtime } = {}) {
 
 async function tryLoadSveltePlugin(root) {
   // Look for @sveltejs/vite-plugin-svelte either in the project or a
-  // sibling/up-tree node_modules.
+  // sibling/up-tree node_modules. If mdsvex is also installed, wire
+  // it in as a preprocessor + extend extensions to include .svx.
   try {
-    const mod = await import("@sveltejs/vite-plugin-svelte");
-    return mod.svelte();
+    const sveltePlugin = await import("@sveltejs/vite-plugin-svelte");
+    const mdsvex = await tryLoadMdsvex();
+    if (mdsvex) {
+      return sveltePlugin.svelte({
+        extensions: [".svelte", ".svx"],
+        preprocess: [mdsvex],
+      });
+    }
+    return sveltePlugin.svelte();
+  } catch {
+    return null;
+  }
+}
+
+async function tryLoadMdsvex() {
+  try {
+    const mod = await import("mdsvex");
+    // Lazy import the workbook-cell remark plugin so we don't pay the
+    // unified pipeline cost when mdsvex isn't in use.
+    const { remarkWorkbookCells } = await import(
+      "../plugins/remarkWorkbookCells.mjs"
+    );
+    return mod.mdsvex({
+      extensions: [".svx"],
+      remarkPlugins: [remarkWorkbookCells],
+    });
   } catch {
     return null;
   }

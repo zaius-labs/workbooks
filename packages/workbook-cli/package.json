@@ -1,6 +1,6 @@
 {
   "name": "@work.books/cli",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Build tool for workbooks — compiles a multi-file source tree into a single, self-contained .workbook.html.",
   "type": "module",
   "license": "Apache-2.0",
@@ -34,15 +34,20 @@
     "node": ">=18"
   },
   "dependencies": {
+    "unist-util-visit": "^5.0.0",
     "vite": "^6.0.0",
     "vite-plugin-singlefile": "^2.0.0"
   },
   "peerDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "mdsvex": "^0.12.0",
     "svelte": "^5.0.0"
   },
   "peerDependenciesMeta": {
     "@sveltejs/vite-plugin-svelte": {
+      "optional": true
+    },
+    "mdsvex": {
       "optional": true
     },
     "svelte": {

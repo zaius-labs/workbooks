@@ -1,0 +1,98 @@
+<script>
+  // Widgets embedded in the document. Each widget is just a Svelte
+  // component — same authoring model as a full SPA workbook, but
+  // running inside the surrounding document's flow + runtime.
+  import ChurnScenario from "./widgets/ChurnScenario.svelte";
+</script>
+
+<wb-workbook name="q4-revenue-report">
+
+<wb-input name="customers" type="csv" default="region,segment,revenue,churn,customers
+us,enterprise,42000,0.03,12
+us,smb,12000,0.04,84
+us,starter,8400,0.11,210
+eu,enterprise,38000,0.02,9
+eu,smb,15600,0.02,67
+eu,starter,3200,0.18,143
+apac,enterprise,28000,0.04,7
+apac,smb,21000,0.05,52
+apac,starter,4400,0.22,180"></wb-input>
+
+# Q4 Customer Revenue Report
+
+<div class="meta">authored in markdown · cells run in your browser</div>
+
+This quarter we observed strong **enterprise** revenue growth across
+all regions, offset by elevated **starter-tier churn** in EU and APAC.
+The report is reproducible: the queries below execute in your browser
+against the embedded customer data and you can refresh the page to
+re-run them.
+
+## By region
+
+```polars id="by_region" reads="customers"
+SELECT region,
+       SUM(revenue) AS total_revenue,
+       AVG(churn) AS avg_churn,
+       SUM(customers) AS total_customers
+FROM data
+GROUP BY region
+ORDER BY total_revenue DESC
+```
+
+<wb-output for="by_region"></wb-output>
+
+The **US** drove the largest absolute revenue, but **EU** had the
+lowest aggregate churn. APAC shows the weakest churn profile, driven
+almost entirely by the starter tier.
+
+## By segment
+
+```polars id="by_segment" reads="customers"
+SELECT segment,
+       SUM(revenue) AS total_revenue,
+       AVG(churn) AS avg_churn
+FROM data
+GROUP BY segment
+ORDER BY total_revenue DESC
+```
+
+<wb-output for="by_segment"></wb-output>
+
+> Enterprise represents the bulk of revenue with negligible churn.
+> Starter is the volume tier and where most retention work is needed.
+
+## Starter-tier rows
+
+```polars id="starter_detail" reads="customers"
+SELECT region, customers, revenue, churn
+FROM data
+WHERE segment = 'starter'
+ORDER BY churn DESC
+```
+
+<wb-output for="starter_detail"></wb-output>
+
+## Scenario — what if we cut starter churn?
+
+The widget below runs the same data through a "what if" projection.
+Drag the slider to model a churn reduction; the table re-runs a
+Polars query in your browser on every change.
+
+<ChurnScenario />
+
+A 50% cut in starter churn would recover about $1,200 per period —
+roughly $5K annualized, mostly concentrated in the APAC starter row.
+
+---
+
+### About this report
+
+This document is a `.workbook.html` — a portable runtime artifact.
+Open it from `file://`, attach it to an email, drop it on a USB
+stick. It runs the same way anywhere because the wasm runtime
+ships inside the file. Authored in `mdsvex` (markdown + Svelte);
+fenced code blocks tagged `polars`, `rhai`, etc. compile to
+runnable cells via the workbook CLI's remark plugin.
+
+</wb-workbook>

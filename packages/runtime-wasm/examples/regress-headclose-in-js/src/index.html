@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>core-bii regression — &lt;/head&gt; inside user JS</title>
+  </head>
+  <body>
+    <main>
+      <h1>core-bii regression fixture</h1>
+      <p>
+        Open the dev console and verify there's no <code>SyntaxError</code>.
+        Below is the result of a function whose source contains a literal
+        <code>&lt;/head&gt;</code> in a template literal — the bug case.
+      </p>
+      <pre id="out"></pre>
+    </main>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

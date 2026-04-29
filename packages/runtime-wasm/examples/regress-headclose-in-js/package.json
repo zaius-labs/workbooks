@@ -1,0 +1,13 @@
+{
+  "name": "@work.books/regress-headclose-in-js",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "workbook build"
+  },
+  "devDependencies": {
+    "@work.books/cli": "*",
+    "vite": "^6.0.0"
+  }
+}

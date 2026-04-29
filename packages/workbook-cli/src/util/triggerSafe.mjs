@@ -42,6 +42,15 @@ export function makeSentinels() {
   };
 }
 
+/** Slot marker injected into <head> during the early HTML transform.
+ *  Later passes locate THIS string (instead of </head>) when inserting
+ *  the portable-assets block, so a user JS bundle containing the
+ *  literal substring "</head>" — common in iframe srcdoc helpers —
+ *  cannot fool the injector into landing assets inside a JS template
+ *  literal. Closes core-bii. */
+export const SLOT_PORTABLE = TRIGGER.COM_OPEN()
+  + " @workbook:slot:portable-assets " + TRIGGER.COM_CLOSE();
+
 /** Build a single inlined-asset script block. */
 export function makeAssetTag(id, type, body) {
   const open = TRIGGER.TAG_SCRIPT_OPEN();

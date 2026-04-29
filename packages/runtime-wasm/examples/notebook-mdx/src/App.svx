@@ -1,0 +1,117 @@
+<script>
+  // Standardized notebook chrome — Notebook wraps the page, NotebookCell
+  // is auto-emitted by the CLI's remarkWorkbookCells plugin from each
+  // ```polars / ```rhai fenced block, NotebookToolbar gives Run All +
+  // Clear. Author writes markdown; chrome is automatic.
+  import { Notebook, NotebookCell, NotebookToolbar } from "@work.books/runtime/notebook";
+
+  const CSV = `region,segment,revenue,churn,customers
+us,enterprise,42000,0.03,12
+us,smb,12000,0.04,84
+us,starter,8400,0.11,210
+eu,enterprise,38000,0.02,9
+eu,smb,15600,0.02,67
+eu,starter,3200,0.18,143
+apac,enterprise,28000,0.04,7
+apac,smb,21000,0.05,52
+apac,starter,4400,0.22,180`;
+</script>
+
+<Notebook data={CSV}>
+
+# Customer churn — notebook
+
+<div class="meta">play to run · edit + re-run · run all from the toolbar</div>
+
+<NotebookToolbar />
+
+A working notebook authored in `mdsvex`. Each fenced code block tagged
+with a workbook language compiles to a `<NotebookCell>` automatically.
+Click ▶ in the gutter to re-run a single cell, or **Run All** above
+to recompute everything.
+
+## What's in the data?
+
+```polars id="schema" reads="csv"
+SELECT region, segment,
+       COUNT(*) AS rows,
+       AVG(revenue) AS avg_revenue,
+       AVG(churn) AS avg_churn
+FROM data
+GROUP BY region, segment
+ORDER BY region, segment
+```
+
+Nine rows across three regions × three segments. Now we want to
+zero in on starter-tier churn.
+
+## Hot spots — high churn rows
+
+```polars id="hotspots" reads="csv"
+SELECT region, segment, customers, revenue, churn
+FROM data
+WHERE churn > 0.10
+ORDER BY churn DESC
+```
+
+Three rows above 10% churn, all in the **starter** tier. APAC starter
+is the worst at 22%.
+
+## Revenue at risk
+
+If the high-churn cohorts kept their customers, what would the
+incremental revenue look like?
+
+```polars id="at_risk" reads="csv"
+SELECT region, segment, customers, revenue, churn,
+       ROUND(revenue * churn, 2) AS revenue_lost_per_period
+FROM data
+WHERE churn > 0.10
+ORDER BY revenue_lost_per_period DESC
+```
+
+## Quick math
+
+```rhai id="totals"
+let total = 8400 * 0.11 + 3200 * 0.18 + 4400 * 0.22;
+total
+```
+
+Roughly **`$2,460`** in revenue churn per period from those three
+rows. Annualized, nearly **`$10K`** of lost contract revenue
+concentrated in the starter tier.
+
+</Notebook>
+
+<style>
+  :global(html, body) {
+    margin: 0; background: #fff; color: #0a0a0a;
+    font-family: -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
+    line-height: 1.55; font-size: 15px;
+  }
+  :global(.workbook-notebook) {
+    max-width: 880px; margin: 0 auto;
+    padding: 32px 24px 80px;
+    display: block;
+  }
+  :global(h1) { font-size: 24px; font-weight: 700; margin: 0 0 8px; }
+  :global(h2) {
+    font-size: 14px; font-weight: 600; color: #707070;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin: 32px 0 12px;
+  }
+  :global(p) { margin: 0 0 12px; color: #0a0a0a; }
+  :global(strong) { font-weight: 600; }
+  :global(em) { font-style: italic; }
+  :global(.meta) {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12px; color: #707070;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin: -4px 0 16px;
+  }
+  :global(code) {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.92em; background: #f5f5f5;
+    padding: 1px 5px; border: 1px solid #d6d6d6; border-radius: 3px;
+  }
+</style>

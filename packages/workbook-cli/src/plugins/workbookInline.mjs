@@ -19,10 +19,62 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolveRuntime, readRuntimeAssets } from "../util/runtime.mjs";
-import { escapeForScript, makeSentinels, makeAssetTag, TRIGGER } from "../util/triggerSafe.mjs";
+import {
+  escapeForScript,
+  makeSentinels,
+  makeAssetTag,
+  TRIGGER,
+  SLOT_PORTABLE,
+} from "../util/triggerSafe.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ICON_PATH = path.resolve(HERE, "..", "..", "templates", "default-icon.svg");
+
+// ----------------------------------------------------------------------
+// Head-injection helpers — closes core-bii.
+//
+// The previous regex-based injector used a plain `</head>` lookup. That
+// regex is unaware of JS scoping: if a user's bundled JS contains the
+// substring "</head>" inside a template literal (legitimate in iframe
+// srcdoc helpers and similar HTML-emitting code), the injector would
+// land ~16 MB of base64 wasm INSIDE that template literal, severing
+// the JS expression and corrupting the entire bundle.
+//
+// Fix: SLOT_PORTABLE — a unique sentinel comment — is emitted into
+// the document head during the early HTML transform (order: "pre",
+// before vite-plugin-singlefile inlines the user JS bundle). Later
+// asset-injection passes anchor on the slot instead of </head>; by
+// construction the slot lives outside any user code. The </head>
+// regex is retained as a fallback only for HTML inputs that bypass
+// transformIndexHtml entirely.
+// ----------------------------------------------------------------------
+
+/** Inject `content` into the document head. Prefers the SLOT_PORTABLE
+ *  sentinel (placed during transformIndexHtml at order "pre") as the
+ *  anchor. Falls back to a </head> regex for HTML inputs that haven't
+ *  been through the slot-emitting transform. */
+function injectIntoHead(html, content, { consumeSlot = false } = {}) {
+  if (html.includes(SLOT_PORTABLE)) {
+    const replacement = consumeSlot ? content : content + "\n" + SLOT_PORTABLE;
+    return html.replace(SLOT_PORTABLE, replacement);
+  }
+  const headClose = TRIGGER.HEAD_CLOSE();
+  if (html.toLowerCase().includes(headClose)) {
+    return html.replace(new RegExp(headClose, "i"), content + "\n" + headClose);
+  }
+  return content + "\n" + html;
+}
+
+/** Ensure SLOT_PORTABLE is present in the document head. Idempotent
+ *  — calling on an HTML that already has the slot returns it unchanged. */
+function ensureSlot(html) {
+  if (html.includes(SLOT_PORTABLE)) return html;
+  const headClose = TRIGGER.HEAD_CLOSE();
+  if (html.toLowerCase().includes(headClose)) {
+    return html.replace(new RegExp(headClose, "i"), SLOT_PORTABLE + "\n" + headClose);
+  }
+  return SLOT_PORTABLE + "\n" + html;
+}
 
 // ----------------------------------------------------------------------
 // Pure HTML transforms — used by both the Vite plugin (build path with
@@ -32,13 +84,15 @@ const DEFAULT_ICON_PATH = path.resolve(HERE, "..", "..", "templates", "default-i
 
 /** Inject favicon link tags (data-URL inlined) and the workbook-spec
  *  JSON script into the document head. Skips favicon injection if the
- *  page already declares one. Idempotent — running twice is a no-op. */
+ *  page already declares one. Idempotent — running twice is a no-op.
+ *  Also ensures SLOT_PORTABLE is present so a subsequent
+ *  inlinePortableAssets pass can anchor on it (closes core-bii). */
 export async function injectSpecAndIcons(html, config) {
   const hasUserIcon = /<link\s[^>]*rel\s*=\s*["']?(?:icon|shortcut icon)["']?/i.test(html);
   const iconLinks = hasUserIcon ? "" : await buildIconLinks(config);
 
   // Skip if already injected (singleFile re-builds).
-  if (/<script id="workbook-spec"[^>]*>/.test(html)) return html;
+  if (/<script id="workbook-spec"[^>]*>/.test(html)) return ensureSlot(html);
 
   const spec = buildSpec(config);
   const specJson = escapeForScript(JSON.stringify(spec));
@@ -47,16 +101,16 @@ export async function injectSpecAndIcons(html, config) {
   const specTag =
     `${tagOpen} id="workbook-spec" type="application/json">${specJson}${tagEnd}`;
   const injection = (iconLinks ? iconLinks + "\n" : "") + specTag;
-  const headClose = TRIGGER.HEAD_CLOSE();
-  if (html.toLowerCase().includes(headClose)) {
-    return html.replace(new RegExp(headClose, "i"), injection + "\n" + headClose);
-  }
-  return injection + "\n" + html;
+  // Make sure the slot exists, then inject above it. Slot stays —
+  // inlinePortableAssets uses it as its own anchor.
+  return injectIntoHead(ensureSlot(html), injection);
 }
 
 /** Inline the wasm-bindgen JS, runtime bundle JS, and wasm bytes as
  *  <script type="text/plain"> blocks in the head, between sentinels.
- *  Replaces a prior block if present. */
+ *  Replaces a prior block if present. Anchors on SLOT_PORTABLE
+ *  (closes core-bii) — the slot is consumed at this point because
+ *  no further injection passes need it. */
 export async function inlinePortableAssets(html, runtime) {
   const assets = await readRuntimeAssets(runtime);
   const { BEGIN, END } = makeSentinels();
@@ -75,12 +129,7 @@ export async function inlinePortableAssets(html, runtime) {
   );
   if (priorRe.test(html)) return html.replace(priorRe, wrapped);
 
-  // Insert before </head>.
-  const headClose = TRIGGER.HEAD_CLOSE();
-  if (html.toLowerCase().includes(headClose)) {
-    return html.replace(new RegExp(headClose, "i"), wrapped + "\n" + headClose);
-  }
-  return wrapped + "\n" + html;
+  return injectIntoHead(html, wrapped, { consumeSlot: true });
 }
 
 /** Replace <link rel="stylesheet" href="..."> tags with inlined
@@ -244,10 +293,14 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
       });
     },
 
-    /** Inject the workbook-spec script + favicon links. Runs in both
-     * dev and build. */
+    /** Inject the workbook-spec script + favicon links + the
+     *  SLOT_PORTABLE anchor (closes core-bii). Runs at order "pre" so
+     *  it sees the source HTML BEFORE viteSingleFile inlines the user
+     *  JS bundle into <body>. The slot lands in <head>; later
+     *  writeBundle uses it as the asset-injection anchor instead of a
+     *  </head> regex that could match inside a JS template literal. */
     transformIndexHtml: {
-      order: "post",
+      order: "pre",
       async handler(html) {
         // Skip injection if the host page already has its own favicon
         // links — let the author opt out by simply declaring them.
@@ -263,16 +316,9 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
         const specTag =
           `${tagOpen} id="workbook-spec" type="application/json">${specJson}${tagEnd}`;
         const injection = (iconLinks ? iconLinks + "\n" : "") + specTag;
-        // Inject before </head>.
-        const headClose = TRIGGER.HEAD_CLOSE();
-        if (html.toLowerCase().includes(headClose)) {
-          return html.replace(
-            new RegExp(headClose, "i"),
-            injection + "\n" + headClose,
-          );
-        }
-        // No <head>? Prepend.
-        return injection + "\n" + html;
+        // Place the slot first, then inject spec/icons before it. The
+        // slot stays in place for the writeBundle pass.
+        return injectIntoHead(ensureSlot(html), injection);
       },
     },
 
@@ -305,16 +351,17 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
         makeAssetTag("runtime-bundle-src", "text/plain", escapeForScript(assets.bundleSrc)),
       ].join("\n");
       const wrapped = `${BEGIN}\n${block}\n${END}`;
-      const headClose = TRIGGER.HEAD_CLOSE();
-      const headCloseRe = new RegExp(headClose, "i");
 
       for (const file of htmlFiles) {
         let src = await fs.readFile(file, "utf8");
-        if (headCloseRe.test(src)) {
-          src = src.replace(headCloseRe, wrapped + "\n" + headClose);
-        } else {
-          src = wrapped + "\n" + src;
-        }
+        // Anchor on SLOT_PORTABLE if present (the transformIndexHtml
+        // pre-pass put it there). Falls back to a </head> regex when
+        // the source HTML never went through transformIndexHtml.
+        // Closes core-bii: a user JS bundle that includes the
+        // literal substring "</head>" (e.g. iframe srcdoc helpers)
+        // can't trick us into landing 16 MB of base64 inside their
+        // template literal because the slot is unique.
+        src = injectIntoHead(src, wrapped, { consumeSlot: true });
         // Rename <slug>.html → <slug>.workbook.html unless the user
         // already used the .workbook.html extension.
         const base = path.basename(file);
