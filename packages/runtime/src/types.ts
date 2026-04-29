@@ -810,12 +810,11 @@ export type CellBlock = {
     | "rhai"
     | "polars"
     | "sqlite"
-    | "duckdb"
     | "candle-inference"
     | "linfa-train"
     | "wasm-fn"
     | "chat";
-  /** Source for source-driven languages (rhai, sqlite, duckdb, polars). */
+  /** Source for source-driven languages (rhai, sqlite, polars). */
   source?: string;
   /** Structured spec for declarative languages (candle-inference,
    *  linfa-train, wasm-fn, chat). Shape varies by language; the executor

@@ -28,7 +28,6 @@ const WORKBOOK_LANGUAGES = new Set([
   "rhai",
   "polars",
   "sqlite",
-  "duckdb",
   "candle-inference",
   "linfa-train",
   "wasm-fn",

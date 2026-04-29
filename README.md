@@ -160,7 +160,6 @@ zaius-labs/workbooks/
 │   │       ├── agentLoop.ts        ← tool-using agent loop
 │   │       ├── modelArtifactResolver.ts ← IndexedDB model cache
 │   │       ├── crossWorkbookLoader.ts   ← lockfile + pin
-│   │       ├── duckdbSidecar.ts    ← lazy-loaded @duckdb/duckdb-wasm
 │   │       ├── runDiff.ts          ← structured diff between runs
 │   │       ├── loopBlock.ts        ← parallel iteration
 │   │       └── (Svelte components: Workbook, Block dispatcher, blocks/*)
@@ -357,8 +356,7 @@ the same internal spec → same executor → same wasm engine.
 | `rhai` | Rhai engine (in wasm) | Variable scope wired from cell params; expression eval with full scripting |
 | `polars` | Polars LazyFrame + SQL frontend (in wasm) | OLAP at ~1.75 MB compressed |
 | `chart` | Plotters → SVG (in wasm) | Bar / line; multi-series spec |
-| `sqlite` | `@sqlite.org/sqlite-wasm` | Lazy-loaded JS sidecar |
-| `duckdb` | `@duckdb/duckdb-wasm` | Lazy-loaded JS sidecar; for advanced SQL needs Polars doesn't cover |
+| `sqlite` | `@sqlite.org/sqlite-wasm` | Lazy-loaded JS sidecar (stub today; roadmap for non-Polars SQL) |
 | `candle-inference` | Candle (in wasm) | Real BERT-class model inference; `embedTextFlat` for sentence embeddings |
 | `linfa-train` | Linfa (in wasm) | Classical ML — linear regression, trees, clustering |
 | `chat` | LlmClient (proto-typed) | Browser transport calls OpenRouter / OpenAI-compatible endpoints |

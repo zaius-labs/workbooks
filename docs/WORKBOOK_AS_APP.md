@@ -105,7 +105,7 @@ the CLI middleware at `/__workbook/*`). In build: same surface, but
 the loader reads the inlined `<script id>` blocks and imports via
 blob URLs. **The user's compiled JS does not statically import the
 runtime bundle** — that keeps the user code small and avoids
-pulling in the runtime's optional peer deps (duckdb, deck.gl, etc.)
+pulling in the runtime's optional peer deps (deck.gl, mermaid, plotly, etc.)
 into the build graph.
 
 ## Env contract (varlock-style)

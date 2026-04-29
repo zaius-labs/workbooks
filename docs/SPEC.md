@@ -18,7 +18,7 @@ Type is a hint to consumers about what chrome (if any) to wrap the workbook in. 
 
 ## Format
 
-The format is a self-contained HTML file that opens in any browser without installation. **Cells, when present, execute in a Rust runtime compiled to WebAssembly that ships with the workbook** — Polars for DataFrames, DuckDB-WASM for SQL, Candle for ML inference, Linfa for classical ML, Plotters for visualization, Rhai for scripting glue. No Python sandbox, no server-side compute for the common path, no cold start. A workbook is fully runnable in the browser the moment it loads. Heavy or specialized workloads can opt into a Signal-hosted runtime (Tier 3 below), but the default — and the differentiator — is client-side execution.
+The format is a self-contained HTML file that opens in any browser without installation. **Cells, when present, execute in a Rust runtime compiled to WebAssembly that ships with the workbook** — Polars for DataFrames + SQL, Candle for ML inference, Linfa for classical ML, Plotters for visualization, Rhai for scripting glue. SQLite via `@sqlite.org/sqlite-wasm` is available as an opt-in JS-side sidecar for non-Polars SQL. No Python sandbox, no server-side compute for the common path, no cold start. A workbook is fully runnable in the browser the moment it loads. Heavy or specialized workloads can opt into a Signal-hosted runtime (Tier 3 below), but the default — and the differentiator — is client-side execution.
 
 For SPA workbooks, cells are usually empty — the author is rendering a custom UI directly. The wasm runtime is still available on demand via `virtual:workbook-runtime` (or, for hand-written single-file workbooks, by reading the inlined `<script id="*">` blocks at boot).
 
@@ -109,13 +109,13 @@ A `.workbook` file is valid HTML containing four structured script layers plus a
 
 **Layer 1 — Manifest**: Structured document definition. Machine-parseable. Drives everything: blocks, parameters, schedule, dependencies, API exposure, MCP surface, runtime config, provenance.
 
-**Layer 2 — Tabular data**: Arrow IPC format (or DuckDB-WASM database for SQL-heavy workbooks). Polars and DuckDB query this layer with zero-copy. Updated on every run. May be a preview slice in `linked` mode for large workbooks; the full data is fetched from R2 lazily.
+**Layer 2 — Tabular data**: Arrow IPC format (or SQLite database for SQL-heavy workbooks). Polars queries this layer with zero-copy. Updated on every run. May be a preview slice in `linked` mode for large workbooks; the full data is fetched from R2 lazily.
 
 **Layer 3 — State**: Serialized cell output state from the last run — pre-rendered plots (base64 PNG), text outputs, computed values. The file never looks broken; outputs are always visible because they were embedded at generation time.
 
 **Layer 4 — Svelte UI runtime + components**: The compiled `@workbook/runtime` bundle (~250 KB) containing all block components, the runtime control plane client, and the Svelte mount logic. Loaded from CDN in `linked` mode (cross-workbook caching) or inlined in `portable` mode. The `mount()` call instantiates `Workbook.svelte`, which reads the manifest and renders every block.
 
-**Layer 5 — Rust/WASM execution runtime**: The compiled `@workbook/runtime-wasm` bundle (~10–15 MB) containing Polars (DataFrames), DataFusion + DuckDB-WASM (SQL), Candle (ML inference), Linfa (classical ML), Burn + WebGPU (training), Plotters / Charming (charts), Rhai (scripting glue), tokenizers, and arrow-rs. Loaded once from CDN, cached aggressively across workbooks. In `portable` mode, the bundle is inlined for true offline portability.
+**Layer 5 — Rust/WASM execution runtime**: The compiled `@workbook/runtime-wasm` bundle (~10–15 MB) containing Polars (DataFrames + SQL), Candle (ML inference), Linfa (classical ML), Burn + WebGPU (training), Plotters / Charming (charts), Rhai (scripting glue), tokenizers, and arrow-rs. SQLite via `@sqlite.org/sqlite-wasm` is a JS-side sidecar (lazy-loaded only when a workbook declares `language: "sqlite"`). Loaded once from CDN, cached aggressively across workbooks. In `portable` mode, the bundle is inlined for true offline portability.
 
 The body is empty until JS loads (`<div id="app">` with a small skeleton loader). Once the runtime mounts, the document is fully reactive — interactive components are first-class, not progressively-enhanced static HTML.
 
@@ -168,7 +168,7 @@ Three tiers cover the realistic deployment surface:
 
 No install, no account, nothing. Open the `.workbook` file in any browser:
 - All display blocks render (charts, tables, metrics, prose, diagrams)
-- SQL cells run via DuckDB-WASM / DataFusion against the embedded data layer
+- SQL cells run via Polars-SQL (or the SQLite sidecar when declared) against the embedded data layer
 - Polars cells run DataFrame operations natively in WASM
 - Rhai cells orchestrate calls into the WASM runtime
 - Candle inference cells run ML models (including quantized LLMs up to ~3B params)

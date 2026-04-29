@@ -56,7 +56,6 @@ function extractReads(cell: Cell): string[] {
   switch (cell.language) {
     case "polars":
     case "sqlite":
-    case "duckdb":
       return extractSqlReads(src);
     case "rhai":
       return extractRhaiReads(src);

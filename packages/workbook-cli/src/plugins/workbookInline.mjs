@@ -239,7 +239,7 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
      *   const out = wasm.runPolarsSql(sql, csv);
      *
      * Why a loader instead of direct imports: the runtime bundle has
-     * optional peer deps (duckdb, deck.gl, etc.) that should NOT be
+     * optional peer deps (deck.gl, mermaid, plotly, etc.) that should NOT be
      * bundled into the user's app at build time. We inline the
      * runtime bundle JS as a side asset and import it at use time
      * via blob URLs. This also keeps the *user code* small even when

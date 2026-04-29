@@ -2,6 +2,14 @@
 
 A strategic alternative to the Python+E2B runtime described in `WORKBOOK_SPEC.md`. Pivots cell execution from Python-in-a-server-sandbox to Rust-compiled-to-WASM running entirely client-side. **And** ships a Rust-native agent runtime that compiles to WASM — so the agent itself runs in the browser alongside the cells it generates. The workbook becomes a single self-contained file containing the document, the runtime, and the agent that authored and refines it.
 
+> **Update (core-0id.7)**: this doc references DuckDB-WASM throughout
+> as the SQL engine. The runtime as shipped removed DuckDB — Polars-SQL
+> covers analytical workloads, and `@sqlite.org/sqlite-wasm` (lazy-loaded
+> JS sidecar) is the non-Polars roadmap path for the `language: "sqlite"`
+> cell type. Mentions of "DuckDB-WASM" below should be read as
+> "Polars-SQL today / SQLite sidecar tomorrow" unless explicitly
+> discussing why DuckDB was originally chosen.
+
 This document analyzes the pivot end-to-end: thesis, architectural changes, tool-by-tool mapping from Python ecosystem to Rust equivalents, the embedded agent runtime, what's gained, what's lost, and a migration path.
 
 ---

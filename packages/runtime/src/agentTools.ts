@@ -118,7 +118,7 @@ export function createWorkbookAgentTools(
           properties: {
             language: {
               type: "string",
-              description: "One of: rhai, polars, sqlite, duckdb, candle-inference, linfa-train, wasm-fn, chat",
+              description: "One of: rhai, polars, sqlite, candle-inference, linfa-train, wasm-fn, chat",
             },
             source: { type: "string", description: "Cell source code or query." },
             id: {
@@ -210,7 +210,7 @@ export function createWorkbookAgentTools(
 // ----------------------------------------------------------------------
 
 const VALID_LANGUAGES: ReadonlySet<Cell["language"]> = new Set([
-  "rhai", "polars", "sqlite", "duckdb",
+  "rhai", "polars", "sqlite",
   "candle-inference", "linfa-train", "wasm-fn", "chat",
 ]);
 

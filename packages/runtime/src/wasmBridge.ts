@@ -8,15 +8,22 @@
  * (managed) plug a different transport in here — over HTTP via Connect-RPC
  * — without touching consumer code. Same method names, same shapes.
  *
- * Sidecar engines (SQLite via `@sqlite.org/sqlite-wasm`, DuckDB via
- * `@duckdb/duckdb-wasm`) lazy-load only when a workbook's manifest declares
- * them — wired here, not in the Rust crate.
+ * Sidecar engine (SQLite via `@sqlite.org/sqlite-wasm`) lazy-loads only
+ * when a workbook's manifest declares it — wired here, not in the Rust
+ * crate.
  *
- * Status (P2.3): Rhai + Polars SQL paths route end-to-end. SQLite/DuckDB
- * sidecars are stubbed with the load shape so consumers can wire them once
+ * Status (P2.3): Rhai + Polars SQL paths route end-to-end. SQLite
+ * sidecar is stubbed with the load shape so consumers can wire it once
  * the Rust runtime is integrated. Streaming responses collapse into a
  * single response array for now (RunCell will become a real ReadableStream
  * in P3 when streaming cells land).
+ *
+ * DuckDB-WASM was previously wired here as an alternative SQL engine
+ * but was deleted (core-0id.7) — Polars-SQL covers the analytical
+ * workloads the runtime demos, the SQLite stub remains as the
+ * non-Polars roadmap path, and the @duckdb/duckdb-wasm dynamic CDN
+ * import was a supply-chain concern. If a consumer needs DuckDB,
+ * they wire it in their own runtime client.
  */
 
 // Minimal Cell + Environment + CellOutput shapes that match the proto in
@@ -28,7 +35,6 @@ export type CellLanguage =
   | "rhai"
   | "polars"
   | "sqlite"
-  | "duckdb"
   | "candle-inference"
   | "linfa-train"
   | "wasm-fn"
@@ -201,16 +207,8 @@ export function createRuntimeClient(opts: RuntimeClientOptions): RuntimeClient {
         throw new Error("sqlite cell dispatcher not yet wired (P2.5)");
       }
 
-      if (lang === "duckdb") {
-        // P3.1: lazy-load @duckdb/duckdb-wasm sidecar. The DuckDB chunk
-        // (~7 MB) only fetches when a workbook actually runs a duckdb
-        // cell; workbooks using only Polars/Rhai/charts never pay for it.
-        const { runDuckdbSql } = await import("./duckdbSidecar");
-        const sql = req.cell.source ?? "";
-        const csv = (req.params?.csv as string | undefined) ?? "";
-        const outputs = await runDuckdbSql(sql, csv);
-        return { outputs };
-      }
+      // duckdb dispatch removed (core-0id.7). Polars-SQL covers analytical
+      // workloads; SQLite stays the non-Polars roadmap (above).
 
       if (lang === "chat") {
         if (!opts.llmClient) {

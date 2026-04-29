@@ -1,113 +1,6 @@
 var __defProp = Object.defineProperty;
-var __getOwnPropNames = Object.getOwnPropertyNames;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-};
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
-
-// ../../../runtime/src/duckdbSidecar.ts
-var duckdbSidecar_exports = {};
-__export(duckdbSidecar_exports, {
-  runDuckdbSql: () => runDuckdbSql
-});
-async function ensureDuckdb() {
-  if (dbInstance) return dbInstance;
-  if (duckdbPromise) return await duckdbPromise;
-  duckdbPromise = (async () => {
-    const duckdb = await import(
-      /* @vite-ignore */
-      "@duckdb/duckdb-wasm"
-    );
-    const bundles = duckdb.getJsDelivrBundles();
-    const bundle = await duckdb.selectBundle(bundles);
-    const workerScript = `importScripts("${bundle.mainWorker}");`;
-    const workerUrl = URL.createObjectURL(
-      new Blob([workerScript], { type: "application/javascript" })
-    );
-    const worker = new Worker(workerUrl);
-    const logger = new duckdb.ConsoleLogger();
-    const db = new duckdb.AsyncDuckDB(logger, worker);
-    await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-    URL.revokeObjectURL(workerUrl);
-    dbInstance = db;
-    return { db };
-  })();
-  await duckdbPromise;
-  if (!dbInstance) throw new Error("duckdb instance not initialized");
-  return dbInstance;
-}
-async function runDuckdbSql(sql, csv) {
-  const db = await ensureDuckdb();
-  if (csv && db.registerFileText) {
-    await db.registerFileText("data.csv", csv);
-  }
-  const conn = await db.connect();
-  try {
-    if (csv) {
-      try {
-        await conn.query(
-          "CREATE OR REPLACE TABLE data AS SELECT * FROM read_csv_auto('data.csv', HEADER=TRUE)"
-        );
-      } catch (err) {
-        return [{
-          kind: "error",
-          message: `duckdb csv load: ${err instanceof Error ? err.message : String(err)}`
-        }];
-      }
-    }
-    const result = await conn.query(sql);
-    const rows = result.toArray();
-    const headers = result.schema.fields.map((f) => f.name);
-    const csvOut = renderCsv(headers, rows);
-    return [{
-      kind: "text",
-      content: csvOut,
-      mime_type: "text/csv"
-    }];
-  } catch (err) {
-    return [{
-      kind: "error",
-      message: err instanceof Error ? err.message : String(err)
-    }];
-  } finally {
-    await conn.close();
-  }
-}
-function renderCsv(headers, rows) {
-  const lines = [];
-  lines.push(headers.map(escapeCsv).join(","));
-  for (const row of rows) {
-    const r = row;
-    lines.push(headers.map((h) => escapeCsv(formatCell(r[h]))).join(","));
-  }
-  return lines.join("\n") + "\n";
-}
-function formatCell(v) {
-  if (v == null) return "";
-  if (typeof v === "bigint") return v.toString();
-  if (typeof v === "number") return Number.isFinite(v) ? String(v) : "";
-  if (typeof v === "boolean") return v ? "true" : "false";
-  if (typeof v === "string") return v;
-  if (v instanceof Date) return v.toISOString();
-  return String(v);
-}
-function escapeCsv(s) {
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
-var duckdbPromise, dbInstance;
-var init_duckdbSidecar = __esm({
-  "../../../runtime/src/duckdbSidecar.ts"() {
-    "use strict";
-    duckdbPromise = null;
-    dbInstance = null;
-  }
-});
 
 // ../../../runtime/src/wasmBridge.ts
 function createRuntimeClient(opts) {
@@ -147,13 +40,6 @@ function createRuntimeClient(opts) {
       }
       if (lang === "sqlite") {
         throw new Error("sqlite cell dispatcher not yet wired (P2.5)");
-      }
-      if (lang === "duckdb") {
-        const { runDuckdbSql: runDuckdbSql2 } = await Promise.resolve().then(() => (init_duckdbSidecar(), duckdbSidecar_exports));
-        const sql = req.cell.source ?? "";
-        const csv = req.params?.csv ?? "";
-        const outputs = await runDuckdbSql2(sql, csv);
-        return { outputs };
       }
       if (lang === "chat") {
         if (!opts.llmClient) {
@@ -247,7 +133,6 @@ function extractReads(cell) {
   switch (cell.language) {
     case "polars":
     case "sqlite":
-    case "duckdb":
       return extractSqlReads(src);
     case "rhai":
       return extractRhaiReads(src);
@@ -901,7 +786,7 @@ async function runAgentLoop(opts) {
   return { text: finalText, iterations, toolCalls, usage, stopReason };
 }
 
-// ../../../../node_modules/dompurify/dist/purify.es.mjs
+// ../../../../../../node_modules/.bun/dompurify@3.4.1/node_modules/dompurify/dist/purify.es.mjs
 var {
   entries,
   setPrototypeOf,
@@ -2623,7 +2508,7 @@ ${state.error}`);
           properties: {
             language: {
               type: "string",
-              description: "One of: rhai, polars, sqlite, duckdb, candle-inference, linfa-train, wasm-fn, chat"
+              description: "One of: rhai, polars, sqlite, candle-inference, linfa-train, wasm-fn, chat"
             },
             source: { type: "string", description: "Cell source code or query." },
             id: {
@@ -2706,7 +2591,6 @@ var VALID_LANGUAGES = /* @__PURE__ */ new Set([
   "rhai",
   "polars",
   "sqlite",
-  "duckdb",
   "candle-inference",
   "linfa-train",
   "wasm-fn",

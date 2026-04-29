@@ -19,20 +19,24 @@ path = "src/lib.rs"
 # but cells only load the slices their workbook references.
 #
 # Default targets ~2-3 MB brotli. Polars covers OLAP via lazy LazyFrame +
-# SQL frontend; plotters covers charts; rhai covers scripting. SQLite +
-# DuckDB are NOT compiled into this Rust crate — they're sidecar JS
-# modules (`@sqlite.org/sqlite-wasm`, `@duckdb/duckdb-wasm`) lazy-loaded
-# from the JS bridge when a cell explicitly needs them. This avoids the
-# wasi-sdk dependency Rust-bundled SQLite/DuckDB would require.
+# SQL frontend; plotters covers charts; rhai covers scripting. SQLite is
+# the JS-side sidecar (`@sqlite.org/sqlite-wasm`), lazy-loaded from the
+# JS bridge when a workbook declares language: "sqlite". This avoids the
+# wasi-sdk dependency Rust-bundled SQLite would require.
+#
+# DuckDB-WASM was previously listed here as an alternative SQL engine;
+# removed in core-0id.7 (no examples used it; supply-chain risk via
+# the JsDelivr CDN default). Polars-SQL covers analytical workloads; the
+# SQLite sidecar is the non-Polars roadmap.
 #
 # Polars carries a wasm32-friendly feature subset (no parquet/dtype-full,
 # which need lz4-sys / zstd-sys C deps that themselves need a wasi sysroot).
 # Add `polars-parquet` later once we ship a wasi-sdk story.
 default = ["polars-frames", "charts", "rhai-glue"]
 
-# Data layer (Rust-bundled — currently only Polars). SQLite + DuckDB are
-# JS-side via @sqlite.org/sqlite-wasm and @duckdb/duckdb-wasm respectively;
-# wired through the runtime bridge, not this crate.
+# Data layer (Rust-bundled — currently only Polars). SQLite is JS-side
+# via @sqlite.org/sqlite-wasm, wired through the runtime bridge, not
+# this crate.
 polars-frames = ["dep:polars"]
 
 # Visualization

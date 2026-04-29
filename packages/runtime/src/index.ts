@@ -101,10 +101,9 @@ export type {
   ExecutorOptions,
 } from "./reactiveExecutor";
 
-// DuckDB sidecar (P3.1) — opt-in. Workbooks that need DuckDB-specific
-// SQL features dynamic-import this module; the ~7 MB chunk doesn't
-// download for workbooks that only use Polars/Rhai/charts.
-export { runDuckdbSql } from "./duckdbSidecar";
+// (DuckDB sidecar export removed — core-0id.7. Polars-SQL covers
+// analytical SQL; SQLite stub in wasmBridge.ts is the non-Polars
+// roadmap.)
 
 // LLM service client (T-LLM.1) — typed contract matching
 // proto/workbook/llm/v1/llm.proto. Tier 1 browser transport ships now;
