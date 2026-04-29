@@ -43,6 +43,14 @@
       "types": "./src/wasmBridge.ts",
       "default": "./src/wasmBridge.ts"
     },
+    "./cellAnalyzer": {
+      "types": "./src/cellAnalyzer.ts",
+      "default": "./src/cellAnalyzer.ts"
+    },
+    "./reactiveExecutor": {
+      "types": "./src/reactiveExecutor.ts",
+      "default": "./src/reactiveExecutor.ts"
+    },
     "./blocks/*": {
       "svelte": "./src/blocks/*"
     },

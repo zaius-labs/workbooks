@@ -59,6 +59,10 @@ export {
 // matching `proto/workbook/runtime/v1/runtime.proto > WorkbookRuntimeService`.
 export { createRuntimeClient } from "./wasmBridge";
 export type {
+  Cell,
+  CellLanguage,
+  CellOutput,
+  Environment,
   RuntimeClient,
   RuntimeClientOptions,
   WasmLoader,
@@ -69,3 +73,20 @@ export type {
   RunCellResponse,
   BuildInfo,
 } from "./wasmBridge";
+
+// Static cell analyzer (P3.4) — extracts reads/provides from cell sources
+// to drive DAG construction without requiring authors to declare every
+// dependency by hand.
+export { analyzeCell, extractSqlReads, extractRhaiReads } from "./cellAnalyzer";
+export type { CellAnalysis } from "./cellAnalyzer";
+
+// Reactive executor (P3.7) — builds the cell DAG, runs cells in topo
+// order, re-runs only downstream subgraphs when inputs change. Debounced
+// 200ms by default. Pair with createRuntimeClient() to get an end-to-end
+// reactive workbook.
+export { ReactiveExecutor } from "./reactiveExecutor";
+export type {
+  CellState,
+  CellStatus,
+  ExecutorOptions,
+} from "./reactiveExecutor";
