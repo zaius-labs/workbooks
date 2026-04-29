@@ -44,6 +44,15 @@ import { sanitizeSvg } from "./util/sanitize";
 
 // ----------------------------------------------------------------------
 // Plugin registry — third parties can register cell languages.
+//
+// Two scopes are supported:
+//   1. Module-global (legacy): registerWorkbookCell() / getRegisteredCell().
+//      Anyone who imports the runtime sees the same map. Convenient for
+//      one-workbook-per-page apps but unsafe for multi-tenant pages.
+//   2. Per-mount (preferred, core-0id.11): pass `cellRegistry` to
+//      mountHtmlWorkbook. Plugins registered there are scoped to that
+//      single mount — independent workbooks on the same page can register
+//      different executors for the same language without colliding.
 // ----------------------------------------------------------------------
 
 export interface CustomCellExecutor {
@@ -57,6 +66,24 @@ export interface CustomCellExecutor {
   /** Optional: render a custom output element. If unset, default
    *  output rendering kicks in (text/csv/image dispatch). */
   renderOutput?: (target: HTMLElement, outputs: CellOutput[]) => void;
+}
+
+/**
+ * Scoped cell registry. Construct one per workbook mount and pass it to
+ * mountHtmlWorkbook via `cellRegistry`. Lookup falls back to the
+ * module-global registry when a language is not present locally.
+ */
+export interface WorkbookCellRegistry {
+  register(language: string, impl: CustomCellExecutor): void;
+  get(language: string): CustomCellExecutor | undefined;
+}
+
+export function createWorkbookCellRegistry(): WorkbookCellRegistry {
+  const map = new Map<string, CustomCellExecutor>();
+  return {
+    register(language, impl) { map.set(language, impl); },
+    get(language) { return map.get(language); },
+  };
 }
 
 const customCellRegistry = new Map<string, CustomCellExecutor>();
@@ -196,6 +223,13 @@ export interface MountOptions {
   llmClient?: LlmClient;
   /** Override the document. Defaults to global `document`. */
   doc?: Document;
+  /**
+   * Per-mount cell registry. Lookups fall back to the module-global
+   * registry (`registerWorkbookCell`) when a language isn't present here.
+   * Use this on multi-workbook pages so plugins don't collide across
+   * mounts. (core-0id.11)
+   */
+  cellRegistry?: WorkbookCellRegistry;
 }
 
 export async function mountHtmlWorkbook(opts: MountOptions): Promise<{
@@ -209,6 +243,11 @@ export async function mountHtmlWorkbook(opts: MountOptions): Promise<{
 
   const spec = parseWorkbookHtml(root);
 
+  // Per-mount → module-global lookup chain (core-0id.11).
+  const localRegistry = opts.cellRegistry;
+  const lookupCustom = (language: string): CustomCellExecutor | undefined =>
+    localRegistry?.get(language) ?? customCellRegistry.get(language);
+
   // Build a runtime client that knows how to dispatch built-in cells via
   // wasm AND custom-registered cells via the plugin registry.
   const wasmClient = createRuntimeClient({
@@ -220,7 +259,7 @@ export async function mountHtmlWorkbook(opts: MountOptions): Promise<{
   const client: RuntimeClient = {
     ...wasmClient,
     async runCell(req) {
-      const custom = customCellRegistry.get(req.cell.language);
+      const custom = lookupCustom(req.cell.language);
       if (custom) {
         const outputs = await custom.execute({
           source: req.cell.source ?? "",
@@ -254,7 +293,7 @@ export async function mountHtmlWorkbook(opts: MountOptions): Promise<{
       // CSS.escape is cheap defense-in-depth — guarantees the
       // selector can't be tricked even if parser validation regresses.
       for (const out of doc.querySelectorAll(`wb-output[for="${CSS.escape(state.cellId)}"]`)) {
-        renderOutputElement(out as HTMLElement, state, spec.cells);
+        renderOutputElement(out as HTMLElement, state, spec.cells, lookupCustom);
       }
     },
   });
@@ -345,6 +384,7 @@ function renderOutputElement(
   el: HTMLElement,
   state: CellState,
   cells: Cell[],
+  lookupCustom: (language: string) => CustomCellExecutor | undefined,
 ): void {
   const cellId = el.getAttribute("for");
   if (!cellId) return;
@@ -367,7 +407,7 @@ function renderOutputElement(
 
   // Custom output renderer wins.
   if (cell) {
-    const custom = customCellRegistry.get(cell.language);
+    const custom = lookupCustom(cell.language);
     if (custom?.renderOutput) {
       el.innerHTML = "";
       custom.renderOutput(el, state.outputs);

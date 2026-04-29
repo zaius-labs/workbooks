@@ -147,11 +147,13 @@ export {
   mountHtmlWorkbook,
   registerWorkbookCell,
   getRegisteredCell,
+  createWorkbookCellRegistry,
 } from "./htmlBindings";
 export type {
   WorkbookContext,
   CustomCellExecutor,
   MountOptions,
+  WorkbookCellRegistry,
 } from "./htmlBindings";
 
 // Model artifact resolver (P4.2) — content-addressed IndexedDB cache for
