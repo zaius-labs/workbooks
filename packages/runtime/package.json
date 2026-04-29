@@ -102,6 +102,10 @@
       "types": "./src/autosave.ts",
       "default": "./src/autosave.ts"
     },
+    "./packageWorkbook": {
+      "types": "./src/packageWorkbook.ts",
+      "default": "./src/packageWorkbook.ts"
+    },
     "./sqliteSidecar": {
       "types": "./src/sqliteSidecar.ts",
       "default": "./src/sqliteSidecar.ts"
@@ -208,6 +212,7 @@
     "vite": "^6.0.0"
   },
   "dependencies": {
-    "dompurify": "^3.2.0"
+    "dompurify": "^3.2.0",
+    "fflate": "^0.8.0"
   }
 }

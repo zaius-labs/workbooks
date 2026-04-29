@@ -218,6 +218,13 @@ export type {
 export { exportWorkbookHtml, installAutosave } from "./autosave";
 export type { AutosaveOptions, AutosaveHandle } from "./autosave";
 
+// Workbook packager — produces a .workbook.zip with extracted assets
+// + rewritten HTML refs. The right shape when assets exceed the 25 MB
+// inline cap (videos especially). downloadWorkbookZip wraps it in a
+// click-to-download convenience.
+export { packageWorkbook, downloadWorkbookZip } from "./packageWorkbook";
+export type { PackageWorkbookOptions } from "./packageWorkbook";
+
 // Workbook history resolver — content-addressed Merkle commit chain
 // of the workbook itself. Parser + types are live; the Prolly Tree
 // reader is backed by the Rust+WASM Prolly Tree primitive in
