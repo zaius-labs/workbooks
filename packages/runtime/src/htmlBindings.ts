@@ -53,6 +53,10 @@ import {
   createWorkbookDocResolver,
   type WorkbookDocResolver,
 } from "./workbookDocResolver";
+import {
+  createWorkbookHistoryResolver,
+  type WorkbookHistoryResolver,
+} from "./workbookHistoryResolver";
 
 // ----------------------------------------------------------------------
 // Plugin registry — third parties can register cell languages.
@@ -230,6 +234,38 @@ export interface WorkbookDoc {
     | { kind: "external"; src: string; sha256: string; bytes?: number };
 }
 
+/**
+ * A `<wb-history>` block — content-addressed, structurally-mergeable
+ * version history of the workbook itself. Where `<wb-doc>` carries
+ * the live state of one document, `<wb-history>` carries the chain
+ * of commits that produced the current workbook.
+ *
+ * Backed by a Prolly Tree (Merkle-B-tree with rolling-hash chunk
+ * boundaries — same primitive Dolt and IPLD use). Each commit
+ * points at a root chunk hash; chunks are content-addressed so
+ * corruption is detectable and structural three-way merge is
+ * possible across forked workbooks. The body is a base64'd
+ * serialization of the chunk dictionary plus a head pointer.
+ *
+ *   <wb-history id="changelog" format="prolly-v1"
+ *               head-sha256="abc..." encoding="base64"
+ *               sha256="def...">PROLLY1...</wb-history>
+ *
+ * Status: parser + types only this commit. Real implementation is
+ * the 2-3 month Prolly-Tree-in-Rust+WASM epic — no maintained JS
+ * library exists. The resolver stub validates and throws; the
+ * format is locked so future work doesn't need a breaking change.
+ */
+export interface WorkbookHistory {
+  id: string;
+  format: "prolly-v1";
+  /** sha256 of the current HEAD commit chunk. */
+  headSha256: string;
+  source:
+    | { kind: "inline-base64"; base64: string; sha256: string }
+    | { kind: "external"; src: string; sha256: string; bytes?: number };
+}
+
 interface WorkbookHtmlSpec {
   name: string;
   cells: Cell[];
@@ -238,6 +274,7 @@ interface WorkbookHtmlSpec {
   data: WorkbookData[];
   memory: WorkbookMemory[];
   docs: WorkbookDoc[];
+  history: WorkbookHistory[];
 }
 
 /**
@@ -347,6 +384,13 @@ const MAX_MEMORY_BLOCKS = 16;
 const MAX_DOC_BLOCKS = 8;
 const ALLOWED_DOC_FORMATS = new Set<WorkbookDoc["format"]>(["loro"]);
 
+/** `<wb-history>` caps. A workbook should have at most one history
+ *  block (the chain of commits that produced it). The cap is 2 to
+ *  accommodate the unusual case of two parallel histories being
+ *  reconciled mid-merge. */
+const MAX_HISTORY_BLOCKS = 2;
+const ALLOWED_HISTORY_FORMATS = new Set<WorkbookHistory["format"]>(["prolly-v1"]);
+
 function clipString(raw: string, maxBytes: number): string {
   if (raw.length <= maxBytes) return raw;
   return raw.slice(0, maxBytes);
@@ -381,6 +425,7 @@ export function parseWorkbookHtml(root: Element): WorkbookHtmlSpec {
   const data: WorkbookData[] = [];
   const memory: WorkbookMemory[] = [];
   const docs: WorkbookDoc[] = [];
+  const history: WorkbookHistory[] = [];
   let aggregateInlineBytes = 0;
 
   // Inputs.
@@ -621,7 +666,66 @@ export function parseWorkbookHtml(root: Element): WorkbookHtmlSpec {
     if (entry) docs.push(entry);
   }
 
-  return { name, cells, inputs, agents, data, memory, docs };
+  // <wb-history> Prolly Tree blocks. Versioned commit chain of the
+  // workbook itself. Format is locked here; real implementation
+  // (chunk store + structural merge) is the dedicated Rust+WASM
+  // Prolly-Tree epic — the resolver stub validates and throws until
+  // it lands, but blocks parse cleanly so the file format doesn't
+  // change when the implementation arrives.
+  for (const el of root.querySelectorAll("wb-history")) {
+    if (history.length >= MAX_HISTORY_BLOCKS) break;
+    const id = validId(el.getAttribute("id"));
+    if (!id) continue;
+    if (usedIds.has(id)) continue;
+    usedIds.add(id);
+
+    const formatAttr = el.getAttribute("format") as WorkbookHistory["format"] | null;
+    if (!formatAttr || !ALLOWED_HISTORY_FORMATS.has(formatAttr)) continue;
+
+    const sha256Attr = (el.getAttribute("sha256") ?? "").toLowerCase();
+    const sha256 = VALID_SHA256.test(sha256Attr) ? sha256Attr : null;
+    if (!sha256) continue;
+
+    const headShaAttr = (el.getAttribute("head-sha256") ?? "").toLowerCase();
+    const headSha256 = VALID_SHA256.test(headShaAttr) ? headShaAttr : null;
+    if (!headSha256) continue;
+
+    const srcAttr = el.getAttribute("src");
+    const encoding = (el.getAttribute("encoding") ?? "").toLowerCase();
+
+    let entry: WorkbookHistory | null = null;
+
+    if (srcAttr) {
+      if (!isFetchableUrl(srcAttr)) continue;
+      const bytes = parseBytesAttr(el.getAttribute("bytes"));
+      entry = {
+        id,
+        format: formatAttr,
+        headSha256,
+        source: { kind: "external", src: srcAttr, sha256, bytes },
+      };
+    } else if (encoding === "base64") {
+      const raw = el.textContent ?? "";
+      const base64 = raw.replace(/\s+/g, "");
+      if (!base64) continue;
+      if (base64.length > MAX_INLINE_BASE64_CHARS) continue;
+      const approxBytes = Math.floor((base64.length * 3) / 4);
+      if (aggregateInlineBytes + approxBytes > MAX_AGGREGATE_INLINE_BYTES) continue;
+      aggregateInlineBytes += approxBytes;
+      entry = {
+        id,
+        format: formatAttr,
+        headSha256,
+        source: { kind: "inline-base64", base64, sha256 },
+      };
+    } else {
+      continue;
+    }
+
+    if (entry) history.push(entry);
+  }
+
+  return { name, cells, inputs, agents, data, memory, docs, history };
 }
 
 function coerceValue(raw: string, type: string): unknown {
@@ -670,6 +774,14 @@ export interface MountOptions {
    * Loro dispatcher per mount.
    */
   docResolver?: WorkbookDocResolver;
+  /**
+   * Override the resolver used to materialize `<wb-history>` Prolly
+   * Tree blocks. Default builds a stub that verifies bytes and throws
+   * on traversal — the real Prolly Tree reader is a dedicated epic.
+   * Pass a configured resolver with `bytesOnly: true` to opt into
+   * raw-bytes resolution if the host ships its own reader.
+   */
+  historyResolver?: WorkbookHistoryResolver;
 }
 
 export async function mountHtmlWorkbook(opts: MountOptions): Promise<{
@@ -777,6 +889,15 @@ export async function mountHtmlWorkbook(opts: MountOptions): Promise<{
       await client.registerDoc(id, resolved.handle);
     }
     mergedInputs[id] = resolved.handle.toJSON();
+  }
+
+  // Resolve <wb-history> blocks only when the host explicitly opts in
+  // by passing a historyResolver. The default behavior is to leave
+  // history blocks unresolved — workbooks that embed history but
+  // whose host doesn't know how to read it should still mount cleanly.
+  // The format is parsed and validated above; only traversal is gated.
+  if (opts.historyResolver && spec.history.length > 0) {
+    await opts.historyResolver.resolveAll(spec.history);
   }
 
   const executor = new ReactiveExecutor({

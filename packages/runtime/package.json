@@ -94,6 +94,10 @@
       "types": "./src/loroSidecar.ts",
       "default": "./src/loroSidecar.ts"
     },
+    "./workbookHistoryResolver": {
+      "types": "./src/workbookHistoryResolver.ts",
+      "default": "./src/workbookHistoryResolver.ts"
+    },
     "./sqliteSidecar": {
       "types": "./src/sqliteSidecar.ts",
       "default": "./src/sqliteSidecar.ts"

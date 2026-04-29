@@ -157,6 +157,7 @@ export type {
   WorkbookData,
   WorkbookMemory,
   WorkbookDoc,
+  WorkbookHistory,
 } from "./htmlBindings";
 
 // Model artifact resolver (P4.2) — content-addressed IndexedDB cache for
@@ -203,6 +204,19 @@ export type {
 } from "./workbookDocResolver";
 export { createLoroDispatcher } from "./loroSidecar";
 export type { LoroDispatcher, LoroDocHandle, DocOp } from "./loroSidecar";
+
+// Workbook history resolver — content-addressed Merkle commit chain
+// of the workbook itself. Parser + types are live; the Prolly Tree
+// reader is the dedicated multi-month epic. Resolver verifies bytes
+// and throws on traversal until that work lands; pass bytesOnly=true
+// to opt into raw-bytes resolution for hosts shipping their own
+// readers.
+export { createWorkbookHistoryResolver } from "./workbookHistoryResolver";
+export type {
+  ResolvedHistory,
+  WorkbookHistoryResolver,
+  WorkbookHistoryResolverOptions,
+} from "./workbookHistoryResolver";
 
 // SQLite cell dispatcher — JS-side sidecar around @sqlite.org/sqlite-wasm.
 // Hosts that need to evict cached DB handles (e.g. on workbook unmount)
