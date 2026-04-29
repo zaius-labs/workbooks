@@ -10,15 +10,18 @@ rustflags = [
 ]
 
 # Apple's bundled clang doesn't ship the wasm32 backend, so any C-deps
-# (lz4-sys for parquet, rusqlite-bundled, duckdb-bundled) fail with "No
-# available targets are compatible with triple wasm32-unknown-unknown".
-# Route C compilation through Homebrew LLVM, which DOES include wasm32.
+# (zstd-sys for polars-ipc, lz4-sys for parquet, rusqlite-bundled,
+# duckdb-bundled) fail with "No available targets are compatible with
+# triple wasm32-unknown-unknown". Route C compilation through Homebrew
+# LLVM, which DOES include wasm32.
 #
-# Set these via env if the path is different on another machine:
-#   export CC_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/clang
-#   export AR_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/llvm-ar
-#
-# We don't hard-code the path in cargo config because it varies per machine.
+# Defaults below assume the standard Apple-Silicon Homebrew prefix
+# (/opt/homebrew/opt/llvm). Override per-machine by exporting in your
+# shell — env vars take precedence over [env] entries here:
+#   export CC_wasm32_unknown_unknown=/path/to/llvm/bin/clang
+#   export CXX_wasm32_unknown_unknown=/path/to/llvm/bin/clang++
+#   export AR_wasm32_unknown_unknown=/path/to/llvm/bin/llvm-ar
 [env]
-# Hint to the cc crate which compiler to use for the wasm target.
-# Override by exporting the env var of the same name in your shell.
+CC_wasm32_unknown_unknown = { value = "/opt/homebrew/opt/llvm/bin/clang", force = false }
+CXX_wasm32_unknown_unknown = { value = "/opt/homebrew/opt/llvm/bin/clang++", force = false }
+AR_wasm32_unknown_unknown = { value = "/opt/homebrew/opt/llvm/bin/llvm-ar", force = false }

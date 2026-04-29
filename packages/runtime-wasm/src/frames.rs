@@ -11,6 +11,8 @@
 //! execution lands in P3.2.
 
 use crate::outputs::CellOutput;
+use polars::io::ipc::IpcStreamReader;
+use polars::io::SerReader;
 use polars::prelude::*;
 use polars::sql::SQLContext;
 use serde::{Deserialize, Serialize};
@@ -80,21 +82,13 @@ fn run_polars_sql_inner(sql: String, csv: String) -> Result<Vec<CellOutput>, Str
 /// IPC bytes and threads them into RunCellRequest.memoryTables, which
 /// the JS dispatcher passes here.
 ///
-/// Pipeline:
-///   bytes → arrow-rs IpcStreamReader → RecordBatch
-///         → arrow-rs CsvWriter → CSV string
-///         → polars CsvReader → LazyFrame
+/// Pipeline (native, post-toolchain-fix):
+///   bytes → polars::io::ipc::IpcStreamReader → DataFrame.lazy()
 ///         → registered in SQLContext under the table name
 ///
-/// Going through CSV is the wasm32-friendly path. Polars's own `ipc`
-/// feature pulls zstd-sys which doesn't compile to wasm32 without a
-/// wasi sysroot we don't have yet. arrow-rs's IPC reader doesn't
-/// require any compression codecs (we only enable the `ipc` and `csv`
-/// arrow features), so it builds cleanly. Performance is suboptimal —
-/// double encode/decode through CSV — but correctness holds and the
-/// path is unblocked. When the wasi-sdk story lands, replace this
-/// with `IpcStreamReader::new(...).finish().lazy()` and ditch the
-/// CSV intermediate.
+/// Polars `ipc` feature is enabled in Cargo.toml; the C-deps it pulls
+/// in (zstd-sys, lz4) compile via Homebrew LLVM's wasm32 backend
+/// (configured in .cargo/config.toml). No CSV bridge intermediate.
 ///
 /// Returns the result frame as CSV plus a table output stub.
 ///
@@ -198,40 +192,13 @@ fn run_polars_sql_ipc_inner(
     let mut ctx = SQLContext::new();
 
     for (name, bytes) in tables {
-        // arrow-rs IPC stream → RecordBatches.
-        let reader = arrow::ipc::reader::StreamReader::try_new(Cursor::new(bytes), None)
-            .map_err(|e| format!("ipc reader init for table '{name}': {e}"))?;
-        let batches: Vec<arrow::record_batch::RecordBatch> = reader
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("ipc read batches for table '{name}': {e}"))?;
-        if batches.is_empty() {
-            // Schema-only stream produces an empty table — register a
-            // zero-row LazyFrame so SQL queries against it parse cleanly.
-            ctx.register(&name, DataFrame::default().lazy());
-            continue;
-        }
-
-        // RecordBatches → CSV (with header) → Polars LazyFrame.
-        // CSV is the wasm32-friendly bridge until polars-ipc lands;
-        // arrow-rs CSV writer handles type rendering correctly.
-        let mut csv_buf: Vec<u8> = Vec::new();
-        {
-            let mut writer = arrow::csv::WriterBuilder::new()
-                .with_header(true)
-                .build(&mut csv_buf);
-            for batch in &batches {
-                writer
-                    .write(batch)
-                    .map_err(|e| format!("arrow csv write for table '{name}': {e}"))?;
-            }
-        }
-        let lf = CsvReadOptions::default()
-            .with_has_header(true)
-            .into_reader_with_file_handle(Cursor::new(csv_buf))
+        // Native Polars IPC stream reader — direct path. Replaces the
+        // earlier arrow-rs → CSV bridge once homebrew-clang routing
+        // unblocked zstd-sys / lz4-sys C compilation for wasm32.
+        let df = IpcStreamReader::new(Cursor::new(bytes))
             .finish()
-            .map_err(|e| format!("polars csv parse for table '{name}': {e}"))?
-            .lazy();
-        ctx.register(&name, lf);
+            .map_err(|e| format!("polars ipc parse for table '{name}': {e}"))?;
+        ctx.register(&name, df.lazy());
     }
 
     let result = ctx

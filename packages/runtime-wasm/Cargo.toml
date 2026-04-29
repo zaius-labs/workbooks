@@ -90,12 +90,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde-wasm-bindgen = "0.6"
 
-# Arrow IPC for the data plane. `csv` enables RecordBatch ↔ CSV
-# conversion which we use to bridge IPC bytes from <wb-memory>
-# blocks into Polars-SQL via its CSV reader. (Polars's own `ipc`
-# feature pulls zstd-sys which needs a wasm32 C toolchain we don't
-# have yet — see Cargo.toml comments above on wasi-sdk.)
-arrow = { version = "53", default-features = false, features = ["ipc", "csv"] }
+# Arrow IPC for the data plane. We use arrow-rs directly for
+# appendArrowIpc (schema-checked stream concat) — Polars's own ipc
+# now handles cell-side reading (homebrew-clang wasm32 routing
+# unblocks the zstd-sys / lz4-sys C deps; see .cargo/config.toml).
+arrow = { version = "53", default-features = false, features = ["ipc"] }
 
 # Optional feature crates (gated above)
 polars = { version = "0.45", optional = true, default-features = false, features = [
@@ -103,7 +102,7 @@ polars = { version = "0.45", optional = true, default-features = false, features
   # SQL frontend. Parquet and dtype-full pull in lz4-sys / zstd-sys C deps
   # that need a wasm32 C toolchain — opt those in via a separate feature
   # once we have wasm32 cc set up.
-  "lazy", "csv", "json", "strings", "temporal", "sql",
+  "lazy", "csv", "json", "strings", "temporal", "sql", "ipc", "ipc_streaming",
 ] }
 plotters = { version = "0.3", optional = true, default-features = false, features = [
   "svg_backend", "line_series", "histogram", "area_series",
