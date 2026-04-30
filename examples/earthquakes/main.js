@@ -10,7 +10,7 @@ import { loadRuntime } from "virtual:workbook-runtime";
 import * as d3 from "d3";
 import * as topojson from "topojson-client";
 import worldAtlas from "world-atlas/countries-110m.json";
-import { tableFromIPC } from "apache-arrow";
+import { tableFromIPC } from "workbook:data";
 import eventsSnapshot from "./events.ipc.json";
 
 const els = {

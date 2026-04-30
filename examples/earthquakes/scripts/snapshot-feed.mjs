@@ -5,7 +5,7 @@
 // `connect-src` allowance to USGS needed at render time.
 
 import { writeFileSync } from "node:fs";
-import { tableFromArrays, tableToIPC } from "apache-arrow";
+import { fromArrays, tableToIPC } from "workbook:data";
 import { createHash } from "node:crypto";
 
 const URL_USGS =
@@ -31,7 +31,7 @@ const rows = (geo.features ?? [])
 
 console.log(`  rows: ${rows.length}`);
 
-const table = tableFromArrays({
+const table = fromArrays({
   ts: BigInt64Array.from(rows.map((r) => BigInt(r.ts))),
   mag: Float64Array.from(rows.map((r) => r.mag)),
   depth: Float64Array.from(rows.map((r) => r.depth)),

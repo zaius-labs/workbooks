@@ -248,6 +248,7 @@
         "workbook": "./bin/workbook.mjs",
       },
       "dependencies": {
+        "apache-arrow": "^21.1.0",
         "unist-util-visit": "^5.0.0",
         "vite": "^6.0.0",
         "vite-plugin-singlefile": "^2.0.0",

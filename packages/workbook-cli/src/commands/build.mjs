@@ -5,6 +5,7 @@ import { build as viteBuild } from "vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
 import { loadConfig } from "../util/config.mjs";
 import workbookPlugin from "../plugins/workbookInline.mjs";
+import workbookVirtualModulesPlugin from "../plugins/virtualModules.mjs";
 
 export async function runBuild({ project = ".", out, runtime, wasm } = {}) {
   const config = await loadConfig(project);
@@ -12,6 +13,10 @@ export async function runBuild({ project = ".", out, runtime, wasm } = {}) {
   const inlineRuntime = wasm === false ? false : config.inlineRuntime;
 
   const plugins = [
+    // Resolve `workbook:*` virtual module imports to the SDK shipped
+    // with the CLI. Must run before viteSingleFile/workbookPlugin so
+    // the SDK source is in the module graph by the time inlining runs.
+    workbookVirtualModulesPlugin(),
     // viteSingleFile inlines all JS + CSS into the HTML. Without it,
     // Vite emits separate /assets/*.js + .css files and the HTML
     // <script>/<link> them — which defeats single-file portability.

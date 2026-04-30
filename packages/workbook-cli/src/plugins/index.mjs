@@ -14,3 +14,4 @@
 //   };
 
 export { default as workbookPlugin } from "./workbookInline.mjs";
+export { default as workbookVirtualModulesPlugin } from "./virtualModules.mjs";

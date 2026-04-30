@@ -10,6 +10,12 @@
 
 import { loadRuntime } from "virtual:workbook-runtime";
 import * as d3 from "d3";
+// Reach for the apache-arrow escape hatch via the facade — the table
+// build below uses explicit Utf8 vectors and mixed typed arrays, so
+// it's already past what `fromArrays` covers. Importing through
+// `workbook:data` keeps the rule clean and gives us one place to swap
+// the underlying impl later.
+import { arrow, tableToIPC } from "workbook:data";
 import { mountSettings } from "../_shared/settings.js";
 import pricesCsvText from "./prices.csv?raw";
 
@@ -196,8 +202,6 @@ async function loadInitialRows(csv) {
  * changes (ticker added/removed).
  */
 async function rebuildIpc() {
-  const arrow = await import("apache-arrow");
-
   // Build per-ticker arrays so we can drop the first row (no prev close
   // → daily_return is undefined). Polars wasm doesn't reliably filter
   // NaN values via SQL, and apache-arrow's tableFromArrays can't

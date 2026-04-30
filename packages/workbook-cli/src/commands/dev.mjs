@@ -5,10 +5,14 @@ import fs from "node:fs/promises";
 import { createServer } from "vite";
 import { loadConfig } from "../util/config.mjs";
 import workbookPlugin from "../plugins/workbookInline.mjs";
+import workbookVirtualModulesPlugin from "../plugins/virtualModules.mjs";
 
 export async function runDev({ project = ".", port, runtime } = {}) {
   const config = await loadConfig(project);
-  const plugins = [workbookPlugin({ config, runtimeOverride: runtime })];
+  const plugins = [
+    workbookVirtualModulesPlugin(),
+    workbookPlugin({ config, runtimeOverride: runtime }),
+  ];
 
   // Auto-load Svelte plugin if the project has it as a dep.
   const sveltePlugin = await tryLoadSveltePlugin(config.root);
