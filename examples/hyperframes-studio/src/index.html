@@ -7,6 +7,16 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body class="bg-page text-fg antialiased">
+    <!-- Workbook runtime root. The single <wb-doc> declares the
+         persistent CRDT state for the studio (composition + asset
+         registry, both managed via Loro inside one doc). The runtime
+         registers a LoroDocHandle here at mount; the studio's
+         loroBackend.svelte.js reads it via window.__wbRuntime. State
+         lives in this element on disk — no IndexedDB. -->
+    <wb-workbook>
+      <wb-doc id="hyperframes-state" format="loro" history-horizon="200"></wb-doc>
+    </wb-workbook>
+
     <div id="app"></div>
     <script type="module" src="./main.js"></script>
   </body>

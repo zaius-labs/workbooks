@@ -17,87 +17,56 @@
 // Assets use Loro List semantics — concurrent push lands cleanly via
 // the list CRDT.
 //
-// Storage: one Loro snapshot bytes blob round-trips through IDB
-// under WORKBOOK_KEY. We migrate older keys once on first boot:
+// Persistence — file-as-database. The Loro doc is registered with the
+// workbook runtime via the <wb-doc id="hyperframes-state"> element in
+// index.html. The runtime's save handler exports the doc's bytes back
+// into that element on Cmd+S, so all state lives in the
+// .workbook.html file. NO IndexedDB. NO localStorage. Two copies of
+// the file can never share state — each saved file is its own
+// universe.
 //
-//   workbook.loro       (current)         ← canonical
-//   composition.loro    (prior shape)     ← imports once, dormant
-//   composition         (legacy plain)    ← imports html into Text
-//   assets              (legacy IDB blob) ← imports into list, dormant
-//
-// Earlier shapes used getMap("composition").set("html", …); on
-// migration we copy any Map state into the Text container so the
-// canonical home is always the Text. Map state is left in place for
-// readers that still consult it but is no longer written to.
+// On load, the runtime parses any prior bytes in the <wb-doc> element
+// and instantiates a LoroDoc from them; bootstrapLoro() retrieves the
+// resulting handle from window.__wbRuntime.
 
-import { loadState, markDirty } from "./persistence.svelte.js";
-// Static import — vite-plugin-singlefile mishandles the dynamic
-// `import("loro-crdt")` form by flattening all chunks into one inline
-// <script> with broken hoist order. Static resolves the dep graph at
-// build time so vite-plugin-wasm can transform consistently.
-import { LoroDoc } from "loro-crdt";
+const DOC_ID = "hyperframes-state";
 
-const WORKBOOK_KEY = "workbook.loro";
-const PRIOR_LORO_KEY = "composition.loro";  // earlier shape: composition only
-const LEGACY_KEY = "composition";             // earliest: plain-string IDB blob
-
-let _doc = null;            // populated post-bootstrap
+let _doc = null;            // raw LoroDoc (handle.inner())
 let _bootPromise = null;
 
-/** Bootstrap the Loro doc once. Subsequent calls reuse the cached
- *  promise; sync callers use getDoc() after awaiting bootstrap(). */
+/**
+ * Resolve the raw LoroDoc registered by the workbook runtime for our
+ * <wb-doc id="hyperframes-state"> element. Idempotent — subsequent
+ * calls reuse the cached promise.
+ *
+ * Returns the LoroDoc; throws if the runtime never registered the
+ * doc (e.g. main.js skipped mountHtmlWorkbook). Callers that prefer
+ * graceful degradation can wrap in try/catch.
+ */
 export function bootstrapLoro() {
   if (_bootPromise) return _bootPromise;
   _bootPromise = (async () => {
-    const doc = new LoroDoc();
-
-    // Try the current key first; then the prior composition-only key;
-    // then the original plain-string blob. Earliest match wins as
-    // canonical state and migrates forward on next save.
-    const savedBytes = await loadState(WORKBOOK_KEY);
-    if (savedBytes instanceof Uint8Array && savedBytes.byteLength > 0) {
-      try {
-        doc.import(savedBytes);
-      } catch (e) {
-        console.warn("hf loro: snapshot import failed, starting fresh:", e?.message ?? e);
-      }
-    } else {
-      const priorBytes = await loadState(PRIOR_LORO_KEY);
-      if (priorBytes instanceof Uint8Array && priorBytes.byteLength > 0) {
-        try { doc.import(priorBytes); }
-        catch (e) { console.warn("hf loro: prior snapshot import failed:", e?.message ?? e); }
-      } else {
-        const legacy = await loadState(LEGACY_KEY);
-        if (legacy && typeof legacy.html === "string" && legacy.html.length > 0) {
-          doc.getText("composition").insert(0, legacy.html);
-          doc.commit();
-        }
-      }
-      // Migrate prior Map-backed composition into the Text container.
-      // The Map was used by the earlier Phase-1 of #27; the Text is
-      // the canonical home from #32 onward. We don't clear the Map
-      // (older readers still consult it) but new writes go to Text.
-      const priorMap = doc.getMap("composition").get("html");
-      const currentText = doc.getText("composition").toString();
-      if (typeof priorMap === "string" && priorMap.length > 0 && currentText.length === 0) {
-        doc.getText("composition").insert(0, priorMap);
-        doc.commit();
-      }
-      // Migrate the prior asset-list IDB blob ("assets") into the doc
-      // if no list state has landed in Loro yet. After this commit it
-      // becomes dormant.
-      const legacyAssets = await loadState("assets");
-      if (legacyAssets && Array.isArray(legacyAssets.items) && doc.getList("assets").length === 0) {
-        const list = doc.getList("assets");
-        for (const a of legacyAssets.items) {
-          try { list.push(JSON.stringify(a)); } catch { /* skip bad entries */ }
-        }
-        doc.commit();
-      }
+    // The runtime exposes its client at window.__wbRuntime after
+    // mountHtmlWorkbook resolves. main.js awaits both before we're
+    // called, so the handle should be present.
+    const rt = typeof window !== "undefined"
+      ? window.__wbRuntime
+      : null;
+    if (!rt || typeof rt.getDocHandle !== "function") {
+      throw new Error(
+        "loroBackend: window.__wbRuntime not initialized — " +
+        "did main.js call mountHtmlWorkbook before bootstrapLoro?",
+      );
     }
-
-    _doc = doc;
-    return doc;
+    const handle = rt.getDocHandle(DOC_ID);
+    if (!handle || typeof handle.inner !== "function") {
+      throw new Error(
+        `loroBackend: <wb-doc id="${DOC_ID}"> wasn't registered. ` +
+        `Make sure index.html has <wb-workbook><wb-doc id="${DOC_ID}" format="loro" /></wb-workbook>.`,
+      );
+    }
+    _doc = handle.inner();
+    return _doc;
   })();
   return _bootPromise;
 }
@@ -118,8 +87,7 @@ export function readComposition() {
  *  (full-string set, prepend, append, in-place patch) with one
  *  delete + one insert at the right position, so concurrent edits
  *  to non-overlapping regions of the composition merge cleanly via
- *  Loro's text CRDT. Optimal-diff (Myers et al.) is a future
- *  optimization for many-small-edits scenarios. */
+ *  Loro's text CRDT. */
 function diffShrink(oldStr, newStr) {
   const oldLen = oldStr.length;
   const newLen = newStr.length;
@@ -143,11 +111,9 @@ function diffShrink(oldStr, newStr) {
   };
 }
 
-/** Apply a new composition html as Loro Text ops + commit. The
- *  snapshot save is debounced via markDirty in the persistence
- *  coordinator. Awaits bootstrap so writes that fire before the
- *  Loro WASM finishes loading are queued and applied as soon as
- *  the doc is ready (instead of silently dropping). */
+/** Apply a new composition html as Loro Text ops + commit. Awaits
+ *  bootstrap so writes fired before the runtime finishes loading
+ *  are queued and applied as soon as the doc is ready. */
 export async function writeComposition(html) {
   await bootstrapLoro();
   if (!_doc) return;
@@ -159,12 +125,11 @@ export async function writeComposition(html) {
   if (deleteLen > 0) text.delete(start, deleteLen);
   if (insertText.length > 0) text.insert(start, insertText);
   _doc.commit();
-  scheduleSave();
 }
 
 /** Force-export the current snapshot synchronously. Used by the
- *  Package flow when it needs canonical bytes regardless of debounce
- *  state. Returns null if the doc isn't bootstrapped yet. */
+ *  Package flow when it needs canonical bytes for an external file
+ *  format (zip export). Returns null if the doc isn't bootstrapped. */
 export function snapshotCompositionBytes() {
   return _doc ? _doc.export({ mode: "snapshot" }) : null;
 }
@@ -173,8 +138,7 @@ export function snapshotCompositionBytes() {
 //
 // Asset entries serialize as JSON strings inside a top-level Loro
 // List. Reads parse back into the in-memory shape the assets store
-// uses. Concurrent forks merge via Loro's List CRDT (RGA-flavored
-// for ordered list inserts).
+// uses. Concurrent forks merge via Loro's List CRDT.
 
 /** Read all assets from the Loro list. Returns [] if the doc isn't
  *  bootstrapped or the list is empty. Drops entries that fail to
@@ -197,7 +161,6 @@ export async function pushAsset(asset) {
   if (!_doc) return;
   _doc.getList("assets").push(JSON.stringify(asset));
   _doc.commit();
-  scheduleSave();
 }
 
 /** Remove an asset by id — walks the list, finds the first matching
@@ -215,7 +178,6 @@ export async function removeAssetById(id) {
       if (parsed?.id === id) {
         list.delete(i, 1);
         _doc.commit();
-        scheduleSave();
         return;
       }
     } catch { /* skip */ }
@@ -233,11 +195,4 @@ export async function replaceAssets(items) {
     list.push(JSON.stringify(a));
   }
   _doc.commit();
-  scheduleSave();
-}
-
-function scheduleSave() {
-  markDirty(WORKBOOK_KEY, () => {
-    return _doc ? _doc.export({ mode: "snapshot" }) : null;
-  });
 }

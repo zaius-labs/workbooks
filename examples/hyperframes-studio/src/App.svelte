@@ -11,32 +11,14 @@
   import { agent } from "./lib/agent.svelte.js";
   import { mcpBridge, isMcpMode } from "./lib/mcpBridge.svelte.js";
   import { exportProject } from "./lib/exportProject.js";
-  import { onStatusChange, flushNow } from "./lib/persistence.svelte.js";
+  // Persistence is the workbook runtime's job — Cmd+S is handled by
+  // the SDK's save handler (it serializes <wb-doc> state into the
+  // .workbook.html file with its own toast). Nothing to wire here.
 
   let settingsOpen = $state(false);
   let renderOpen = $state(false);
   let packaging = $state(false);
   let packageStatus = $state("");
-
-  // Autosave status indicator — driven by the persistence coordinator.
-  // Stays subtle: a single character + tooltip rather than a chip.
-  let saveState = $state("idle");   // idle | saving | saved | error
-  let saveError = $state("");
-  onStatusChange((status, err) => {
-    saveState = status;
-    saveError = err ?? "";
-  });
-
-  // Cmd/Ctrl+S forces an immediate flush of any pending writes —
-  // useful before manually closing the tab. Browsers default this to
-  // "save page as", which we override since the running app already
-  // has a Package button for explicit file save.
-  function onKeyDown(e) {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
-      e.preventDefault();
-      flushNow();
-    }
-  }
 
   async function onPackage() {
     if (packaging) return;
@@ -84,8 +66,6 @@
     return () => window.removeEventListener("resize", onResize);
   });
 </script>
-
-<svelte:window onkeydown={onKeyDown} />
 
 <div class="grid h-screen min-h-0 grid-rows-[44px_minmax(0,1fr)]">
   <header class="flex items-stretch gap-1 px-2 border-b border-border bg-page">
@@ -164,31 +144,11 @@
       {env.satisfied ? "● connected" : "○ no key"}
     </span>
 
-    <!-- Autosave indicator — IDB-backed, debounced. Single-glyph form
-         keeps the toolbar quiet; tooltip carries the detail. -->
-    <span
-      class="font-mono text-[10px] tabular-nums self-center w-12 text-center select-none"
-      class:text-fg-faint={saveState === "idle" || saveState === "saved"}
-      class:text-amber-400={saveState === "saving"}
-      class:text-red-400={saveState === "error"}
-      title={
-        saveState === "saving" ? "Saving to IndexedDB…" :
-        saveState === "saved" ? "All changes saved" :
-        saveState === "error" ? `Save failed: ${saveError}` :
-        "Idle"
-      }
-      aria-label={
-        saveState === "saving" ? "Saving" :
-        saveState === "saved" ? "All changes saved" :
-        saveState === "error" ? "Save error" :
-        "Idle"
-      }
-    >
-      {saveState === "saving" ? "saving…" :
-       saveState === "saved" ? "saved" :
-       saveState === "error" ? "err" :
-       ""}
-    </span>
+    <!-- Autosave indicator removed — Cmd+S is handled by the SDK
+         save handler now (with its own toast); state lives in the
+         <wb-doc> element inside the .workbook.html file rather than
+         a debounced IDB write. -->
+
 
     <!-- Package · download project as .workbook.zip with extracted assets -->
     <button

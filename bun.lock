@@ -71,7 +71,6 @@
       "version": "0.1.0",
       "dependencies": {
         "@work.books/runtime": "workspace:*",
-        "loro-crdt": "^1.0.0",
         "svelte": "^5.0.0",
       },
       "devDependencies": {
@@ -187,7 +186,7 @@
     },
     "packages/runtime": {
       "name": "@work.books/runtime",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "dependencies": {
         "@noble/ed25519": "^3",
         "@noble/hashes": "^2",
@@ -655,8 +654,6 @@
     "locate-character": ["locate-character@3.0.0", "", {}, "sha512-SW13ws7BjaeJ6p7Q6CO2nchbYEc3X3J6WrmTTDto7yMPqVSZTUyY5Tjbid+Ab8gLnATtygYtiDIJGQRRn2ZOiA=="],
 
     "lodash.camelcase": ["lodash.camelcase@4.3.0", "", {}, "sha512-TwuEnCnxbc3rAvhf/LbG7tJUDzhqXyFnv3dtzLOPgCG/hODL7WFnsbwktkD7yUV0RrreP/l1PALq/YSg6VvjlA=="],
-
-    "loro-crdt": ["loro-crdt@1.12.1", "", {}, "sha512-iHDGq4RaTHr6CFbXqV91ngKyVlB2NuYXz0q9t0Dedr8sQnbcPNdFs4DaqzDNP1jojuygFvYv12gt407M22OeQg=="],
 
     "magic-string": ["magic-string@0.30.21", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5" } }, "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ=="],
 
