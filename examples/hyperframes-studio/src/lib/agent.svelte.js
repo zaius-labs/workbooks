@@ -85,6 +85,23 @@ function getRuntime() {
  *  can register the same tools onto window.__workbook_mcp without
  *  duplication — the in-app chat agent and an external MCP client
  *  invoke the exact same closures over composition + assets. */
+
+// Plugin-registered extra tools. plugins.svelte.js calls
+// registerExtraTool when a third-party module installs; buildTools
+// concats these onto the built-in list so the agent sees them.
+const extraTools = [];
+
+/** Add a tool to the agent's surface. Used by plugins. Idempotent
+ *  by definition.name — re-registering with the same name replaces. */
+export function registerExtraTool(tool) {
+  if (!tool?.definition?.name) {
+    throw new Error("registerExtraTool: tool.definition.name is required");
+  }
+  const idx = extraTools.findIndex((t) => t.definition.name === tool.definition.name);
+  if (idx >= 0) extraTools[idx] = tool;
+  else extraTools.push(tool);
+}
+
 export function buildTools() {
   return [
     {
@@ -283,6 +300,10 @@ export function buildTools() {
         return `inserted ${a.name} at ${startVal.toFixed(2)}s for ${dur.toFixed(2)}s on lane ${idx}`;
       },
     },
+    // Plugin-registered tools come last so they can't shadow built-ins
+    // (which would be confusing). registerExtraTool replaces by name
+    // within the extra list, but built-ins always win.
+    ...extraTools,
   ];
 }
 

@@ -72,14 +72,21 @@ export function listSkills() {
   return skills;
 }
 
+import { userSkills } from "./userSkills.svelte.js";
+
 /** Load a skill file by normalized path. Accepts:
  *    - the skill key alone (loads its SKILL.md): "hyperframes"
  *    - explicit SKILL: "hyperframes/SKILL"
  *    - a sub-document path: "hyperframes/references/captions"
+ *    - a user-uploaded skill: "user/<name>"
  *  Returns the raw markdown string, or null if not found. */
 export function loadSkill(path) {
   if (typeof path !== "string" || !path) return null;
   const norm = path.replace(/\.md$/, "").replace(/^\/+|\/+$/g, "");
+  if (norm.startsWith("user/")) {
+    const found = userSkills.get(norm.slice("user/".length));
+    return found ? found.content : null;
+  }
   if (files[norm]) return files[norm];
   if (files[norm + "/SKILL"]) return files[norm + "/SKILL"];
   return null;
@@ -96,11 +103,17 @@ export function listSkillFiles() {
  *  prompt (cheap), the body is only loaded when the agent decides
  *  it's relevant via load_skill('<key>'). */
 export function skillsPromptBlock() {
-  if (!skills.length) return "";
   const lines = skills.map((s) => `- ${s.key}: ${s.description}`);
+  // Also surface user-uploaded skills so the agent knows it can
+  // call load_skill('user/<name>') for them.
+  for (const us of userSkills.items) {
+    const description = (us.content.match(/^#+\s+(.+)/m)?.[1] ?? "user-provided skill").trim();
+    lines.push(`- user/${us.name}: ${description}`);
+  }
+  if (!lines.length) return "";
   return [
     "",
-    "Available skills (call load_skill('<key>') to read; sub-paths like 'hyperframes/references/captions' work too):",
+    "Available skills (call load_skill('<key>') to read; sub-paths like 'hyperframes/references/captions' work too; user-provided skills are prefixed 'user/'):",
     ...lines,
   ].join("\n");
 }

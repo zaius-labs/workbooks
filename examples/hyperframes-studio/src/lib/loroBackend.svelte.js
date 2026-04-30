@@ -196,3 +196,49 @@ export async function replaceAssets(items) {
   }
   _doc.commit();
 }
+
+// ─── User-uploaded skills ─────────────────────────────────────────
+//
+// Skill markdown files the user has dragged into the Skills Manager.
+// Same JSON-string-in-Loro-list pattern as assets. Round-trips
+// through the .workbook.html save flow alongside everything else.
+
+/** Read all user skills. Returns [{ name, content }, ...]. */
+export function readUserSkills() {
+  if (!_doc) return [];
+  const list = _doc.getList("user-skills");
+  const out = [];
+  for (const v of list.toArray()) {
+    if (typeof v !== "string") continue;
+    try { out.push(JSON.parse(v)); } catch { /* skip */ }
+  }
+  return out;
+}
+
+/** Append one user skill. */
+export async function pushUserSkill(skill) {
+  await bootstrapLoro();
+  if (!_doc) return;
+  _doc.getList("user-skills").push(JSON.stringify(skill));
+  _doc.commit();
+}
+
+/** Remove a user skill by name. */
+export async function removeUserSkillByName(name) {
+  await bootstrapLoro();
+  if (!_doc) return;
+  const list = _doc.getList("user-skills");
+  const arr = list.toArray();
+  for (let i = 0; i < arr.length; i++) {
+    const v = arr[i];
+    if (typeof v !== "string") continue;
+    try {
+      const parsed = JSON.parse(v);
+      if (parsed?.name === name) {
+        list.delete(i, 1);
+        _doc.commit();
+        return;
+      }
+    } catch { /* skip */ }
+  }
+}

@@ -6,6 +6,8 @@
   import RenderModal from "./components/RenderModal.svelte";
   import Splitter from "./components/Splitter.svelte";
   import MenuBar from "./components/MenuBar.svelte";
+  import PluginManager from "./components/PluginManager.svelte";
+  import SkillManager from "./components/SkillManager.svelte";
   import { env } from "./lib/env.svelte.js";
   import { layout } from "./lib/layout.svelte.js";
   import { mcpBridge, isMcpMode } from "./lib/mcpBridge.svelte.js";
@@ -17,6 +19,8 @@
 
   let settingsOpen = $state(false);
   let renderOpen = $state(false);
+  let pluginsOpen = $state(false);
+  let skillsOpen = $state(false);
   let packaging = $state(false);
   let packageStatus = $state("");
 
@@ -121,6 +125,8 @@
       onPackage={onPackage}
       onRender={() => renderOpen = true}
       onSettings={() => settingsOpen = true}
+      onPluginManager={() => pluginsOpen = true}
+      onSkillManager={() => skillsOpen = true}
     />
 
     <span class="flex-1"></span>
@@ -198,6 +204,8 @@
 
 <SettingsModal bind:open={settingsOpen} />
 <RenderModal bind:open={renderOpen} />
+<PluginManager bind:open={pluginsOpen} />
+<SkillManager bind:open={skillsOpen} />
 
 <!-- Hidden file input for File > Open Project. Accepts hyperframe.html
      and .workbook.html — projectIO.openProject sniffs the format. -->
