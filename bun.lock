@@ -10,6 +10,127 @@
         "age-encryption": "^0.2",
       },
     },
+    "examples/dependency-chain": {
+      "name": "@work.books/example-dependency-chain",
+      "version": "0.1.0",
+      "dependencies": {
+        "@work.books/runtime": "*",
+        "svelte": "^5.0.0",
+      },
+      "devDependencies": {
+        "@sveltejs/vite-plugin-svelte": "^5.0.0",
+        "@work.books/cli": "*",
+        "mdsvex": "^0.12.0",
+        "vite": "^6.0.0",
+      },
+    },
+    "examples/document-mdx": {
+      "name": "@work.books/example-document-mdx",
+      "version": "0.1.0",
+      "dependencies": {
+        "svelte": "^5.0.0",
+      },
+      "devDependencies": {
+        "@sveltejs/vite-plugin-svelte": "^5.0.0",
+        "@work.books/cli": "*",
+        "mdsvex": "^0.12.0",
+        "vite": "^6.0.0",
+      },
+    },
+    "examples/hyperframes-studio": {
+      "name": "@work.books/example-hyperframes-studio",
+      "version": "0.1.0",
+      "dependencies": {
+        "@work.books/runtime": "workspace:*",
+        "loro-crdt": "^1.0.0",
+        "svelte": "^5.0.0",
+      },
+      "devDependencies": {
+        "@sveltejs/vite-plugin-svelte": "^5.0.0",
+        "@tailwindcss/vite": "^4.2.0",
+        "@work.books/cli": "*",
+        "tailwindcss": "^4.2.0",
+        "vite": "^6.0.0",
+        "vite-plugin-wasm": "^3.3.0",
+      },
+    },
+    "examples/notebook-agent": {
+      "name": "@work.books/example-notebook-agent",
+      "version": "0.1.0",
+      "dependencies": {
+        "svelte": "^5.0.0",
+      },
+      "devDependencies": {
+        "@sveltejs/vite-plugin-svelte": "^5.0.0",
+        "@work.books/cli": "*",
+        "vite": "^6.0.0",
+      },
+    },
+    "examples/notebook-mdx": {
+      "name": "@work.books/example-notebook-mdx",
+      "version": "0.1.0",
+      "dependencies": {
+        "@work.books/runtime": "*",
+        "svelte": "^5.0.0",
+      },
+      "devDependencies": {
+        "@sveltejs/vite-plugin-svelte": "^5.0.0",
+        "@work.books/cli": "*",
+        "mdsvex": "^0.12.0",
+        "vite": "^6.0.0",
+      },
+    },
+    "examples/regress-headclose-in-js": {
+      "name": "@work.books/regress-headclose-in-js",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@work.books/cli": "*",
+        "vite": "^6.0.0",
+      },
+    },
+    "examples/svelte-app": {
+      "name": "@work.books/example-svelte-app",
+      "version": "0.1.0",
+      "dependencies": {
+        "svelte": "^5.0.0",
+        "svelte-spa-router": "^4.0.1",
+      },
+      "devDependencies": {
+        "@sveltejs/vite-plugin-svelte": "^5.0.0",
+        "@work.books/cli": "*",
+        "vite": "^6.0.0",
+      },
+    },
+    "examples/tailwind-app": {
+      "name": "@work.books/example-tailwind-app",
+      "version": "0.1.0",
+      "dependencies": {
+        "svelte": "^5.0.0",
+      },
+      "devDependencies": {
+        "@sveltejs/vite-plugin-svelte": "^5.0.0",
+        "@tailwindcss/vite": "^4.2.0",
+        "@work.books/cli": "*",
+        "tailwindcss": "^4.2.0",
+        "vite": "^6.0.0",
+      },
+    },
+    "examples/talk-to-csv": {
+      "name": "@work.books/example-talk-to-csv",
+      "version": "0.1.0",
+      "dependencies": {
+        "age-encryption": "^0.2.4",
+        "svelte": "^5.0.0",
+      },
+      "devDependencies": {
+        "@sveltejs/vite-plugin-svelte": "^5.0.0",
+        "@tailwindcss/vite": "^4.2.0",
+        "@work.books/cli": "*",
+        "@work.books/runtime": "*",
+        "tailwindcss": "^4.2.0",
+        "vite": "^6.0.0",
+      },
+    },
     "packages/runtime": {
       "name": "@work.books/runtime",
       "version": "0.5.0",
@@ -65,127 +186,6 @@
     "packages/runtime-wasm": {
       "name": "@work.books/runtime-wasm",
       "version": "0.2.4",
-    },
-    "packages/runtime-wasm/examples/dependency-chain": {
-      "name": "@work.books/example-dependency-chain",
-      "version": "0.1.0",
-      "dependencies": {
-        "@work.books/runtime": "*",
-        "svelte": "^5.0.0",
-      },
-      "devDependencies": {
-        "@sveltejs/vite-plugin-svelte": "^5.0.0",
-        "@work.books/cli": "*",
-        "mdsvex": "^0.12.0",
-        "vite": "^6.0.0",
-      },
-    },
-    "packages/runtime-wasm/examples/document-mdx": {
-      "name": "@work.books/example-document-mdx",
-      "version": "0.1.0",
-      "dependencies": {
-        "svelte": "^5.0.0",
-      },
-      "devDependencies": {
-        "@sveltejs/vite-plugin-svelte": "^5.0.0",
-        "@work.books/cli": "*",
-        "mdsvex": "^0.12.0",
-        "vite": "^6.0.0",
-      },
-    },
-    "packages/runtime-wasm/examples/hyperframes-studio": {
-      "name": "@work.books/example-hyperframes-studio",
-      "version": "0.1.0",
-      "dependencies": {
-        "@work.books/runtime": "workspace:*",
-        "loro-crdt": "^1.0.0",
-        "svelte": "^5.0.0",
-      },
-      "devDependencies": {
-        "@sveltejs/vite-plugin-svelte": "^5.0.0",
-        "@tailwindcss/vite": "^4.2.0",
-        "@work.books/cli": "*",
-        "tailwindcss": "^4.2.0",
-        "vite": "^6.0.0",
-        "vite-plugin-wasm": "^3.3.0",
-      },
-    },
-    "packages/runtime-wasm/examples/notebook-agent": {
-      "name": "@work.books/example-notebook-agent",
-      "version": "0.1.0",
-      "dependencies": {
-        "svelte": "^5.0.0",
-      },
-      "devDependencies": {
-        "@sveltejs/vite-plugin-svelte": "^5.0.0",
-        "@work.books/cli": "*",
-        "vite": "^6.0.0",
-      },
-    },
-    "packages/runtime-wasm/examples/notebook-mdx": {
-      "name": "@work.books/example-notebook-mdx",
-      "version": "0.1.0",
-      "dependencies": {
-        "@work.books/runtime": "*",
-        "svelte": "^5.0.0",
-      },
-      "devDependencies": {
-        "@sveltejs/vite-plugin-svelte": "^5.0.0",
-        "@work.books/cli": "*",
-        "mdsvex": "^0.12.0",
-        "vite": "^6.0.0",
-      },
-    },
-    "packages/runtime-wasm/examples/regress-headclose-in-js": {
-      "name": "@work.books/regress-headclose-in-js",
-      "version": "0.1.0",
-      "devDependencies": {
-        "@work.books/cli": "*",
-        "vite": "^6.0.0",
-      },
-    },
-    "packages/runtime-wasm/examples/svelte-app": {
-      "name": "@work.books/example-svelte-app",
-      "version": "0.1.0",
-      "dependencies": {
-        "svelte": "^5.0.0",
-        "svelte-spa-router": "^4.0.1",
-      },
-      "devDependencies": {
-        "@sveltejs/vite-plugin-svelte": "^5.0.0",
-        "@work.books/cli": "*",
-        "vite": "^6.0.0",
-      },
-    },
-    "packages/runtime-wasm/examples/tailwind-app": {
-      "name": "@work.books/example-tailwind-app",
-      "version": "0.1.0",
-      "dependencies": {
-        "svelte": "^5.0.0",
-      },
-      "devDependencies": {
-        "@sveltejs/vite-plugin-svelte": "^5.0.0",
-        "@tailwindcss/vite": "^4.2.0",
-        "@work.books/cli": "*",
-        "tailwindcss": "^4.2.0",
-        "vite": "^6.0.0",
-      },
-    },
-    "packages/runtime-wasm/examples/talk-to-csv": {
-      "name": "@work.books/example-talk-to-csv",
-      "version": "0.1.0",
-      "dependencies": {
-        "age-encryption": "^0.2.4",
-        "svelte": "^5.0.0",
-      },
-      "devDependencies": {
-        "@sveltejs/vite-plugin-svelte": "^5.0.0",
-        "@tailwindcss/vite": "^4.2.0",
-        "@work.books/cli": "*",
-        "@work.books/runtime": "*",
-        "tailwindcss": "^4.2.0",
-        "vite": "^6.0.0",
-      },
     },
     "packages/workbook-cli": {
       "name": "@work.books/cli",
@@ -379,23 +379,23 @@
 
     "@work.books/cli": ["@work.books/cli@workspace:packages/workbook-cli"],
 
-    "@work.books/example-dependency-chain": ["@work.books/example-dependency-chain@workspace:packages/runtime-wasm/examples/dependency-chain"],
+    "@work.books/example-dependency-chain": ["@work.books/example-dependency-chain@workspace:examples/dependency-chain"],
 
-    "@work.books/example-document-mdx": ["@work.books/example-document-mdx@workspace:packages/runtime-wasm/examples/document-mdx"],
+    "@work.books/example-document-mdx": ["@work.books/example-document-mdx@workspace:examples/document-mdx"],
 
-    "@work.books/example-hyperframes-studio": ["@work.books/example-hyperframes-studio@workspace:packages/runtime-wasm/examples/hyperframes-studio"],
+    "@work.books/example-hyperframes-studio": ["@work.books/example-hyperframes-studio@workspace:examples/hyperframes-studio"],
 
-    "@work.books/example-notebook-agent": ["@work.books/example-notebook-agent@workspace:packages/runtime-wasm/examples/notebook-agent"],
+    "@work.books/example-notebook-agent": ["@work.books/example-notebook-agent@workspace:examples/notebook-agent"],
 
-    "@work.books/example-notebook-mdx": ["@work.books/example-notebook-mdx@workspace:packages/runtime-wasm/examples/notebook-mdx"],
+    "@work.books/example-notebook-mdx": ["@work.books/example-notebook-mdx@workspace:examples/notebook-mdx"],
 
-    "@work.books/example-svelte-app": ["@work.books/example-svelte-app@workspace:packages/runtime-wasm/examples/svelte-app"],
+    "@work.books/example-svelte-app": ["@work.books/example-svelte-app@workspace:examples/svelte-app"],
 
-    "@work.books/example-tailwind-app": ["@work.books/example-tailwind-app@workspace:packages/runtime-wasm/examples/tailwind-app"],
+    "@work.books/example-tailwind-app": ["@work.books/example-tailwind-app@workspace:examples/tailwind-app"],
 
-    "@work.books/example-talk-to-csv": ["@work.books/example-talk-to-csv@workspace:packages/runtime-wasm/examples/talk-to-csv"],
+    "@work.books/example-talk-to-csv": ["@work.books/example-talk-to-csv@workspace:examples/talk-to-csv"],
 
-    "@work.books/regress-headclose-in-js": ["@work.books/regress-headclose-in-js@workspace:packages/runtime-wasm/examples/regress-headclose-in-js"],
+    "@work.books/regress-headclose-in-js": ["@work.books/regress-headclose-in-js@workspace:examples/regress-headclose-in-js"],
 
     "@work.books/runtime": ["@work.books/runtime@workspace:packages/runtime"],
 

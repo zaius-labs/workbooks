@@ -10,15 +10,15 @@
   "homepage": "https://github.com/zaius-labs/workbooks",
   "workspaces": [
     "packages/*",
-    "packages/runtime-wasm/examples/svelte-app",
-    "packages/runtime-wasm/examples/notebook-agent",
-    "packages/runtime-wasm/examples/tailwind-app",
-    "packages/runtime-wasm/examples/document-mdx",
-    "packages/runtime-wasm/examples/notebook-mdx",
-    "packages/runtime-wasm/examples/dependency-chain",
-    "packages/runtime-wasm/examples/regress-headclose-in-js",
-    "packages/runtime-wasm/examples/hyperframes-studio",
-    "packages/runtime-wasm/examples/talk-to-csv"
+    "examples/svelte-app",
+    "examples/notebook-agent",
+    "examples/tailwind-app",
+    "examples/document-mdx",
+    "examples/notebook-mdx",
+    "examples/dependency-chain",
+    "examples/regress-headclose-in-js",
+    "examples/hyperframes-studio",
+    "examples/talk-to-csv"
   ],
   "scripts": {
     "build": "pnpm -r --filter ./packages/* build",
