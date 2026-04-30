@@ -2,6 +2,7 @@
   import { composition } from "../lib/composition.svelte.js";
   import { layout, ZOOM_PRESETS } from "../lib/layout.svelte.js";
   import RangeEditorPopover from "./RangeEditorPopover.svelte";
+  import { timelineClipActions } from "../lib/pluginApi.svelte.js";
 
   let rangeEditor = $state(null); // { clip, anchor: {x, y} }
 
@@ -503,6 +504,32 @@
     /* Hover doesn't change the selected accent — keeps the cue stable. */
     border-color: var(--color-accent);
   }
+
+  /* Plugin-registered clip action row — only rendered when one
+   * clip is selected (see {#if} above). Sits above the clip body
+   * with a subtle drop shadow so it reads as its own toolbar. */
+  .clip-actions {
+    position: absolute;
+    top: -22px;
+    right: 0;
+    display: flex;
+    gap: 2px;
+    z-index: 5;
+    pointer-events: auto;
+  }
+  .clip-actions button {
+    height: 20px; min-width: 20px;
+    padding: 0 6px;
+    background: var(--color-fg);
+    color: white;
+    border: 0;
+    border-radius: 3px;
+    font: 10px var(--font-mono);
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+    transition: opacity 100ms ease;
+  }
+  .clip-actions button:hover { opacity: 0.85; }
 </style>
 
 <RangeEditorPopover
@@ -666,6 +693,34 @@
                     role="slider"
                     tabindex="-1"
                   ></div>
+                {/if}
+
+                <!-- Plugin-registered clip actions. Visible only
+                     when exactly ONE clip is selected and that clip
+                     is THIS one. Each plugin's `when` predicate
+                     filters the action set. Pointer events stop
+                     here so the parent's drag/select gesture
+                     doesn't fire when clicking an action button. -->
+                {#if selectedIds.size === 1 && selectedIds.has(c.id) && timelineClipActions.length > 0}
+                  <div class="clip-actions">
+                    {#each timelineClipActions as action (action.pluginId + ":" + action.label)}
+                      {#if !action.when || action.when(c)}
+                        <button
+                          type="button"
+                          onpointerdown={(ev) => ev.stopPropagation()}
+                          onclick={(ev) => {
+                            ev.stopPropagation();
+                            try {
+                              const r = action.onClick(c);
+                              if (r && typeof r.then === "function") r.catch((e) => console.warn(`clip action ${action.pluginId}:`, e));
+                            } catch (e) { console.warn(`clip action ${action.pluginId}:`, e); }
+                          }}
+                          title={action.label + " · " + action.pluginId}
+                          aria-label={action.label}
+                        >{action.icon ?? action.label.slice(0, 2)}</button>
+                      {/if}
+                    {/each}
+                  </div>
                 {/if}
               </div>
             {/each}
