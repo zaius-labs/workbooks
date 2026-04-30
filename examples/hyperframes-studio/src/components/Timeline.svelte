@@ -5,6 +5,16 @@
 
   let rangeEditor = $state(null); // { clip, anchor: {x, y} }
 
+  // Selection model. Plain click on a clip replaces; Cmd/Ctrl+click
+  // toggles in/out of the multi-set. Backspace or Delete removes
+  // every selected clip (when focus isn't in an input/textarea).
+  // Click on empty timeline area clears the selection. Shift+click
+  // is reserved for the existing RangeEditor popover.
+  let selectedIds = $state(new Set());
+  function isMultiSelectKey(ev) {
+    return ev.metaKey || ev.ctrlKey;
+  }
+
   let trackEl;
   let dragging = $state(false);
   let hoverX = $state(null);
@@ -309,9 +319,24 @@
       rangeEditor = { clip, anchor: { x: ev.clientX, y: ev.clientY } };
       return;
     }
+    ev.stopPropagation();
+    // Selection bookkeeping happens here AND on pointer-up: down
+    // tentatively selects (so the next move is over the right clip
+    // even if no drag happens), up commits. Cmd/Ctrl+click toggles
+    // without affecting other selections.
+    if (isMultiSelectKey(ev)) {
+      const next = new Set(selectedIds);
+      if (next.has(clip.id)) next.delete(clip.id);
+      else next.add(clip.id);
+      selectedIds = next;
+    } else if (!selectedIds.has(clip.id)) {
+      // Replace selection only if the clip wasn't already selected;
+      // otherwise leave the multi-selection intact so a drag can
+      // move the whole group later (group-drag is a future feature).
+      selectedIds = new Set([clip.id]);
+    }
     if (!clip.caps?.canMove) return;
     ev.preventDefault();
-    ev.stopPropagation();
     ev.currentTarget.setPointerCapture(ev.pointerId);
     composition.playing = false;
     const frame = document.querySelector("iframe[title='HyperFrames preview']");
@@ -342,6 +367,40 @@
     try { ev.currentTarget.releasePointerCapture(ev.pointerId); } catch {}
     moving = null;
   }
+
+  // Click empty timeline area → clear selection. Bound on the lanes
+  // wrapper; clip pointer-down stops propagation so this only fires
+  // for genuine empty-area clicks.
+  function onLanesPointerDown(ev) {
+    if (ev.button !== 0) return;
+    if (ev.shiftKey || isMultiSelectKey(ev)) return;
+    if (selectedIds.size > 0) selectedIds = new Set();
+  }
+
+  // Backspace / Delete deletes every selected clip. Skip when focus
+  // is in an editable element so the studio's chat / inputs / etc.
+  // continue to behave normally.
+  function isEditableTarget(target) {
+    if (!(target instanceof HTMLElement)) return false;
+    const tag = target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+    if (target.isContentEditable) return true;
+    return false;
+  }
+  function onWindowKeydown(ev) {
+    if (ev.key !== "Backspace" && ev.key !== "Delete") return;
+    if (selectedIds.size === 0) return;
+    if (isEditableTarget(ev.target)) return;
+    ev.preventDefault();
+    const ids = [...selectedIds];
+    selectedIds = new Set();
+    for (const id of ids) composition.removeClipById(id);
+  }
+
+  $effect(() => {
+    window.addEventListener("keydown", onWindowKeydown);
+    return () => window.removeEventListener("keydown", onWindowKeydown);
+  });
 </script>
 
 <style>
@@ -427,35 +486,22 @@
   .studio-clip[data-role="b-roll"]    { --color-studio-clip-bg: color-mix(in srgb, #4ade80 18%, transparent); --color-studio-clip-border: color-mix(in srgb, #4ade80 60%, transparent); }
   .studio-clip[data-role="audio"]     { --color-studio-clip-bg: color-mix(in srgb, #facc15 18%, transparent); --color-studio-clip-border: color-mix(in srgb, #facc15 60%, transparent); }
 
-  /* Per-clip delete button — hidden until hover so the clip face
-   * stays clean at rest. Sits in the top-right corner, overlapping
-   * the trim-end handle by enough to remain clickable on small
-   * clips. Pointer events stay on the button so the parent's
-   * pan/select gesture isn't started by clicking the X. */
-  .clip-delete {
-    position: absolute;
-    top: 1px;
-    right: 1px;
-    width: 16px;
-    height: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0, 0, 0, 0.4);
-    color: rgba(255, 255, 255, 0.85);
-    border: 0;
-    border-radius: 3px;
-    font-size: 14px;
-    line-height: 1;
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 100ms ease, background 100ms ease, color 100ms ease;
-    z-index: 4;
+  /* Selected clip — visual prominence above hover/trim states.
+   * Solid accent border + glow so multi-selection reads at a
+   * glance. The variant is data-role-aware (the role-coloured
+   * background still wins) so a selected b-roll clip stays green
+   * but gains the selection border. */
+  .studio-clip.selected {
+    border-color: var(--color-accent);
+    box-shadow:
+      inset 0 0 0 1px var(--color-accent),
+      0 0 0 1px color-mix(in srgb, var(--color-accent) 60%, transparent),
+      0 0 12px color-mix(in srgb, var(--color-accent) 32%, transparent);
+    color: var(--color-fg);
   }
-  .studio-clip:hover .clip-delete { opacity: 1; }
-  .clip-delete:hover {
-    background: rgba(220, 38, 38, 0.85);
-    color: white;
+  .studio-clip.selected:hover {
+    /* Hover doesn't change the selected accent — keeps the cue stable. */
+    border-color: var(--color-accent);
   }
 </style>
 
@@ -578,15 +624,16 @@
       </div>
 
       <!-- Clip lanes -->
-      <div class="relative space-y-1 mt-3">
+      <div class="relative space-y-1 mt-3" onpointerdown={onLanesPointerDown}>
         {#each lanes as lane, li (li)}
           <div class="studio-row relative h-9">
             {#each lane as c, i (c.id + ":" + i)}
               <div
-                title={`${c.id}${c.role ? ` · ${c.role}` : ""}${c.group ? ` · ${c.group}` : ""}\n${c.start.toFixed(2)}s → ${(c.start + c.duration).toFixed(2)}s\n${c.label}`}
+                title={`${c.id}${c.role ? ` · ${c.role}` : ""}${c.group ? ` · ${c.group}` : ""}\n${c.start.toFixed(2)}s → ${(c.start + c.duration).toFixed(2)}s\n${c.label}\n\nClick to select · Cmd/Ctrl+click to multi-select · Backspace to delete`}
                 class="studio-clip absolute top-0.5 bottom-0.5 font-mono text-[11px] leading-7 px-2.5 truncate text-fg"
                 class:trimming={trimming?.id === c.id}
                 class:moving={moving?.id === c.id}
+                class:selected={selectedIds.has(c.id)}
                 data-role={c.role || null}
                 style="left: {c.start * layout.pps}px; width: {Math.max(2, c.duration * layout.pps)}px;"
                 onpointerdown={(ev) => onClipPointerDown(ev, c)}
@@ -595,23 +642,6 @@
                 onpointercancel={onClipPointerUp}
               >
                 <span class="opacity-60 mr-1 pointer-events-none">{c.id}</span><span class="pointer-events-none">{c.label}</span>
-
-                <!-- Delete button — visible on hover. Stops pointer
-                     events from bubbling into the clip's pan/select
-                     handler. Confirms before deleting since the
-                     timeline doesn't have undo wired. -->
-                <button
-                  class="clip-delete"
-                  onpointerdown={(ev) => ev.stopPropagation()}
-                  onclick={(ev) => {
-                    ev.stopPropagation();
-                    if (confirm(`Delete clip ${c.id}?`)) {
-                      composition.removeClipById(c.id);
-                    }
-                  }}
-                  title="Delete clip"
-                  aria-label={`Delete clip ${c.id}`}
-                >×</button>
 
                 {#if c.caps?.canTrimStart}
                   <div
