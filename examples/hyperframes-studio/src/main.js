@@ -19,6 +19,14 @@ import { mount } from "svelte";
 import App from "./App.svelte";
 import { loadRuntime } from "virtual:workbook-runtime";
 import { bootstrapLoro } from "./lib/loroBackend.svelte.js";
+// Expose loro-crdt to the runtime BEFORE we call mountHtmlWorkbook.
+// The runtime bundle runs in a Blob URL context where bare-specifier
+// dynamic imports can't resolve — Vite bundles loro into THIS
+// (user-side) bundle, and we hand it to the runtime via the global.
+import * as loro from "loro-crdt";
+if (typeof window !== "undefined") {
+  window.__wb_loro = loro;
+}
 
 (async () => {
   try {

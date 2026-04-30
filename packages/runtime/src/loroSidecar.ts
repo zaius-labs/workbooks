@@ -110,19 +110,40 @@ let loroPromise: Promise<LoroModule> | null = null;
 async function loadLoro(): Promise<LoroModule> {
   if (!loroPromise) {
     loroPromise = (async () => {
-      // Dynamic import via variable specifier so TS doesn't try to
-      // resolve the optional peer dep at compile time.
-      const specifier = "loro-crdt";
-      let mod: LoroModule;
+      // Two-step lookup:
+      //
+      //   1. window.__wb_loro — host-provided. The user's app does
+      //      `import * as loro from "loro-crdt"; window.__wb_loro = loro`
+      //      in its entry. Vite bundles loro into the user's main.js,
+      //      and we read it back on the global. Required when the
+      //      runtime bundle is loaded as a Blob URL (which can't
+      //      resolve bare-specifier imports).
+      //
+      //   2. dynamic import — fallback for hosts that load the runtime
+      //      through their own module graph (e.g. tests, dev-server
+      //      with Vite serving). Vite resolves "loro-crdt" via the
+      //      host's node_modules.
+      //
+      // Workbooks that ship a wb-doc element MUST take path 1 — the
+      // single-file inlined runtime can't reach into the user's
+      // bundle without the global.
+      type GlobalLoroHost = { __wb_loro?: LoroModule };
+      const w = (typeof window !== "undefined"
+        ? (window as Window & GlobalLoroHost)
+        : null);
+      if (w && w.__wb_loro) return w.__wb_loro;
+
       try {
-        mod = (await import(/* @vite-ignore */ specifier)) as unknown as LoroModule;
+        const mod = (await import(/* @vite-ignore */ "loro-crdt")) as unknown as LoroModule;
+        return mod;
       } catch {
         throw new Error(
-          "wb-doc cells require loro-crdt — install it as a peer dep " +
-            "or pre-bundle it with your workbook host",
+          "wb-doc cells require loro-crdt. In a single-file workbook, " +
+          "import it in your main.js and expose it as " +
+          "`window.__wb_loro = await import('loro-crdt')` before " +
+          "calling mountHtmlWorkbook.",
         );
       }
-      return mod;
     })();
   }
   return loroPromise;

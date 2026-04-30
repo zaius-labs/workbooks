@@ -3582,19 +3582,19 @@ var loroPromise = null;
 async function loadLoro() {
   if (!loroPromise) {
     loroPromise = (async () => {
-      const specifier = "loro-crdt";
-      let mod;
+      const w = typeof window !== "undefined" ? window : null;
+      if (w && w.__wb_loro) return w.__wb_loro;
       try {
-        mod = await import(
+        const mod = await import(
           /* @vite-ignore */
-          specifier
+          "loro-crdt"
         );
+        return mod;
       } catch {
         throw new Error(
-          "wb-doc cells require loro-crdt \u2014 install it as a peer dep or pre-bundle it with your workbook host"
+          "wb-doc cells require loro-crdt. In a single-file workbook, import it in your main.js and expose it as `window.__wb_loro = await import('loro-crdt')` before calling mountHtmlWorkbook."
         );
       }
-      return mod;
     })();
   }
   return loroPromise;
