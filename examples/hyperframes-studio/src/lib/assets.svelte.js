@@ -51,15 +51,33 @@ function readAsDataUrl(file) {
 
 async function probeMediaDuration(dataUrl, kind) {
   if (kind !== "video" && kind !== "audio") return null;
+  return probeMediaDurationFromSrc(dataUrl, kind);
+}
+
+async function probeMediaDurationFromSrc(src, kind) {
+  if (kind !== "video" && kind !== "audio") return null;
   return new Promise((resolve) => {
     const el = document.createElement(kind === "video" ? "video" : "audio");
     el.preload = "metadata";
-    el.src = dataUrl;
+    el.src = src;
     const done = (v) => resolve(v);
     el.onloadedmetadata = () => done(Number.isFinite(el.duration) ? +el.duration.toFixed(2) : null);
     el.onerror = () => done(null);
     setTimeout(() => done(null), 4000);
   });
+}
+
+function inferKindFromUrl(parsedUrl) {
+  const ext = parsedUrl.pathname
+    .toLowerCase()
+    .split(".")
+    .pop();
+  if (!ext || ext === parsedUrl.pathname.toLowerCase()) return null;
+  if (["png", "jpg", "jpeg", "gif", "webp", "avif"].includes(ext)) return "image";
+  if (ext === "svg") return "svg";
+  if (["mp4", "webm", "mov", "m4v", "ogv"].includes(ext)) return "video";
+  if (["mp3", "wav", "ogg", "m4a", "flac", "aac"].includes(ext)) return "audio";
+  return null;
 }
 
 class AssetsStore {
@@ -128,6 +146,78 @@ class AssetsStore {
       catch (e) { errors.push(`${f.name}: ${e.message ?? e}`); }
     }
     return { added: out, errors };
+  }
+
+  /**
+   * Add a URL-linked asset (image / video / audio). The URL becomes
+   * the `dataUrl` field; the composition embeds it via <img src=...>
+   * etc. Bytes never load into the studio — the recipient's browser
+   * fetches at playback. Cheaper than data URLs, but the rendered
+   * artifact depends on the URL staying reachable.
+   *
+   * The asset is flagged `linked: true` so the UI can mark it
+   * distinctly from embedded blobs.
+   *
+   * Kind is inferred from the URL extension; pass `opts.kind` to
+   * override (useful for query-string-bearing URLs that don't end
+   * in a recognizable extension). Duration is probed asynchronously
+   * for video/audio; failure is silent (linked assets often disallow
+   * cross-origin metadata reads).
+   *
+   * @param {string} url
+   * @param {{ name?: string, kind?: "image"|"video"|"audio"|"svg" }} [opts]
+   */
+  async addFromUrl(url, opts = {}) {
+    const trimmed = String(url ?? "").trim();
+    if (!trimmed) throw new Error("URL is empty");
+
+    let parsed;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      throw new Error(`'${trimmed}' isn't a valid URL`);
+    }
+    if (!/^https?:$/i.test(parsed.protocol)) {
+      throw new Error(`URL protocol '${parsed.protocol}' isn't supported — use http(s).`);
+    }
+
+    const kind = opts.kind ?? inferKindFromUrl(parsed);
+    if (!kind) {
+      throw new Error(
+        "Couldn't detect the asset kind from the URL. Pass it explicitly, " +
+        "or use a URL ending in a recognizable extension (.png, .jpg, .svg, .mp4, .webm, .mp3, .wav).",
+      );
+    }
+
+    const inferredName =
+      opts.name ||
+      decodeURIComponent(parsed.pathname.split("/").pop() || "") ||
+      `${kind}-linked`;
+
+    // Probe duration for video/audio. Some URLs reject cross-origin
+    // metadata reads; we silently fall back to null in that case.
+    const duration = await probeMediaDurationFromSrc(trimmed, kind);
+
+    const id = `asset-${Math.random().toString(36).slice(2, 10)}`;
+    const item = {
+      id,
+      name: inferredName,
+      type: kind === "svg" ? "image/svg+xml" : `${kind}/*`,
+      kind,
+      dataUrl: trimmed,
+      size: 0,                  // unknown for linked assets
+      duration,
+      addedAt: Date.now(),
+      linked: true,
+    };
+    this.items = [...this.items, item];
+    pushAsset(item);
+    recordEdit(
+      `asset:${item.id}`,
+      { id: item.id, name: item.name, kind: item.kind, linked: true },
+      `add linked asset ${item.name}`,
+    );
+    return item;
   }
 
   remove(id) {

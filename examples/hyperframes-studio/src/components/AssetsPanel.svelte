@@ -40,6 +40,32 @@
   }
   function onDragLeave() { dragHover = false; }
 
+  // URL import — paste an image/video/audio URL (Google Drive,
+  // S3, anywhere). Asset is flagged `linked: true` so the recipient's
+  // browser fetches at playback rather than carrying the bytes inline.
+  let urlInput = $state("");
+  let urlBusy = $state(false);
+  let urlError = $state("");
+  async function onAddUrl() {
+    const u = urlInput.trim();
+    if (!u) return;
+    urlBusy = true;
+    urlError = "";
+    try {
+      const item = await assets.addFromUrl(u);
+      lastAdded = [item.id];
+      urlInput = "";
+      setTimeout(() => { lastAdded = []; }, 1200);
+    } catch (e) {
+      urlError = e?.message ?? String(e);
+    } finally {
+      urlBusy = false;
+    }
+  }
+  function onUrlKey(ev) {
+    if (ev.key === "Enter") onAddUrl();
+  }
+
   function insertOnTimeline(asset) {
     const dur = asset.duration ?? 3;
     composition.addMediaClip({
@@ -114,7 +140,9 @@
             <div class="p-2 flex flex-col gap-1 flex-1">
               <div class="font-mono text-[11px] text-fg truncate" title={a.name}>{a.name}</div>
               <div class="font-mono text-[10px] text-fg-faint flex items-center justify-between">
-                <span>{a.kind} · {fmtBytes(a.size)}</span>
+                <span>
+                  {a.kind}{#if a.linked} · linked{:else} · {fmtBytes(a.size)}{/if}
+                </span>
                 {#if a.duration}<span class="tabular-nums">{a.duration.toFixed(1)}s</span>{/if}
               </div>
               <div class="flex gap-1 mt-auto pt-1.5">
@@ -148,26 +176,54 @@
     {/if}
   </div>
 
-  <!-- Footer: persistent action bar at the bottom of the panel. -->
-  <div class="border-t border-border px-4 py-3 flex items-center justify-between gap-2 flex-shrink-0">
-    <span class="font-mono text-[10px] text-fg-faint">
-      Cleared on reload
-    </span>
-    <input
-      bind:this={inputEl}
-      type="file"
-      multiple
-      accept="image/*,video/*,audio/*,.svg"
-      onchange={onPick}
-      class="hidden"
-    />
-    <button
-      onclick={() => inputEl?.click()}
-      disabled={importing}
-      class="px-3 h-8 rounded font-mono text-[12px] font-semibold border border-accent bg-accent text-accent-fg hover:opacity-90 cursor-pointer disabled:opacity-50"
-    >
-      {importing ? "importing…" : "+ add files"}
-    </button>
+  <!-- Footer: persistent action bar at the bottom of the panel.
+       Two routes for adding assets:
+         1. + add files: drag-and-drop or pick local files (embedded
+            as base64 — cheap to author, large in saved file).
+         2. URL: paste any http(s) image/video/audio URL — linked
+            external (cheap saved file, depends on URL availability). -->
+  <div class="border-t border-border px-4 py-2.5 flex flex-col gap-2 flex-shrink-0">
+    <div class="flex items-center gap-2">
+      <input
+        type="text"
+        bind:value={urlInput}
+        placeholder="paste an image / video / audio URL"
+        onkeydown={onUrlKey}
+        disabled={urlBusy}
+        class="flex-1 h-7 px-2 rounded border border-border bg-page text-fg font-mono text-[11px] outline-none focus:border-accent placeholder:text-fg-faint"
+      />
+      <button
+        onclick={onAddUrl}
+        disabled={urlBusy || !urlInput.trim()}
+        class="px-2.5 h-7 rounded font-mono text-[11px] border border-border bg-surface text-fg-muted hover:text-fg hover:border-border-2 cursor-pointer disabled:opacity-40"
+        title="Add a URL-linked asset (Google Drive, S3, anywhere). Bytes never load into the studio; the artifact fetches them at playback."
+      >
+        {urlBusy ? "linking…" : "link"}
+      </button>
+    </div>
+    {#if urlError}
+      <div class="font-mono text-[10px] text-red-300">{urlError}</div>
+    {/if}
+    <div class="flex items-center justify-between gap-2">
+      <span class="font-mono text-[10px] text-fg-faint">
+        files = embedded · URL = linked
+      </span>
+      <input
+        bind:this={inputEl}
+        type="file"
+        multiple
+        accept="image/*,video/*,audio/*,.svg"
+        onchange={onPick}
+        class="hidden"
+      />
+      <button
+        onclick={() => inputEl?.click()}
+        disabled={importing}
+        class="px-3 h-7 rounded font-mono text-[11px] font-semibold border border-accent bg-accent text-accent-fg hover:opacity-90 cursor-pointer disabled:opacity-50"
+      >
+        {importing ? "importing…" : "+ add files"}
+      </button>
+    </div>
   </div>
 </section>
 
