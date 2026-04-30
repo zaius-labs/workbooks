@@ -97,6 +97,21 @@ export interface WorkbookDataResolverOptions {
    * where every author is expected to sign.
    */
   signaturePolicy?: "allow" | "require";
+  /**
+   * Auto-drop the cached passphrase after N ms of inactivity. Each
+   * successful encrypted-block resolve resets the idle timer; if N
+   * ms elapse with no further resolves, the cache is cleared and
+   * the next encrypted block re-prompts via requestPassword.
+   *
+   * Default: undefined (no auto-forget — passphrase persists until
+   * explicit forgetPassphrase() or resolver GC). Reasonable values:
+   *   5 * 60_000   for sensitive data (5 min)
+   *   30 * 60_000  for low-friction UX (30 min)
+   *
+   * Useful in apps where the user opens a sensitive workbook,
+   * walks away, and someone else sits down at the laptop.
+   */
+  passphraseIdleTimeoutMs?: number;
 }
 
 const TEXT_MIMES = new Set<string>([
@@ -176,6 +191,19 @@ export function createWorkbookDataResolver(
   // parallel before the cache is filled, both would call
   // requestPassword without this single-flight promise.
   let inflightPasswordRequest: Promise<string> | null = null;
+  // Idle-forget timer. Reset on every successful decryptOrReprompt
+  // call. When it fires, cachedPassword is cleared so the next
+  // encrypted resolve re-prompts. setTimeout in ms; falsy disables.
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  function bumpIdleTimer() {
+    const ms = opts.passphraseIdleTimeoutMs;
+    if (!ms || ms <= 0) return;
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      cachedPassword = null;
+      idleTimer = null;
+    }, ms);
+  }
 
   /** Get the passphrase for encrypted blocks, prompting via the
    *  host's requestPassword callback only if we haven't already
@@ -210,6 +238,10 @@ export function createWorkbookDataResolver(
   function forgetPassphrase(): void {
     cachedPassword = null;
     inflightPasswordRequest = null;
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
   }
 
   /** Try to decrypt; on failure, drop the cached password so the
@@ -225,9 +257,16 @@ export function createWorkbookDataResolver(
     }
     const password = await getPassword();
     try {
-      return await decryptWithPassphrase(ciphertext, password);
+      const plaintext = await decryptWithPassphrase(ciphertext, password);
+      // Successful decrypt — reset the idle-forget timer.
+      bumpIdleTimer();
+      return plaintext;
     } catch (e) {
       cachedPassword = null;
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+      }
       throw new Error(
         `workbook data ${blockId}: decryption failed (likely wrong passphrase): ` +
           (e instanceof Error ? e.message : String(e)),

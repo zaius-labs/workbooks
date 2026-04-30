@@ -47,7 +47,30 @@ async function readPassword(opts) {
     return readStdinFirstLine();
   }
   if (opts["password-file"]) {
-    const data = await fs.readFile(opts["password-file"], "utf8");
+    const filePath = opts["password-file"];
+    // Permission check — reject world- or group-readable on POSIX.
+    // A passphrase file with `-rw-r--r--` is a leak waiting to
+    // happen (any other process can read it). Override via
+    // WORKBOOK_ALLOW_INSECURE_PW_FILE=1 if you really mean it.
+    try {
+      const st = await fs.stat(filePath);
+      // POSIX mode bits — ignore on platforms that don't surface them.
+      const mode = st.mode & 0o777;
+      if (mode & 0o077) {
+        const allow = process.env.WORKBOOK_ALLOW_INSECURE_PW_FILE === "1";
+        const msg =
+          `--password-file ${filePath} is group/world-readable (mode ${mode.toString(8)}). ` +
+          `Run \`chmod 600 ${filePath}\` so only you can read it. ` +
+          `Override with WORKBOOK_ALLOW_INSECURE_PW_FILE=1 if intentional.`;
+        if (!allow) throw new Error(msg);
+        process.stderr.write(`workbook encrypt: WARNING — ${msg}\n`);
+      }
+    } catch (e) {
+      // If stat itself fails we want the actual file read error to
+      // surface a clearer message — only re-throw our own check.
+      if (e?.message?.startsWith("--password-file")) throw e;
+    }
+    const data = await fs.readFile(filePath, "utf8");
     return data.split(/\r?\n/, 1)[0];
   }
   if (opts.password) return String(opts.password);
