@@ -27,7 +27,7 @@
   "scripts": {
     "build": "pnpm -r --filter ./packages/* build",
     "typecheck": "pnpm -r --filter ./packages/* typecheck",
-    "build:runtime-bundle": "esbuild examples/reactive-cells/runtime-entry.ts --bundle --format=esm --platform=browser --outfile=examples/reactive-cells/runtime.bundle.js --external:loro-crdt --external:@sqlite.org/sqlite-wasm --external:age-encryption"
+    "build:runtime-bundle": "esbuild examples/reactive-cells/runtime-entry.ts --bundle --format=esm --platform=browser --outfile=examples/reactive-cells/runtime.bundle.js --external:loro-crdt --external:@sqlite.org/sqlite-wasm --external:age-encryption --external:just-bash"
   },
   "devDependencies": {
     "@noble/ed25519": "^3",

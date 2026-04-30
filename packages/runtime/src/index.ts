@@ -168,6 +168,16 @@ export type {
   AgentLoopResult,
 } from "./agentLoop";
 
+// Framework-default `bash` agent tool (core-547) — single just-bash +
+// virtual-FS tool surface auto-mounted with the workbook's data
+// primitives. Loaded lazily on first invoke so workbooks without
+// agents never pay the cost.
+export { createWorkbookBashTool } from "./agentBashTool";
+export type {
+  CreateWorkbookBashToolOptions,
+  WorkbookBashSpecShape,
+} from "./agentBashTool";
+
 // HTML-first workbook bindings (T-HTML.1) — custom elements + parser
 // + mounter. The DOM IS the workbook; no JSON marshaling needed.
 //   <wb-workbook> <wb-input> <wb-cell> <wb-output> <wb-agent> <wb-chat>

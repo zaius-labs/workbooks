@@ -165,6 +165,14 @@ ORDER BY total_revenue DESC
       await mountHtmlWorkbook({
         loadWasm: async () => wasm,
         llmClient,
+        // Chat-only demo — the agent's job is to summarize cell
+        // outputs, not run shell scripts. Opt out of the framework
+        // default `bash` tool (core-547) so we don't pull just-bash
+        // into a static HTML page that has no bundler. Workbooks
+        // bundled with workbook-cli get bash by default; HTML-only
+        // workbooks that want it need an importmap pointing at a
+        // CDN build of just-bash.
+        disableDefaultBashTool: true,
       });
     });
   </script>

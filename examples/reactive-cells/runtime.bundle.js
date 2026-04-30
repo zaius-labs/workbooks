@@ -1044,7 +1044,170 @@ async function runAgentLoop(opts) {
   return { text: finalText, iterations, toolCalls, usage, stopReason };
 }
 
-// ../../node_modules/.bun/dompurify@3.4.1/node_modules/dompurify/dist/purify.es.mjs
+// packages/runtime/src/agentBashTool.ts
+var ROOT = "/workbook";
+var DATA_DIR = `${ROOT}/data`;
+var MEMORY_DIR = `${ROOT}/memory`;
+var DOCS_DIR = `${ROOT}/docs`;
+var INPUTS_DIR = `${ROOT}/inputs`;
+var SKILLS_DIR = `${ROOT}/skills`;
+var TOOL_DESCRIPTION = "Run a bash script against the workbook's virtual filesystem. Files (read-only): /workbook/data/<id>.<ext> (wb-data, ext from mime), /workbook/memory/<id>.arrow (wb-memory, Arrow IPC bytes), /workbook/docs/<id>.json (wb-doc, JSON projection), /workbook/inputs/<name> (wb-input values), /workbook/skills/<key>.md (skills, when configured). Standard utilities: cat, sed, grep, awk, head, tail, cut, sort, uniq, wc, tr, diff, find, ls, jq, echo, tee, xargs. Pipes, redirects, heredocs, if/while/for, functions, glob \u2014 full bash. Multi-line scripts work; run a small program if needed. v1 is READ-ONLY \u2014 writes back to /workbook/* are not propagated to the runtime; use a workbook-specific mutation tool for that.";
+function mimeToExt(mime) {
+  const m = (mime ?? "").toLowerCase();
+  if (m === "text/csv") return "csv";
+  if (m === "text/tab-separated-values") return "tsv";
+  if (m === "application/json") return "json";
+  if (m === "application/jsonl") return "jsonl";
+  if (m === "application/x-sqlite3") return "sqlite";
+  if (m === "application/parquet") return "parquet";
+  if (m === "text/plain") return "txt";
+  return "bin";
+}
+function bytesToBase64(bytes) {
+  let binary = "";
+  const chunk = 32768;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+async function buildSnapshot(opts) {
+  const { client, spec, getSkillSource, skillKeys } = opts;
+  const files = [];
+  const inputs = spec.inputs ?? {};
+  for (const [name, value] of Object.entries(inputs)) {
+    let content;
+    if (value === null || value === void 0) content = "";
+    else if (typeof value === "string") content = value;
+    else if (typeof value === "number" || typeof value === "boolean") content = String(value);
+    else {
+      try {
+        content = JSON.stringify(value);
+      } catch {
+        content = String(value);
+      }
+    }
+    files.push({ path: `${INPUTS_DIR}/${name}`, content });
+  }
+  for (const d of spec.data ?? []) {
+    const ext = mimeToExt(d.mime);
+    const placeholder = `# wb-data id=${d.id} mime=${d.mime}
+# bytes not directly accessible from bash in v1.
+# Reference this id in a Polars/SQL/Rhai cell to query it.
+`;
+    files.push({ path: `${DATA_DIR}/${d.id}.${ext}`, content: placeholder });
+  }
+  if (client.exportMemory) {
+    for (const m of spec.memory ?? []) {
+      try {
+        const bytes = await client.exportMemory(m.id);
+        files.push({ path: `${MEMORY_DIR}/${m.id}.arrow`, content: bytesToBase64(bytes) });
+      } catch {
+      }
+    }
+  }
+  if (client.readDoc) {
+    for (const d of spec.docs ?? []) {
+      try {
+        const json = await client.readDoc(d.id);
+        files.push({
+          path: `${DOCS_DIR}/${d.id}.json`,
+          content: JSON.stringify(json, null, 2)
+        });
+      } catch {
+      }
+    }
+  }
+  if (client.exportDoc) {
+    for (const d of spec.docs ?? []) {
+      try {
+        const bytes = await client.exportDoc(d.id);
+        files.push({ path: `${DOCS_DIR}/${d.id}.loro`, content: bytesToBase64(bytes) });
+      } catch {
+      }
+    }
+  }
+  if (getSkillSource && skillKeys && skillKeys.length > 0) {
+    for (const key of skillKeys) {
+      try {
+        const md = await getSkillSource(key);
+        if (typeof md === "string" && md.length > 0) {
+          files.push({ path: `${SKILLS_DIR}/${key}.md`, content: md });
+        }
+      } catch {
+      }
+    }
+  }
+  return files;
+}
+var _justBashModule = null;
+function loadJustBash() {
+  if (!_justBashModule) {
+    _justBashModule = import(
+      /* @vite-ignore */
+      "just-bash"
+    );
+  }
+  return _justBashModule;
+}
+function createWorkbookBashTool(opts) {
+  let bashInstance = null;
+  async function ensureBash(initialFiles) {
+    if (bashInstance) return bashInstance;
+    const mod = await loadJustBash();
+    bashInstance = new mod.Bash({ cwd: ROOT, files: initialFiles });
+    return bashInstance;
+  }
+  return {
+    definition: {
+      name: "bash",
+      description: TOOL_DESCRIPTION,
+      parameters: {
+        type: "object",
+        properties: {
+          script: {
+            type: "string",
+            description: "Bash script to execute against the workbook VFS."
+          }
+        },
+        required: ["script"]
+      }
+    },
+    invoke: async (args) => {
+      const script = String(args.script ?? "");
+      try {
+        const snapshot = await buildSnapshot(opts);
+        const filesMap = {};
+        for (const f of snapshot) filesMap[f.path] = f.content;
+        const bash = await ensureBash(filesMap);
+        for (const f of snapshot) {
+          try {
+            await bash.fs.writeFile(f.path, f.content);
+          } catch {
+          }
+        }
+        const result = await bash.exec(script);
+        const stdout = String(result.stdout ?? "").replace(/\n+$/, "");
+        const stderr = String(result.stderr ?? "").replace(/\n+$/, "");
+        const exit = Number(result.exitCode ?? 0);
+        const lines = [];
+        if (stdout) lines.push(stdout);
+        if (stderr) lines.push(`stderr:
+${stderr}`);
+        if (exit !== 0) lines.push(`exit ${exit}`);
+        return lines.join("\n") || "(no output)";
+      } catch (err2) {
+        const msg = err2 instanceof Error ? err2.message : String(err2);
+        if (/failed to fetch|cannot find|not found/i.test(msg)) {
+          return `error: 'just-bash' could not be loaded \u2014 the bash tool requires the just-bash package. Bundled workbooks add it via npm; HTML-only workbooks need an importmap entry pointing at a CDN build (e.g. https://esm.sh/just-bash@^2). Underlying error: ${msg}`;
+        }
+        return `error: ${msg}`;
+      }
+    }
+  };
+}
+
+// node_modules/dompurify/dist/purify.es.mjs
 var {
   entries,
   setPrototypeOf,
@@ -4240,11 +4403,30 @@ async function mountHtmlWorkbook(opts) {
   for (const inp of doc.querySelectorAll("wb-input")) {
     bindInputElement(inp, executor);
   }
+  const extraTools = opts.agentTools;
+  const buildAgentTools = (agent) => {
+    if (agent.tools.length > 0) {
+      return [];
+    }
+    const tools = [];
+    if (!opts.disableDefaultBashTool) {
+      tools.push(
+        createWorkbookBashTool({
+          client,
+          spec,
+          getSkillSource: opts.getSkillSource,
+          skillKeys: opts.agentSkillKeys
+        })
+      );
+    }
+    if (extraTools && extraTools.length > 0) tools.push(...extraTools);
+    return tools;
+  };
   for (const chat of doc.querySelectorAll("wb-chat")) {
-    bindChatElement(chat, ctx, spec);
+    bindChatElement(chat, ctx, spec, buildAgentTools);
   }
   for (const agentEl of doc.querySelectorAll("wb-agent")) {
-    bindAgentElement(agentEl, ctx, spec);
+    bindAgentElement(agentEl, ctx, spec, buildAgentTools);
   }
   await executor.runAll();
   return { executor, ctx, spec };
@@ -4392,16 +4574,18 @@ function escapeHtml(s) {
     return "&#39;";
   });
 }
-function bindAgentElement(el, ctx, spec) {
+function bindAgentElement(el, ctx, spec, buildTools) {
   const id = el.getAttribute("id");
   if (!id) return;
   const agent = spec.agents.find((a) => a.id === id);
   if (!agent) return;
   if (el.hasAttribute("auto") || el.hasAttribute("trigger") === false) {
-    runAgentOnce(el, ctx, agent).catch((err2) => console.warn("agent run", err2));
+    runAgentOnce(el, ctx, agent, buildTools(agent)).catch(
+      (err2) => console.warn("agent run", err2)
+    );
   }
 }
-async function runAgentOnce(el, ctx, agent) {
+async function runAgentOnce(el, ctx, agent, tools) {
   if (!ctx.llmClient) return;
   const contextLines = [];
   for (const ref of agent.reads) {
@@ -4421,8 +4605,7 @@ Provide your analysis.` : "Begin.";
     model: agent.model,
     systemPrompt: agent.systemPrompt,
     initialUserMessage: userMessage,
-    tools: []
-    // tool-use agent layer comes next
+    tools
   });
   const outputs = document.querySelectorAll(`wb-output[for="${CSS.escape(agent.id)}"]`);
   for (const o of outputs) {
@@ -4433,14 +4616,14 @@ Provide your analysis.` : "Begin.";
     o.appendChild(div);
   }
 }
-function bindChatElement(el, ctx, spec) {
+function bindChatElement(el, ctx, spec, buildTools) {
   const agentId = el.getAttribute("for") ?? el.getAttribute("agent");
   if (!agentId) {
     el.innerHTML = `<div class="wb-out error">wb-chat: missing 'for' attribute</div>`;
     return;
   }
-  const agent = spec.agents.find((a) => a.id === agentId);
-  if (!agent) {
+  const agentMatch = spec.agents.find((a) => a.id === agentId);
+  if (!agentMatch) {
     el.innerHTML = `<div class="wb-out error">wb-chat: no agent with id '${escapeHtml(agentId)}'</div>`;
     return;
   }
@@ -4448,6 +4631,7 @@ function bindChatElement(el, ctx, spec) {
     el.innerHTML = `<div class="wb-out error">wb-chat: no llmClient configured</div>`;
     return;
   }
+  const agent = agentMatch;
   el.innerHTML = `
     <div class="wb-chat">
       <div class="wb-chat-history" data-history></div>
@@ -4499,22 +4683,41 @@ Available context (cell outputs):
 ${contextLines.join("\n\n")}` : agent.systemPrompt;
     let streamed = "";
     try {
-      const it = ctx.llmClient.generateChat({
-        model: agent.model,
-        messages: [
-          { role: "system", content: augmentedSystem },
-          ...history.map((m) => ({ role: m.role, content: m.content }))
-        ]
-      });
-      for await (const ev of it) {
-        if (ev.kind === "delta") {
-          streamed += ev.text;
-          renderHistory(streamed);
-        } else if (ev.kind === "done") {
-          if (ev.errorMessage) {
-            history.push({ role: "assistant", content: `[error] ${ev.errorMessage}` });
-          } else {
-            history.push({ role: "assistant", content: ev.finalText || streamed });
+      const tools = buildTools(agent);
+      if (tools.length > 0) {
+        const result = await runAgentLoop({
+          llmClient: ctx.llmClient,
+          model: agent.model,
+          systemPrompt: augmentedSystem,
+          initialUserMessage: text2,
+          tools,
+          onDelta: (delta) => {
+            streamed += delta;
+            renderHistory(streamed);
+          }
+        });
+        history.push({
+          role: "assistant",
+          content: result.text || streamed || "(empty response)"
+        });
+      } else {
+        const it = ctx.llmClient.generateChat({
+          model: agent.model,
+          messages: [
+            { role: "system", content: augmentedSystem },
+            ...history.map((m) => ({ role: m.role, content: m.content }))
+          ]
+        });
+        for await (const ev of it) {
+          if (ev.kind === "delta") {
+            streamed += ev.text;
+            renderHistory(streamed);
+          } else if (ev.kind === "done") {
+            if (ev.errorMessage) {
+              history.push({ role: "assistant", content: `[error] ${ev.errorMessage}` });
+            } else {
+              history.push({ role: "assistant", content: ev.finalText || streamed });
+            }
           }
         }
       }
@@ -4858,6 +5061,7 @@ export {
   createBrowserLlmClient,
   createRuntimeClient,
   createWorkbookAgentTools,
+  createWorkbookBashTool,
   escapeHtml2 as escapeHtml,
   mountHtmlWorkbook,
   parseWorkbookHtml,
