@@ -1,0 +1,7 @@
+node_modules
+
+# Keep the final artifact in source control so anyone cloning the repo
+# can open the .workbook.html immediately (no install + build). Other
+# build intermediates (chunked assets, source maps) stay ignored.
+dist/*
+!dist/*.workbook.html

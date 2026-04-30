@@ -1,5 +1,14 @@
 node_modules/
-dist/
+
+# Don't blanket-ignore `dist/` at every depth — example projects keep
+# their final .workbook.html artifact in dist/ committed (so anyone
+# cloning the repo can open it without an install + build). Each
+# example's local .gitignore allows that one file through and
+# excludes the rest. Scope the global ignore to the repo root and
+# package builds only.
+/dist/
+packages/*/dist/
+
 build/
 target/
 .svelte-kit/

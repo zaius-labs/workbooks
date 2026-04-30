@@ -1,0 +1,205 @@
+/* Reusable settings panel styles for showcase workbooks. Scoped via
+ * `wb-` prefix to avoid clashing with host workbook CSS. */
+
+.wb-settings-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #0f1115;
+  color: white;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(15, 17, 21, 0.18);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.12s ease, background 0.12s ease;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+}
+.wb-settings-btn:hover { background: #1a1d24; transform: rotate(60deg); }
+
+.wb-settings-panel {
+  position: fixed;
+  bottom: 76px;
+  right: 20px;
+  width: 360px;
+  max-width: calc(100vw - 40px);
+  background: white;
+  border: 1px solid #e7e6e2;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(15, 17, 21, 0.18);
+  z-index: 30;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  overflow: hidden;
+  color: #0f1115;
+}
+
+.wb-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #e7e6e2;
+  background: #fafaf7;
+}
+
+.wb-settings-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.wb-settings-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: #8a909c;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+}
+.wb-settings-close:hover { color: #0f1115; }
+
+.wb-settings-body { padding: 14px 18px 18px; }
+
+.wb-settings-field { margin-bottom: 18px; }
+.wb-settings-field:last-child { margin-bottom: 0; }
+
+.wb-settings-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8a909c;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+.wb-settings-required {
+  background: #fef9c3;
+  color: #713f12;
+  padding: 1px 6px;
+  font-size: 9px;
+  border-radius: 3px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  font-style: normal;
+  margin-left: 6px;
+  display: inline-block;
+}
+.wb-settings-label a {
+  color: #2563eb;
+  text-decoration: none;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.wb-settings-label a:hover { text-decoration: underline; }
+
+.wb-settings-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.wb-settings-input {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid #e7e6e2;
+  border-radius: 5px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  background: #fcfcfa;
+  outline: none;
+  color: #0f1115;
+}
+.wb-settings-input:focus { border-color: #2563eb; background: white; }
+
+.wb-settings-save {
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  background: #0f1115;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.wb-settings-save:hover { background: #1a1d24; }
+
+.wb-settings-clear-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: 1px solid #e7e6e2;
+  background: white;
+  color: #8a909c;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wb-settings-clear-btn:hover { color: #ef4444; border-color: #ef4444; }
+
+.wb-settings-hint {
+  font-size: 12px;
+  color: #8a909c;
+  font-style: italic;
+  margin: 8px 0 0;
+  line-height: 1.45;
+}
+
+.wb-settings-status {
+  margin: 6px 0 0;
+  font-size: 11px;
+  font-family: ui-monospace, Menlo, monospace;
+  color: #10b981;
+  min-height: 14px;
+}
+.wb-settings-status.is-err { color: #ef4444; }
+
+/* The banner element exists in markup as an empty <div> so the host
+ * can place it where they want. Styling is gated on :not([hidden])
+ * so the empty placeholder doesn't render as a yellow box when no
+ * banner is active. */
+.wb-settings-banner[hidden] { display: none !important; }
+.wb-settings-banner:not([hidden]) {
+  background: #fef9c3;
+  border: 1px solid #facc15;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 12px 0;
+  font-size: 13px;
+  color: #713f12;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+}
+.wb-settings-banner strong { color: #713f12; font-weight: 600; }
+
+.wb-link-btn {
+  background: none;
+  border: none;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 500;
+}
+.wb-link-btn:hover { color: #1d4ed8; }
