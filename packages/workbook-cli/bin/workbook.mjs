@@ -19,6 +19,8 @@ async function help() {
     "Commands:",
     "  workbook dev [project]     start a Vite dev server with HMR",
     "  workbook build [project]   compile project into dist/<slug>.workbook.html",
+    "  workbook check [project]   lint a workbook source tree (--reporter=json for tools)",
+    "  workbook explain <rule>    show rationale + fix for a check rule",
     "  workbook encrypt           emit an encrypted <wb-data> element from a file",
     "  workbook keygen            generate an Ed25519 author keypair for signing",
     "  workbook init <name>       (todo) scaffold a new workbook project",
@@ -62,10 +64,19 @@ function parseFlags(rest) {
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a.startsWith("--")) {
-      const k = a.slice(2);
-      const next = rest[i + 1];
-      if (k.startsWith("no-")) { out[k.slice(3)] = false; continue; }
-      const value = (next == null || next.startsWith("--")) ? true : (i++, next);
+      // Support both `--key value` and `--key=value`.
+      const eq = a.indexOf("=");
+      let k;
+      let value;
+      if (eq !== -1) {
+        k = a.slice(2, eq);
+        value = a.slice(eq + 1);
+      } else {
+        k = a.slice(2);
+        if (k.startsWith("no-")) { out[k.slice(3)] = false; continue; }
+        const next = rest[i + 1];
+        value = (next == null || next.startsWith("--")) ? true : (i++, next);
+      }
       if (MULTI_VALUE_FLAGS.has(k)) {
         if (out[k] === undefined) out[k] = [];
         else if (!Array.isArray(out[k])) out[k] = [out[k]];
@@ -104,6 +115,18 @@ try {
       const flags = parseFlags(argv.slice(1));
       const { runKeygen } = await import(path.join(cmdRoot, "keygen.mjs"));
       await runKeygen(flags);
+      break;
+    }
+    case "check": {
+      const flags = parseFlags(argv.slice(1));
+      const { runCheck } = await import(path.join(cmdRoot, "check.mjs"));
+      await runCheck({ project: flags._[0] ?? ".", ...flags });
+      break;
+    }
+    case "explain": {
+      const flags = parseFlags(argv.slice(1));
+      const { runExplain } = await import(path.join(cmdRoot, "explain.mjs"));
+      await runExplain(flags);
       break;
     }
     case "init": {
