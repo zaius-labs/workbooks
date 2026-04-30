@@ -1,0 +1,19 @@
+{
+  "name": "@work.books/example-stocks",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/ensure-prices-csv.mjs && workbook dev",
+    "build": "node scripts/ensure-prices-csv.mjs && workbook build"
+  },
+  "dependencies": {
+    "@work.books/runtime-wasm": "workspace:*",
+    "apache-arrow": "^21.1.0",
+    "d3": "^7.9.0"
+  },
+  "devDependencies": {
+    "@work.books/cli": "*",
+    "vite": "^6.0.0"
+  }
+}

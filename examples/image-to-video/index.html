@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Image → video — depth-driven animation</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<main class="nb">
+  <header class="hero">
+    <p class="kicker">Workbook · pipeline · depth → motion → video</p>
+    <h1>Turn a still image into a video</h1>
+    <p class="lede">
+      A staged pipeline: drop an image, extract its depth map locally
+      (Depth Anything v2 running through the workbook's Candle-ONNX
+      runtime), sketch motion arrows on the canvas, let
+      <a href="https://ai.google.dev/" target="_blank" rel="noreferrer">Gemini</a>
+      draft a Veo-shaped motion prompt from the depth + your sketch, then
+      ship it to <a href="https://ai.google.dev/gemini-api/docs/video" target="_blank" rel="noreferrer">Veo 3.1</a>
+      to render the final video. Five cells, one path, ending with an
+      actual video you can scrub.
+    </p>
+    <p class="meta" id="meta">Drop an image to begin.</p>
+  </header>
+
+  <section class="cell drop-cell">
+    <div class="cell-head">
+      <span class="cell-num">1</span>
+      <span class="cell-lang">drop · upload</span>
+      <span class="cell-title">Source image</span>
+      <button class="run-btn ghost" id="clear-img">Clear</button>
+    </div>
+    <div id="dropzone" class="dropzone">
+      <div class="dropzone-msg">
+        <strong>Drop an image</strong> or click to pick
+        <small>One image — JPEG / PNG / WebP. Pick something with depth
+        (a landscape, a portrait, an interior) for the best demo.</small>
+      </div>
+      <input id="file-input" type="file" accept="image/*" hidden>
+    </div>
+    <div id="img-preview" class="img-preview"></div>
+  </section>
+
+  <section class="cell">
+    <div class="cell-head">
+      <span class="cell-num">2</span>
+      <span class="cell-lang">candle · depth-anything-v2</span>
+      <span class="cell-title">Estimate depth (locally, in your browser)</span>
+      <button class="run-btn" data-run="cell-depth">Run</button>
+    </div>
+    <p class="cell-prose">
+      Depth Anything v2 (small, ~80 MB) runs through the workbook's
+      runtime — Candle compiles to WASM, decodes the ONNX model, and
+      produces a depth map per pixel. The runtime is the only ML stack
+      bundled in this artifact; no transformers.js, no ort-web, no
+      external service. Foreground = warm, background = cool.
+    </p>
+    <div class="cell-out vision-out" id="out-depth"></div>
+  </section>
+
+  <section class="cell">
+    <div class="cell-head">
+      <span class="cell-num">3</span>
+      <span class="cell-lang">draw · motion arrows</span>
+      <span class="cell-title">Sketch motion paths</span>
+      <button class="run-btn ghost" id="clear-strokes">Clear strokes</button>
+    </div>
+    <p class="cell-prose">
+      Click and drag on the image to draw arrows showing where things
+      should move. Multiple arrows are fine — different objects, different
+      directions. Combined with the depth map, this turns into a 3D motion
+      hint for the video model: "subject orbits left, camera pushes in,
+      foreground tree sways."
+    </p>
+    <div class="cell-out" id="out-strokes"></div>
+  </section>
+
+  <section class="cell">
+    <div class="cell-head">
+      <span class="cell-num">4</span>
+      <span class="cell-lang">openrouter · llm</span>
+      <span class="cell-title">Compose the motion prompt</span>
+      <button class="run-btn" data-run="cell-prompt">Compose</button>
+    </div>
+    <p class="cell-prose">
+      An LLM (configurable in ⚙) reads a description of the depth map
+      stats + your motion arrows, and writes a tight Kling-shaped prompt
+      describing camera move, subject motion, atmosphere, and pacing. You
+      can edit the result before generating.
+    </p>
+    <div class="cell-controls">
+      <textarea id="prompt-text" class="cell-textarea" rows="4"
+        placeholder="The drafted prompt will appear here. Edit freely before generating."></textarea>
+    </div>
+    <div class="cell-out" id="out-prompt"></div>
+  </section>
+
+  <section class="cell">
+    <div class="cell-head">
+      <span class="cell-num">5</span>
+      <span class="cell-lang">veo · image→video</span>
+      <span class="cell-title">Generate the video</span>
+      <button class="run-btn" data-run="cell-video">Generate</button>
+    </div>
+    <p class="cell-prose">
+      Sends your image + the prompt to <code id="video-model-display">veo-3.1-fast-generate-preview</code>
+      on Google AI Studio (configurable in ⚙). Veo Fast renders a 5-second
+      clip in 30–60s; the workbook polls the long-running operation and
+      embeds the result inline once Google's CDN drops the bytes.
+    </p>
+    <div class="cell-out" id="out-video"></div>
+  </section>
+
+  <footer>
+    <p class="footer-note">
+      Depth model: <a href="https://huggingface.co/onnx-community/depth-anything-v2-small" target="_blank" rel="noreferrer">Depth Anything v2 (small)</a>
+      via <code>@work.books/runtime-wasm</code>'s Candle-ONNX runner — model
+      bytes cached in your browser after first download. LLM + video calls
+      go to OpenRouter; set your key in the ⚙ panel. Video output is
+      streamed by Kling and embedded inline.
+    </p>
+  </footer>
+</main>
+
+<div data-settings-banner></div>
+
+<script type="module" src="./main.js"></script>
+</body>
+</html>
