@@ -268,6 +268,67 @@ class CompositionStore {
    *  composition we use a regex tag rewrite instead of full DOM
    *  serialize-then-stringify (which would normalize whitespace,
    *  attribute order, and entity encoding). */
+  /**
+   * Bash-style atomic find-and-replace on the composition HTML.
+   * Mirrors Claude Code's Edit tool semantics:
+   *   - `oldString` MUST appear exactly once in the source unless
+   *     `replaceAll` is true. Zero matches or ambiguous matches
+   *     return an error tuple instead of throwing — the agent's
+   *     edit_composition tool surfaces the error message.
+   *   - `newString` may be empty (removes the match).
+   *   - The whole HTML round-trips through writeComposition so
+   *     diff-shrink Loro ops fire and the audit chain records.
+   *
+   * @param {string} oldString
+   * @param {string} newString
+   * @param {{ replaceAll?: boolean }} [opts]
+   * @returns {{ ok: true, count: number } | { ok: false, error: string, count?: number }}
+   */
+  editHtml(oldString, newString, { replaceAll = false } = {}) {
+    if (typeof oldString !== "string" || oldString.length === 0) {
+      return { ok: false, error: "oldString must be a non-empty string" };
+    }
+    if (typeof newString !== "string") {
+      return { ok: false, error: "newString must be a string" };
+    }
+    if (oldString === newString) {
+      return { ok: false, error: "oldString and newString are identical — no edit to apply" };
+    }
+    const cur = this.html;
+    // Count occurrences without regex (oldString can contain
+    // arbitrary punctuation; regex-escaping every call is more
+    // brittle than scanning).
+    let count = 0;
+    let from = 0;
+    while (true) {
+      const idx = cur.indexOf(oldString, from);
+      if (idx < 0) break;
+      count++;
+      from = idx + oldString.length;
+    }
+    if (count === 0) {
+      return { ok: false, error: "oldString not found in composition" };
+    }
+    if (count > 1 && !replaceAll) {
+      return {
+        ok: false,
+        count,
+        error:
+          `oldString appears ${count} times — make it unique (add surrounding context) ` +
+          `or pass replace_all=true to replace every occurrence.`,
+      };
+    }
+    let next;
+    if (replaceAll) {
+      next = cur.split(oldString).join(newString);
+    } else {
+      const i = cur.indexOf(oldString);
+      next = cur.slice(0, i) + newString + cur.slice(i + oldString.length);
+    }
+    this.set(next);
+    return { ok: true, count: replaceAll ? count : 1 };
+  }
+
   patchClip(id, patch) {
     if (!id || !patch || typeof DOMParser === "undefined") return false;
     // Extract the opening tag of the element with this id, edit its

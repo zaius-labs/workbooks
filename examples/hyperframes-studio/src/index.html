@@ -5,6 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>hyperframes-studio · workbook</title>
     <link rel="stylesheet" href="./styles.css" />
+    <!-- Hide every workbook custom element by default. They're data
+         carriers, not visual content; without this the save handler's
+         refresh of <wb-doc> textContent shows thousands of chars of
+         base64 on top of the app. !important so author CSS can't
+         accidentally re-show them. -->
+    <style>
+      wb-workbook, wb-doc, wb-memory, wb-data, wb-history,
+      wb-cell, wb-input, wb-output, wb-agent, wb-chat, wb-system, wb-tool {
+        display: none !important;
+      }
+    </style>
   </head>
   <body class="bg-page text-fg antialiased">
     <!-- Workbook runtime root. The single <wb-doc> declares the

@@ -20,59 +20,85 @@ import { readAllTurns, appendTurn, clearTurns } from "./memoryBackend.svelte.js"
 import { assets } from "./assets.svelte.js";
 import { loadSkill, skillsPromptBlock } from "./skills.js";
 
-const HOUSE_STYLE = `HyperFrames composition rules:
-- Each visible clip is a top-level element with id, data-start (seconds), data-duration (seconds).
-- The runtime toggles class 'active' on a clip when data-start <= t < data-start + data-duration.
-- Hide clips by default in CSS (e.g. .scene { display: none }) and reveal with .scene.active { display: flex }.
-- Build the hero frame layout first; only then add motion.
-- Default canvas is 16:9. Use vw/vh, vmin, or %; do not hardcode 1920x1080.
-- 3-5 hex values in the palette; one display font + one mono is plenty.
+// Studio's house-style rules live in skills/hyperframes/SKILL.md;
+// the agent loads them on demand via load_skill('hyperframes/SKILL').
+// Inline duplication here was just feeding both surfaces from one
+// constant — dropped now that the bash-style tools encourage the
+// agent to read skills first.
 
-Animation timing — IMPORTANT:
-- Position GSAP tweens RELATIVE TO THE CLIP, never as absolute timestamps.
-- The runtime adds a label per clip id at its start time. Use:
-    tl.from("#intro .title", {...}, "intro+=0.25")     // clip-relative
-  or the functional form:
-    tl.from("#intro .title", {...}, hf.at("intro", 0.25))
-- Absolute positions like \`tl.from(..., 0.25)\` will desynchronize when the user
-  drags the clip on the timeline editor. Always use clip labels.`;
+const BASE_SYSTEM_PROMPT = `You are a HyperFrames compositor working on a single HTML file
+that the user previews as a short video composition in the player on the right.
 
-const BASE_SYSTEM_PROMPT = `You are a HyperFrames compositor embedded in a workbook.
-The user wants short HTML video compositions on the right-hand player.
+The composition is one HTML document. You have FIVE bash-style tools:
 
-You have these tools:
-- get_composition: read the current HTML (data URLs redacted to placeholders)
-- set_composition: replace it (provide the FULL HTML body, not a diff)
-- patch_clip: retime / move a single clip without rewriting the whole HTML
-- delete_clip: remove a single clip by id (surgical — no full rewrite)
-- list_clips: list parsed clips with id / start / duration
-- list_assets: list user-imported media (image / video / audio / svg) with stable ids
-- add_asset_clip: insert an asset by id onto the timeline as an <img|video|audio> clip
-- load_skill: read any vendored skill file by path (see "Available skills" below)
-- house_style: shortcut for load_skill('hyperframes/house-style') — read once on first task
+  read_composition({line_start?, line_end?})
+      Print the file with line numbers (cat -n style). Read first.
+      Always.
 
-Skills are progressive-disclosure: the descriptions below stay in your context;
-the bodies are loaded on demand via load_skill. For non-trivial work — captions,
-transitions, audio-reactive visuals, palettes, GSAP techniques — pick the
-relevant skill from the list and load it before writing HTML. Don't reinvent
-patterns the bundle already documents.
+  edit_composition({old_string, new_string, replace_all?})
+      Surgical find-and-replace. The DEFAULT tool for any change.
+      old_string MUST appear exactly once unless replace_all=true.
+      Add surrounding context until your old_string is unique.
+      new_string may be empty to delete.
 
-Workflow: when the user asks for a change, FIRST get_composition, THEN set_composition with the
-full updated HTML. Each visible clip needs a unique id, data-start, and data-duration. Hide clips
-in CSS by default; reveal with the .active class added by the runtime.
+  write_composition({html})
+      Escape hatch: replace the entire file. Use ONLY when starting
+      from scratch (a brand-new composition). NEVER use this for
+      incremental changes — it's how you forget styles, lose data
+      attributes, and break clips. Default to edit_composition.
 
-When the user references an asset they imported (a logo, a clip, a song): call list_assets to get
-its id, then add_asset_clip to drop it onto the timeline. Never try to embed a base64 data URL via
-set_composition — your context can't hold it.
+  list_assets()
+      Names + ids of media the user dragged in (images, videos,
+      audio, svg). Reference them in HTML via
+        src="@hf-asset:<id>"
+      The studio expands the placeholder to the real bytes when it
+      mounts the iframe. Don't paste base64 data URLs.
 
-Asset placeholders: get_composition redacts every embedded data URL to a stable
-src="@hf-asset:<asset-id>" placeholder. Pass these placeholders through unchanged in
-set_composition; the studio expands them back to real data URLs on submit. If you see
-src="@hf-redacted-data-url:<size>", that's a data URL not tracked by the assets registry —
-you cannot round-trip it via set_composition (the call will fail). Use add_asset_clip to
-add new media; use patch_clip to retime an existing clip without rewriting the whole HTML.
+  load_skill({path})
+      Read a markdown skill file. ALWAYS load 'hyperframes/SKILL'
+      on any non-trivial task — it documents the file conventions
+      (clip schema, .scene class, data-start/data-duration,
+      runtime behavior, transition library, palettes). Skip it
+      and you'll write code that doesn't run.
 
-Reply concisely (1-3 sentences). Do not paste the full HTML back into chat — the player shows it.`;
+How to work:
+
+  1. read_composition (whole file or a range you suspect).
+  2. load_skill('hyperframes/SKILL') if you don't already know
+     the conventions for this task.
+  3. Plan the smallest edit that achieves the goal. Almost always
+     a single edit_composition call. Sometimes a few in sequence.
+  4. After each edit_composition, the player auto-reloads. The
+     edit's response tells you the new clip count + total
+     duration. Read again if you need to verify.
+
+Conventions (also documented more fully in 'hyperframes/SKILL'):
+
+  - Every clip is one HTML element with: a unique id, class="scene"
+    (or whatever the existing CSS targets), data-start="<seconds>",
+    data-duration="<seconds>". Display: none by default; runtime
+    adds .active to reveal.
+  - Add a clip by edit_composition: find the closing </body> (or
+    a sentinel comment) and insert the new clip before it.
+  - Remove a clip: edit_composition with old_string = the clip's
+    full element (open tag through </tag>) and new_string = "".
+  - Retime a clip: edit_composition that finds the data-start and
+    data-duration attributes for the matching id, replaces with
+    new values.
+  - Add an imported asset to the timeline: list_assets to get its
+    id, then edit_composition to insert
+      <video id="clip-x" class="scene" data-start="..." data-duration="..."
+             src="@hf-asset:<id>" muted playsinline
+             style="position:absolute;inset:0;width:100%;height:100%;
+                    object-fit:cover;display:none;"></video>
+    (or <img>/<audio> as appropriate).
+
+Failure mode to avoid: write_composition. It loses styles, drops
+data-attrs, mangles existing clips. Reach for edit_composition
+99% of the time.
+
+Reply concisely (1-3 sentences). Don't paste HTML back into chat —
+the player shows it.`;
 
 /** Compose the system prompt at send time. Appends the dynamic
  *  skills frontmatter block (Pi-core / Anthropic Skills convention:
@@ -119,32 +145,89 @@ export function unregisterExtraTool(name) {
 
 export function buildTools() {
   return [
+    // ── read ──────────────────────────────────────────────────────
     {
       definition: {
-        name: "get_composition",
+        name: "read_composition",
         description:
-          "Read the current HyperFrames composition HTML. Embedded data URLs " +
-          "(images / video / audio bytes) are redacted to placeholders of the " +
-          "form `src=\"@hf-asset:<asset-id>\"` to keep your context small. " +
-          "Pass those placeholders through unchanged in set_composition; the " +
-          "studio expands them back to real data URLs on submit.",
-        parameters: { type: "object", properties: {} },
-      },
-      invoke: () => redactDataUrlsForAgent(composition.html),
-    },
-    {
-      definition: {
-        name: "set_composition",
-        description:
-          "Replace the entire HyperFrames composition with new HTML. " +
-          "Provide the FULL HTML body (style + scenes), not a diff. " +
-          "Asset references must use the `src=\"@hf-asset:<id>\"` placeholder " +
-          "form (never paste raw base64 data URLs — your context can't hold them). " +
-          "The player reloads on success.",
+          "Read the composition HTML with line numbers (cat -n style). " +
+          "Use this BEFORE any edit so you can craft a unique old_string. " +
+          "Returns the full file by default; pass line_start / line_end " +
+          "to see a slice. Embedded data URLs are redacted to short " +
+          "`src=\"@hf-asset:<asset-id>\"` placeholders to keep your context " +
+          "small — those placeholders survive edit_composition and the " +
+          "studio expands them at submit.",
         parameters: {
           type: "object",
           properties: {
-            html: { type: "string", description: "Full composition HTML body" },
+            line_start: { type: "number", description: "First line (1-indexed). Optional." },
+            line_end:   { type: "number", description: "Last line (inclusive). Optional." },
+          },
+        },
+      },
+      invoke: ({ line_start, line_end } = {}) => {
+        const redacted = redactDataUrlsForAgent(composition.html);
+        const lines = redacted.split("\n");
+        const total = lines.length;
+        const start = Math.max(1, Math.floor(line_start ?? 1));
+        const end = Math.min(total, Math.floor(line_end ?? total));
+        if (start > end) return `(empty range — file has ${total} lines)`;
+        const width = String(end).length;
+        const out = lines.slice(start - 1, end).map((line, i) => {
+          const n = String(start + i).padStart(width, " ");
+          return `${n}  ${line}`;
+        });
+        return out.join("\n") +
+          (end < total ? `\n… ${total - end} more lines` : "");
+      },
+    },
+    // ── edit ──────────────────────────────────────────────────────
+    {
+      definition: {
+        name: "edit_composition",
+        description:
+          "Surgical find-and-replace on the composition HTML. The default " +
+          "tool for ANY change. `old_string` MUST appear exactly once in " +
+          "the source (add surrounding context until it's unique) unless " +
+          "you pass replace_all=true. `new_string` may be empty to delete. " +
+          "Errors instead of overwriting if old_string isn't unique. " +
+          "ALWAYS read_composition first so your old_string is exact.",
+        parameters: {
+          type: "object",
+          properties: {
+            old_string: { type: "string", description: "Exact text to find. Include enough surrounding context to be unique." },
+            new_string: { type: "string", description: "Replacement text. May be empty to delete the match." },
+            replace_all: { type: "boolean", description: "Replace every occurrence. Default false." },
+          },
+          required: ["old_string", "new_string"],
+        },
+      },
+      invoke: ({ old_string, new_string, replace_all }) => {
+        const expandedOld = expandAssetPlaceholders(String(old_string ?? ""));
+        const expandedNew = expandAssetPlaceholders(String(new_string ?? ""));
+        const r = composition.editHtml(expandedOld, expandedNew, {
+          replaceAll: Boolean(replace_all),
+        });
+        if (!r.ok) return `error: ${r.error}`;
+        const total = composition.totalDuration;
+        const n = composition.clips.length;
+        return `edit applied · ${r.count} replacement${r.count === 1 ? "" : "s"} · ${n} clip${n === 1 ? "" : "s"} · ${total.toFixed(1)}s`;
+      },
+    },
+    // ── write (escape hatch — for restructure-from-scratch) ───────
+    {
+      definition: {
+        name: "write_composition",
+        description:
+          "Replace the ENTIRE composition with new HTML. ESCAPE HATCH — " +
+          "use this ONLY when restructuring from scratch (e.g. starting " +
+          "a totally new piece). For every other change, use " +
+          "edit_composition. Asset references stay as " +
+          "`src=\"@hf-asset:<id>\"` placeholders.",
+        parameters: {
+          type: "object",
+          properties: {
+            html: { type: "string", description: "Full composition HTML" },
           },
           required: ["html"],
         },
@@ -155,169 +238,54 @@ export function buildTools() {
         } catch (e) {
           return `error: ${e?.message ?? e}`;
         }
-        const total = composition.totalDuration;
         const n = composition.clips.length;
-        return `composition updated · ${n} clip${n === 1 ? "" : "s"} · ${total.toFixed(1)}s total`;
+        return `composition replaced · ${n} clip${n === 1 ? "" : "s"} · ${composition.totalDuration.toFixed(1)}s`;
       },
     },
+    // ── assets (read-only listing) ────────────────────────────────
     {
       definition: {
-        name: "patch_clip",
+        name: "list_assets",
         description:
-          "Update a single clip's timing or lane in place — fast local edit " +
-          "that doesn't require rewriting the full HTML. Use this for retime " +
-          "(start, duration), lane moves (trackIndex), or media in-points " +
-          "(playbackStart on video/audio). Other content changes still go " +
-          "through set_composition.",
-        parameters: {
-          type: "object",
-          properties: {
-            id:            { type: "string", description: "Clip element id" },
-            start:         { type: "number" },
-            duration:      { type: "number" },
-            trackIndex:    { type: "number" },
-            playbackStart: { type: "number", description: "Media in-point (video/audio only)" },
-          },
-          required: ["id"],
-        },
-      },
-      invoke: (patch) => {
-        if (!patch?.id) return "error: id is required";
-        const ok = composition.patchClip(patch.id, patch);
-        return ok
-          ? `patched ${patch.id}`
-          : `error: clip with id=${patch.id} not found`;
-      },
-    },
-    {
-      definition: {
-        name: "delete_clip",
-        description:
-          "Remove a clip from the composition by element id. Use this " +
-          "when the user asks to drop, cut, or remove a scene/asset. " +
-          "Surgical — doesn't require rewriting the whole HTML through " +
-          "set_composition.",
-        parameters: {
-          type: "object",
-          properties: {
-            id: { type: "string", description: "Clip element id (matches list_clips output)" },
-          },
-          required: ["id"],
-        },
-      },
-      invoke: (args) => {
-        if (!args?.id) return "error: id is required";
-        const ok = composition.removeClipById(args.id);
-        return ok
-          ? `deleted ${args.id}`
-          : `error: clip with id=${args.id} not found`;
-      },
-    },
-    {
-      definition: {
-        name: "list_clips",
-        description: "List clips in the current composition with their timing.",
+          "List media files the user has imported. Returns id, kind " +
+          "(image|video|audio|svg), name, and natural duration. " +
+          "Reference assets in HTML via `src=\"@hf-asset:<id>\"` " +
+          "(never raw base64 — the studio expands placeholders at submit).",
         parameters: { type: "object", properties: {} },
       },
       invoke: () => {
-        const cs = composition.clips;
-        if (!cs.length) return "(no clips)";
-        return cs.map((c) =>
-          `${c.id}\tstart=${c.start}s\tdur=${c.duration}s\t${c.label}`,
+        if (!assets.items.length) {
+          return "(no assets imported · ask the user to drop files in the Assets panel, " +
+                 "or use the URL input to link an external image/video/audio)";
+        }
+        return assets.items.map((a) =>
+          `${a.id}\t${a.kind}\t${a.name}${a.duration ? `\t${a.duration}s` : ""}`,
         ).join("\n");
       },
     },
-    {
-      definition: {
-        name: "house_style",
-        description:
-          "Get the canonical HyperFrames house style guide. This is " +
-          "load_skill('hyperframes/house-style') — kept as a separate tool " +
-          "for discoverability since the agent always wants this on first read.",
-        parameters: { type: "object", properties: {} },
-      },
-      invoke: () => loadSkill("hyperframes/house-style") ?? HOUSE_STYLE,
-    },
+    // ── skills (load on demand) ───────────────────────────────────
     {
       definition: {
         name: "load_skill",
         description:
-          "Load a vendored skill markdown file. Accepts a skill key alone " +
-          "(loads its SKILL.md, e.g. 'hyperframes' → 'hyperframes/SKILL'), " +
-          "an explicit /SKILL path, or any sub-document path " +
-          "(e.g. 'hyperframes/references/captions', " +
-          "'hyperframes/palettes/warm-editorial'). Returns the raw markdown.",
+          "Load a skill markdown file. Skill keys come from the " +
+          "'Available skills' list at the bottom of the system prompt. " +
+          "Read 'hyperframes/SKILL' first on any non-trivial task — it's " +
+          "the house-style + cell conventions you'll need for HTML edits.",
         parameters: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Skill file path (no .md suffix)" },
+            path: { type: "string", description: "Skill key (e.g. 'hyperframes' or 'hyperframes/references/captions')" },
           },
           required: ["path"],
         },
       },
       invoke: ({ path }) => {
         const md = loadSkill(String(path ?? ""));
-        return md ?? `error: no skill file at path=${path}`;
+        return md ?? `error: no skill at path=${path}`;
       },
     },
-    {
-      definition: {
-        name: "list_assets",
-        description:
-          "List media files the user has imported into this session. Returns id, name, kind " +
-          "(image|video|audio|svg), size, and natural duration if known. Data URLs are NOT " +
-          "included to keep your context small — reference assets by id via add_asset_clip.",
-        parameters: { type: "object", properties: {} },
-      },
-      invoke: () => {
-        if (!assets.items.length) return "(no assets imported · ask the user to drop files into the Assets panel)";
-        return assets.items.map((a) =>
-          `${a.id}\t${a.kind}\t${a.name}\tsize=${a.size}B${a.duration ? `\tdur=${a.duration}s` : ""}`,
-        ).join("\n");
-      },
-    },
-    {
-      definition: {
-        name: "add_asset_clip",
-        description:
-          "Insert a previously-imported asset onto the timeline. Pass the asset's id (from " +
-          "list_assets). Optional: start (seconds, default = end of current composition), " +
-          "duration (seconds, default = asset's natural duration or 3s for stills), " +
-          "trackIndex (default = 1 for visuals, 2 for audio), label.",
-        parameters: {
-          type: "object",
-          properties: {
-            id:         { type: "string", description: "Asset id" },
-            start:      { type: "number" },
-            duration:   { type: "number" },
-            trackIndex: { type: "number" },
-            label:      { type: "string" },
-          },
-          required: ["id"],
-        },
-      },
-      invoke: ({ id, start, duration, trackIndex, label }) => {
-        const a = assets.get(id);
-        if (!a) return `error: no asset with id=${id}`;
-        const dur = Number.isFinite(duration) ? duration : (a.duration ?? 3);
-        const startVal = Number.isFinite(start) ? start : composition.totalDuration;
-        const idx = Number.isFinite(trackIndex)
-          ? trackIndex
-          : (a.kind === "audio" ? 2 : 1);
-        composition.addMediaClip({
-          kind: a.kind === "image" || a.kind === "svg" ? "img" : a.kind,
-          src: a.dataUrl,
-          start: startVal,
-          duration: dur,
-          trackIndex: idx,
-          label: label ?? a.name,
-        });
-        return `inserted ${a.name} at ${startVal.toFixed(2)}s for ${dur.toFixed(2)}s on lane ${idx}`;
-      },
-    },
-    // Plugin-registered tools come last so they can't shadow built-ins
-    // (which would be confusing). registerExtraTool replaces by name
-    // within the extra list, but built-ins always win.
+    // Plugin-registered tools last (built-ins win on name collision).
     ...extraTools,
   ];
 }
