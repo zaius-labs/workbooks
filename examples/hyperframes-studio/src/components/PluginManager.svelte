@@ -20,6 +20,7 @@
   let url = $state("");
   let error = $state("");
   let success = $state("");
+  let fileInputEl;
 
   async function onInstall() {
     error = ""; success = "";
@@ -33,6 +34,21 @@
     }
   }
   function onKey(ev) { if (ev.key === "Enter") onInstall(); }
+
+  async function onPickFile(ev) {
+    error = ""; success = "";
+    const file = ev.target.files?.[0];
+    ev.target.value = "";
+    if (!file) return;
+    try {
+      const code = await file.text();
+      const entry = await plugins.installFromCode(code, { sourceLabel: file.name });
+      success = `installed ${entry.name}${entry.version ? ` v${entry.version}` : ""} (from file)`;
+      setTimeout(() => { success = ""; }, 2200);
+    } catch (e) {
+      error = e?.message ?? String(e);
+    }
+  }
 
   async function onUpdate(id) {
     error = ""; success = "";
@@ -95,6 +111,19 @@
             disabled={plugins.busy || !url.trim()}
           >
             {plugins.busy ? "installing…" : "install"}
+          </button>
+        </div>
+        <div class="file-row">
+          <span>or install from a local .js file:</span>
+          <input
+            type="file"
+            accept=".js,.mjs,application/javascript,text/javascript"
+            bind:this={fileInputEl}
+            onchange={onPickFile}
+            style="display: none"
+          />
+          <button class="ghost" onclick={() => fileInputEl?.click()} disabled={plugins.busy}>
+            choose file…
           </button>
         </div>
 
@@ -194,6 +223,19 @@
     cursor: pointer;
   }
   .install-row button:disabled { opacity: 0.4; cursor: wait; }
+  .file-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-top: 6px;
+    font: 10px var(--font-mono); color: var(--color-fg-faint);
+  }
+  .file-row button {
+    height: 24px; padding: 0 10px;
+    border: 1px solid var(--color-border); border-radius: 4px;
+    background: transparent; color: var(--color-fg-muted);
+    font: 10px var(--font-mono); cursor: pointer;
+  }
+  .file-row button:hover:not(:disabled) { color: var(--color-fg); border-color: var(--color-fg); }
+  .file-row button:disabled { opacity: 0.4; cursor: not-allowed; }
 
   .msg { margin-top: 8px; padding: 6px 10px; border-radius: 4px; font: 11px var(--font-mono); }
   .msg-err { color: rgb(248 113 113); border: 1px solid rgba(220, 38, 38, 0.4); background: rgba(127, 29, 29, 0.18); }

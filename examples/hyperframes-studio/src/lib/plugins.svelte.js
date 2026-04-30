@@ -160,6 +160,75 @@ class PluginsStore {
     }
   }
 
+  /**
+   * Install (or update) a plugin from a code string. Same shape as
+   * install(url) but the source is embedded directly — there's no
+   * URL to update from later. Useful for dev iteration (paste a
+   * local .js file) and for plugins that ship as part of a workbook
+   * itself (the file already contains the code; no network needed).
+   */
+  async installFromCode(code, { sourceLabel, enable = true } = {}) {
+    const text = String(code ?? "");
+    if (!text.trim()) throw new Error("plugin source is empty");
+    if (text.length > MAX_PLUGIN_BYTES) {
+      throw new Error(
+        `plugin source ${(text.length / 1024 / 1024).toFixed(1)} MB exceeds ` +
+        `limit ${MAX_PLUGIN_BYTES / 1024 / 1024} MB`,
+      );
+    }
+
+    this.busy = true;
+    try {
+      const probe = await loadModuleFromCode(text);
+      const manifest = probe?.manifest;
+      if (!manifest || typeof manifest !== "object") {
+        throw new Error("plugin must export a manifest object");
+      }
+      if (typeof manifest.id !== "string" || !manifest.id) {
+        throw new Error("plugin manifest.id is required (string)");
+      }
+      if (typeof probe.onActivate !== "function") {
+        throw new Error("plugin must export an onActivate(wb) function");
+      }
+
+      const now = Date.now();
+      const existingIdx = this.items.findIndex((p) => p.id === manifest.id);
+      const enabled = existingIdx >= 0 ? this.items[existingIdx].enabled : enable;
+      const config  = existingIdx >= 0 ? this.items[existingIdx].config  : {};
+      const installedAt = existingIdx >= 0 ? this.items[existingIdx].installedAt : now;
+
+      if (existingIdx >= 0) await this._deactivate(this.items[existingIdx].id);
+
+      const record = {
+        id: manifest.id,
+        name: manifest.name ?? manifest.id,
+        version: manifest.version ?? "0",
+        description: manifest.description ?? "",
+        icon: manifest.icon ?? null,
+        surfaces: Array.isArray(manifest.surfaces) ? manifest.surfaces : [],
+        permissions: Array.isArray(manifest.permissions) ? manifest.permissions : [],
+        // Inline-installed plugins have no update URL — re-install
+        // by uploading a fresh source file.
+        source: { kind: "inline", code: text, label: sourceLabel ?? null },
+        installedAt,
+        updatedAt: now,
+        enabled,
+        config,
+      };
+
+      const next = this.items.slice();
+      if (existingIdx >= 0) next[existingIdx] = record;
+      else next.push(record);
+      this.items = next;
+      await this._persist();
+
+      if (enabled) await this._activate(record);
+      return record;
+    } finally {
+      this.busy = false;
+    }
+  }
+
   /** Re-fetch a plugin's source URL and replace the embedded bytes. */
   async update(id) {
     const record = this.items.find((p) => p.id === id);
