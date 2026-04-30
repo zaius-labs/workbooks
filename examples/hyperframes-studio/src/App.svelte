@@ -10,6 +10,7 @@
   import { layout } from "./lib/layout.svelte.js";
   import { mcpBridge, isMcpMode } from "./lib/mcpBridge.svelte.js";
   import { exportProject } from "./lib/exportProject.js";
+  import { newProject, openProject, exportHyperframeHtml } from "./lib/projectIO.js";
   // Persistence is the workbook runtime's job — Cmd+S is handled by
   // the SDK's save handler (it serializes <wb-doc> state into the
   // .workbook.html file with its own toast). Nothing to wire here.
@@ -18,6 +19,48 @@
   let renderOpen = $state(false);
   let packaging = $state(false);
   let packageStatus = $state("");
+
+  // Hidden file input drives File > Open Project. Click is triggered
+  // programmatically from the menu; the input captures the chosen
+  // file and routes through projectIO.openProject which handles both
+  // hyperframe.html and .workbook.html shapes.
+  let openFileInput;
+
+  async function onNewProject() {
+    if (!confirm("Start a new project? Unsaved changes in the current composition will be lost.")) return;
+    await newProject();
+    packageStatus = "new project ready";
+    setTimeout(() => { packageStatus = ""; }, 2000);
+  }
+
+  function onOpenProject() {
+    openFileInput?.click();
+  }
+
+  async function onOpenProjectFileChosen(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";  // reset so the same file can be re-opened later
+    if (!file) return;
+    packageStatus = `opening ${file.name}…`;
+    const r = await openProject(file);
+    if (r.ok) {
+      packageStatus = `opened ${file.name}`;
+    } else {
+      packageStatus = `open failed: ${r.error}`;
+    }
+    setTimeout(() => { packageStatus = ""; }, 4000);
+  }
+
+  async function onExportHyperframe() {
+    packageStatus = "exporting…";
+    const r = await exportHyperframeHtml();
+    if (r.ok) {
+      packageStatus = `exported ${r.filename} (${r.sizeKb} KB)`;
+    } else {
+      packageStatus = `export failed: ${r.error}`;
+    }
+    setTimeout(() => { packageStatus = ""; }, 3000);
+  }
 
   async function onPackage() {
     if (packaging) return;
@@ -72,6 +115,9 @@
          primary application actions here; tabs live inside the
          left panel itself now (LeftPanel.svelte). -->
     <MenuBar
+      onNewProject={onNewProject}
+      onOpenProject={onOpenProject}
+      onExportHyperframe={onExportHyperframe}
       onPackage={onPackage}
       onRender={() => renderOpen = true}
       onSettings={() => settingsOpen = true}
@@ -152,4 +198,14 @@
 
 <SettingsModal bind:open={settingsOpen} />
 <RenderModal bind:open={renderOpen} />
+
+<!-- Hidden file input for File > Open Project. Accepts hyperframe.html
+     and .workbook.html — projectIO.openProject sniffs the format. -->
+<input
+  type="file"
+  accept=".html,text/html"
+  bind:this={openFileInput}
+  onchange={onOpenProjectFileChosen}
+  style="display: none"
+/>
 
