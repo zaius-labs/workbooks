@@ -18,3 +18,4 @@ export {
 } from "../../packages/runtime/src/htmlBindings";
 export { renderMarkdown, escapeHtml } from "../../packages/runtime/src/markdown";
 export { createWorkbookAgentTools } from "../../packages/runtime/src/agentTools";
+export { createWorkbookBashTool } from "../../packages/runtime/src/agentBashTool";

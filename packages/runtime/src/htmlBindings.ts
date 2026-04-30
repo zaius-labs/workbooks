@@ -39,7 +39,8 @@ import type {
 } from "./wasmBridge";
 import type { CellState } from "./reactiveExecutor";
 import type { LlmClient } from "./llmClient";
-import { runAgentLoop } from "./agentLoop";
+import { runAgentLoop, type AgentTool } from "./agentLoop";
+import { createWorkbookBashTool } from "./agentBashTool";
 import { sanitizeSvg } from "./util/sanitize";
 import {
   createWorkbookDataResolver,
@@ -837,6 +838,32 @@ export interface MountOptions {
    * raw-bytes resolution if the host ships its own reader.
    */
   historyResolver?: WorkbookHistoryResolver;
+  /**
+   * Optional extra agent tools (core-547). Merged with the framework
+   * default `bash` tool for any `<wb-agent>` whose `<wb-tool>` children
+   * leave its tools array empty. Use this to register app-specific
+   * mutation tools (e.g. studio-style composition.set wrappers) that
+   * the standard read-only bash tool can't provide.
+   *
+   * Pass an empty array to OPT OUT of the default bash tool while
+   * still leaving agent dispatch tool-aware.
+   */
+  agentTools?: AgentTool[];
+  /**
+   * Suppress the framework-default `bash` agent tool. When true, agents
+   * with no <wb-tool> children fall back to the legacy zero-tool dispatch
+   * regardless of agentTools. Useful for portable exports where the
+   * just-bash dependency isn't available.
+   */
+  disableDefaultBashTool?: boolean;
+  /**
+   * Optional callback yielding skill markdown by key, surfaced to the
+   * default bash tool under /workbook/skills/<key>.md. Pair with
+   * `agentSkillKeys` to declare which keys to mount.
+   */
+  getSkillSource?: (key: string) => string | null | Promise<string | null>;
+  /** Skill keys to mount in the bash tool's VFS. */
+  agentSkillKeys?: string[];
 }
 
 export async function mountHtmlWorkbook(opts: MountOptions): Promise<{
@@ -1014,14 +1041,46 @@ export async function mountHtmlWorkbook(opts: MountOptions): Promise<{
     bindInputElement(inp as HTMLElement, executor);
   }
 
+  // Resolve the per-agent tool surface (core-547). For each agent:
+  //   1. If <wb-tool ref="..."> children declare cell-bound tools, the
+  //      legacy path is unchanged (no framework default — author opted
+  //      into a specific surface).
+  //   2. Otherwise, default to [bash, ...opts.agentTools] unless
+  //      disableDefaultBashTool is set or opts.agentTools is explicitly
+  //      provided as []. The bash tool is constructed lazily — the
+  //      just-bash module isn't loaded until the agent first runs it.
+  const extraTools = opts.agentTools;
+  const buildAgentTools = (agent: AgentSpec): AgentTool[] => {
+    if (agent.tools.length > 0) {
+      // Author specified <wb-tool ref="cellId"> children. The cell-bound
+      // tool surface is a future epic (core-6ul) — for now we honor the
+      // declaration shape but don't dispatch anything; same posture as
+      // before this change.
+      return [];
+    }
+    const tools: AgentTool[] = [];
+    if (!opts.disableDefaultBashTool) {
+      tools.push(
+        createWorkbookBashTool({
+          client,
+          spec,
+          getSkillSource: opts.getSkillSource,
+          skillKeys: opts.agentSkillKeys,
+        }),
+      );
+    }
+    if (extraTools && extraTools.length > 0) tools.push(...extraTools);
+    return tools;
+  };
+
   // Wire <wb-chat> elements to their agents.
   for (const chat of doc.querySelectorAll("wb-chat")) {
-    bindChatElement(chat as HTMLElement, ctx, spec);
+    bindChatElement(chat as HTMLElement, ctx, spec, buildAgentTools);
   }
 
   // Wire <wb-agent> trigger buttons (manual run for now).
   for (const agentEl of doc.querySelectorAll("wb-agent")) {
-    bindAgentElement(agentEl as HTMLElement, ctx, spec);
+    bindAgentElement(agentEl as HTMLElement, ctx, spec, buildAgentTools);
   }
 
   // (window.__wbRuntime is set immediately after the client is
@@ -1204,6 +1263,7 @@ function bindAgentElement(
   el: HTMLElement,
   ctx: WorkbookContext,
   spec: WorkbookHtmlSpec,
+  buildTools: (agent: AgentSpec) => AgentTool[],
 ): void {
   const id = el.getAttribute("id");
   if (!id) return;
@@ -1214,7 +1274,9 @@ function bindAgentElement(
   // bound by a <wb-output for="agentId">. The chat element handles
   // multi-turn; standalone agent cells run once at mount or on click.
   if (el.hasAttribute("auto") || el.hasAttribute("trigger") === false) {
-    runAgentOnce(el, ctx, agent).catch((err) => console.warn("agent run", err));
+    runAgentOnce(el, ctx, agent, buildTools(agent)).catch((err) =>
+      console.warn("agent run", err),
+    );
   }
 }
 
@@ -1222,6 +1284,7 @@ async function runAgentOnce(
   el: HTMLElement,
   ctx: WorkbookContext,
   agent: AgentSpec,
+  tools: AgentTool[],
 ): Promise<void> {
   if (!ctx.llmClient) return;
   // Build context from the agent's `reads` cells.
@@ -1242,7 +1305,7 @@ async function runAgentOnce(
     model: agent.model,
     systemPrompt: agent.systemPrompt,
     initialUserMessage: userMessage,
-    tools: [], // tool-use agent layer comes next
+    tools,
   });
 
   // Find the matching <wb-output for=agent.id> and update. agent.id
@@ -1262,14 +1325,15 @@ function bindChatElement(
   el: HTMLElement,
   ctx: WorkbookContext,
   spec: WorkbookHtmlSpec,
+  buildTools: (agent: AgentSpec) => AgentTool[],
 ): void {
   const agentId = el.getAttribute("for") ?? el.getAttribute("agent");
   if (!agentId) {
     el.innerHTML = `<div class="wb-out error">wb-chat: missing 'for' attribute</div>`;
     return;
   }
-  const agent = spec.agents.find((a) => a.id === agentId);
-  if (!agent) {
+  const agentMatch = spec.agents.find((a) => a.id === agentId);
+  if (!agentMatch) {
     // agentId is from getAttribute("for")/("agent"), workbook-controlled.
     // Escape before interpolating into the error message. closes core-0id.2 + .3
     el.innerHTML = `<div class="wb-out error">wb-chat: no agent with id '${escapeHtml(agentId)}'</div>`;
@@ -1279,6 +1343,10 @@ function bindChatElement(
     el.innerHTML = `<div class="wb-out error">wb-chat: no llmClient configured</div>`;
     return;
   }
+  // Re-bind to a non-nullable reference so the inner send() closure
+  // doesn't lose the narrowing (TS can't track it through the function
+  // boundary).
+  const agent: AgentSpec = agentMatch;
 
   // Render chat shell.
   el.innerHTML = `
@@ -1335,22 +1403,49 @@ function bindChatElement(
 
     let streamed = "";
     try {
-      const it = ctx.llmClient!.generateChat({
-        model: agent.model,
-        messages: [
-          { role: "system", content: augmentedSystem },
-          ...history.map((m) => ({ role: m.role, content: m.content })),
-        ],
-      });
-      for await (const ev of it) {
-        if (ev.kind === "delta") {
-          streamed += ev.text;
-          renderHistory(streamed);
-        } else if (ev.kind === "done") {
-          if (ev.errorMessage) {
-            history.push({ role: "assistant", content: `[error] ${ev.errorMessage}` });
-          } else {
-            history.push({ role: "assistant", content: ev.finalText || streamed });
+      // Resolve the agent's tool surface lazily (per send) so
+      // late-registered runtime state — newly appended memory rows,
+      // mutated docs — is reflected when the bash tool builds its
+      // VFS snapshot. core-547.
+      const tools = buildTools(agent);
+      if (tools.length > 0) {
+        // Tool-aware path: route through runAgentLoop so the model can
+        // call bash + any host-registered extras between turns.
+        const result = await runAgentLoop({
+          llmClient: ctx.llmClient!,
+          model: agent.model,
+          systemPrompt: augmentedSystem,
+          initialUserMessage: text,
+          tools,
+          onDelta: (delta) => {
+            streamed += delta;
+            renderHistory(streamed);
+          },
+        });
+        history.push({
+          role: "assistant",
+          content: result.text || streamed || "(empty response)",
+        });
+      } else {
+        // Zero-tool path — preserve the original streaming-friendly
+        // generateChat so chat-only agents see token-by-token deltas.
+        const it = ctx.llmClient!.generateChat({
+          model: agent.model,
+          messages: [
+            { role: "system", content: augmentedSystem },
+            ...history.map((m) => ({ role: m.role, content: m.content })),
+          ],
+        });
+        for await (const ev of it) {
+          if (ev.kind === "delta") {
+            streamed += ev.text;
+            renderHistory(streamed);
+          } else if (ev.kind === "done") {
+            if (ev.errorMessage) {
+              history.push({ role: "assistant", content: `[error] ${ev.errorMessage}` });
+            } else {
+              history.push({ role: "assistant", content: ev.finalText || streamed });
+            }
           }
         }
       }
