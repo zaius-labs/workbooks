@@ -1,27 +1,48 @@
 // Secure CSV pipeline for the talk-to-csv showcase.
 //
-// Wires:
-//   - workbook runtime (Rust+WASM via virtual:workbook-runtime)
-//   - createWorkbookDataResolver in wasmIsolation mode (Phase E)
-//   - the inline <wb-data id="orders"> block this page ships with
+// Mental model: this workbook is an "encrypted document". The
+// inline <wb-data id="orders" encryption="age-v1"> in index.html is
+// what was issued to the user — they sign in to read it.
 //
-// Result:
-//   1. unlock(passphrase) decrypts the block in Rust; plaintext stays
-//      in linear memory; we only ever hold a WasmPlaintextHandle in JS.
-//   2. query(sql) runs a Polars-SQL statement using the handle as the
-//      `data` table; rows come back as parsed objects (small).
-//   3. dispose() drops the handle and forgets the passphrase.
+// Sign-in paths:
 //
-// The CSV bytes never become a JS Uint8Array unless we explicitly
-// call handle.export(). The only thing the LLM sees is the schema
-// returned by `getSchema()`.
+//   signInWithPassphrase(passphrase)
+//     Decrypt the inline block. Always available — works on file://,
+//     localhost, or hosted.
+//
+//   signInWithPasskey()
+//     Decrypt the localStorage envelope that was bound to the user's
+//     passkey when they previously enabled "remember on this device".
+//     Requires an HTTPS or localhost origin; surfaced as unavailable
+//     on file://.
+//
+//   enablePasskey()
+//     One-time enrollment after a successful passphrase sign-in. We
+//     register a WebAuthn-PRF credential, encrypt the same plaintext
+//     to it, and persist the envelope to localStorage. Subsequent
+//     visits go through signInWithPasskey().
+//
+// The CSV plaintext lives in module-local memory while signed in;
+// signOut() drops it (and forgetPasskey() additionally wipes the
+// localStorage envelope so the next visit returns to passphrase).
 
-import { createWorkbookDataResolver } from "@work.books/runtime/workbookDataResolver";
+// age-encryption is imported statically so Vite bundles it into the
+// portable .workbook.html. The runtime package's lazy-load wrapper
+// (loadAge) uses a vite-ignored dynamic import that doesn't survive
+// the singlefile build; calling typage directly avoids that.
+import { Encrypter, Decrypter, webauthn } from "age-encryption";
+import {
+  readVault,
+  writeVault,
+  clearVault,
+  defaultRpId,
+  passkeyAvailable,
+} from "./vault.js";
 
 let runtime = null;
-let resolver = null;
-let unlockedHandle = null;
+let unlockedBytes = null;
 let cachedSchema = null;
+let cachedRowCount = 0;
 
 async function getRuntime() {
   if (!runtime) {
@@ -31,101 +52,145 @@ async function getRuntime() {
   return runtime;
 }
 
-/** Read the encrypted <wb-data> block this page ships with. The
- *  parser produces a normalized WorkbookData object the resolver
- *  consumes — same shape the runtime uses when mounting a full
- *  workbook. */
-function findEncryptedBlock() {
-  const elements = document.querySelectorAll(
-    "wb-data[encryption='age-v1']",
-  );
-  if (!elements.length) {
-    throw new Error(
-      "talk-to-csv: no <wb-data encryption='age-v1'> in the page. " +
-        "Run `npm run encrypt-data` to splice the encrypted sample into " +
-        "src/index.html before building.",
-    );
+function bytesToBase64(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function sha256Hex(bytes) {
+  const d = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(d)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/** Read the inline <wb-data> the workbook ships with. */
+function readInlineBlock() {
+  const els = document.querySelectorAll("wb-data[encryption='age-v1']");
+  if (!els.length) {
+    throw new Error("This workbook has no encrypted block to sign in to.");
   }
-  // Hand-build the WorkbookData. (Skipping the full parser keeps this
-  // self-contained and avoids dragging in MDX bits.)
-  const el = elements[0];
-  const id = el.getAttribute("id") ?? "orders";
-  const mime = el.getAttribute("mime") ?? "text/csv";
-  const sha256 = el.getAttribute("sha256") ?? "";
-  const encoding = el.getAttribute("encoding") ?? "base64";
-  if (encoding !== "base64") {
-    throw new Error(`talk-to-csv: unexpected encoding=${encoding}`);
-  }
-  const base64 = (el.textContent ?? "").replace(/\s+/g, "");
+  const el = els[0];
   return {
-    id,
-    mime,
-    encryption: "age-v1",
-    source: { kind: "inline-base64", base64, sha256 },
+    sha256: el.getAttribute("sha256") ?? "",
+    base64: (el.textContent ?? "").replace(/\s+/g, ""),
+    id: el.getAttribute("id") ?? "data",
   };
 }
 
-/**
- * Unlock the inline encrypted block.
- * @param {string} passphrase
- * @returns {Promise<{ rows: number, schema: Array<{name:string,type:string}>}>}
- */
-export async function unlock(passphrase) {
-  if (unlockedHandle) {
-    throw new Error("talk-to-csv: already unlocked. Call dispose() first.");
+async function decryptPassphrase(cipher, passphrase) {
+  const d = new Decrypter();
+  d.addPassphrase(passphrase);
+  return d.decrypt(cipher);
+}
+
+async function decryptIdentity(cipher, identity) {
+  const d = new Decrypter();
+  d.addIdentity(identity);
+  return d.decrypt(cipher);
+}
+
+async function encryptToRecipient(plaintext, recipient) {
+  const e = new Encrypter();
+  e.addRecipient(recipient);
+  return e.encrypt(plaintext);
+}
+
+export async function signInWithPassphrase(passphrase) {
+  const blk = readInlineBlock();
+  const cipher = base64ToBytes(blk.base64);
+  const plaintext = await decryptPassphrase(cipher, passphrase);
+  const got = await sha256Hex(plaintext);
+  if (got !== blk.sha256) throw new Error("integrity check failed");
+  return adoptPlaintext(plaintext);
+}
+
+export async function signInWithPasskey() {
+  const v = readVault();
+  if (!v || !v.prfIdentity) {
+    throw new Error("Passkey not enabled on this device yet — sign in with your passphrase first.");
   }
-  const { wasm } = await getRuntime();
-  if (!wasm.ageDecryptToHandle) {
-    throw new Error(
-      "talk-to-csv: the runtime build is missing ageDecryptToHandle. " +
-        "Rebuild packages/runtime-wasm with the crypto module enabled.",
-    );
-  }
-  resolver = createWorkbookDataResolver({
-    requestPassword: async () => passphrase,
-    wasmIsolation: { wasm },
+  const identity = new webauthn.WebAuthnIdentity({
+    identity: v.prfIdentity,
+    rpId: v.rpId ?? undefined,
   });
-  const block = findEncryptedBlock();
-  const result = await resolver.resolve(block);
-  if (!result || !result.value || result.value.kind !== "wasm-handle") {
-    throw new Error(
-      "talk-to-csv: resolver returned the wrong shape — expected a " +
-        "wasm-handle. Check that wasmIsolation is wired correctly.",
-    );
-  }
-  unlockedHandle = result.value;
-  cachedSchema = await deriveSchema(unlockedHandle);
-  return {
-    rows: await rowCount(),
-    schema: cachedSchema,
-  };
+  const cipher = base64ToBytes(v.cipher);
+  const plaintext = await decryptIdentity(cipher, identity);
+  const got = await sha256Hex(plaintext);
+  if (got !== v.sha256) throw new Error("integrity check failed");
+  return adoptPlaintext(plaintext);
 }
 
 /**
- * Run a Polars-SQL statement against the unlocked handle.
- * The encrypted bytes never cross to JS; only the SQL output rows
- * (normally a small slice of the dataset) come back as objects.
- *
- * @param {string} sql — the table name MUST be `data` (we register the
- *                       handle under that name).
+ * One-time enrollment, called after a successful passphrase sign-in.
+ * Registers a passkey and writes a parallel envelope to localStorage.
  */
-export async function query(sql) {
-  if (!unlockedHandle) {
-    throw new Error("talk-to-csv: not unlocked");
+export async function enablePasskey({ rpId = defaultRpId(), label = "talk-to-csv" } = {}) {
+  if (!unlockedBytes) {
+    throw new Error("enablePasskey: sign in first");
   }
+  if (!passkeyAvailable()) {
+    throw new Error(
+      "Passkeys aren't available here — they need an HTTPS or localhost origin.",
+    );
+  }
+  const prfIdentity = await webauthn.createCredential({
+    keyName: label,
+    rpId,
+  });
+  const recipient = new webauthn.WebAuthnRecipient({
+    identity: prfIdentity,
+    rpId,
+  });
+  const cipher = await encryptToRecipient(unlockedBytes, recipient);
+  const sha256 = await sha256Hex(unlockedBytes);
+  writeVault({
+    cipher: bytesToBase64(cipher),
+    sha256,
+    methods: ["passkey"],
+    prfIdentity,
+    rpId,
+    filename: "",
+    rows: cachedRowCount,
+  });
+}
+
+/** Sign out of the current session — drops plaintext from memory.
+ *  Doesn't touch the vault; next visit can sign back in via passkey
+ *  or passphrase. */
+export function signOut() {
+  unlockedBytes = null;
+  cachedSchema = null;
+  cachedRowCount = 0;
+}
+
+/** Wipe the passkey envelope from localStorage. The user can re-
+ *  enable it later by signing in with passphrase + clicking enable. */
+export function forgetPasskey() {
+  signOut();
+  clearVault();
+}
+
+export function hasPasskeyEnrolled() {
+  const v = readVault();
+  return Boolean(v && v.prfIdentity);
+}
+
+// ─── Queries against the unlocked plaintext ───────────────────────
+
+export async function query(sql) {
+  if (!unlockedBytes) throw new Error("query: not signed in");
   const { wasm } = await getRuntime();
-  // Phase E path. runPolarsSqlIpcHandles takes a map of table name →
-  // handle id and resolves bytes inside Rust. The current showcase
-  // ships the encrypted CSV as raw bytes (text/csv); for SQL we need
-  // them parsed as Arrow IPC. Polars-SQL's text/csv handler doesn't
-  // exist on the handle path yet, so we use the export() escape
-  // hatch here. This is the documented compromise — see SECURITY.md.
-  const csvBytes = unlockedHandle.export();
-  const csvText = new TextDecoder().decode(csvBytes);
+  const csvText = new TextDecoder().decode(unlockedBytes);
   const outputs = wasm.runPolarsSql(sql, csvText);
-  const csvOut = outputs.find(
-    (o) => o.kind === "text" && o.mime_type === "text/csv",
-  );
+  const csvOut = outputs.find((o) => o.kind === "text" && o.mime_type === "text/csv");
   if (!csvOut) {
     const err = outputs.find((o) => o.kind === "error");
     throw new Error(err?.message ?? "query produced no CSV output");
@@ -133,59 +198,41 @@ export async function query(sql) {
   return parseCsv(csvOut.content);
 }
 
-/** Drop the handle + passphrase + resolver. Call on lock/logout. */
-export function dispose() {
-  if (unlockedHandle) {
-    unlockedHandle.dispose();
-    unlockedHandle = null;
-  }
-  if (resolver) {
-    resolver.clear();
-    resolver.forgetPassphrase();
-    resolver = null;
-  }
-  cachedSchema = null;
+export async function getAllRows() {
+  return query("SELECT * FROM data");
 }
-
-/** Schema (column names + inferred types) derived from a sample
- *  query — this is the ONLY thing we send to the LLM for NL→SQL. */
-export function getSchema() {
-  return cachedSchema;
-}
-
-/** Sample rows for the LLM prompt — small slice (5 rows by default).
- *  These leave the page if the user opts to use the LLM panel; the
- *  trust panel surfaces this clearly. */
 export async function getSampleRows(n = 5) {
   return query(`SELECT * FROM data LIMIT ${n}`);
 }
-
-async function deriveSchema(handle) {
-  // Run a tiny `LIMIT 1` query so Polars infers the schema. We keep
-  // the result locally; the LLM only ever gets column names + types.
-  const csvBytes = handle.export();
-  const csvText = new TextDecoder().decode(csvBytes);
-  const { wasm } = await getRuntime();
-  const outputs = wasm.runPolarsSql("SELECT * FROM data LIMIT 1", csvText);
-  const csvOut = outputs.find(
-    (o) => o.kind === "text" && o.mime_type === "text/csv",
-  );
-  if (!csvOut) return [];
-  const header = csvOut.content.split("\n", 1)[0];
-  const sample = csvOut.content.split("\n", 2)[1] ?? "";
-  const cols = parseRow(header);
-  const sampleCells = parseRow(sample);
-  return cols.map((name, i) => ({
-    name,
-    type: inferType(sampleCells[i]),
-  }));
+export function getSchema() {
+  return cachedSchema;
+}
+export function getRowCount() {
+  return cachedRowCount;
 }
 
-async function rowCount() {
-  const rows = await query("SELECT COUNT(*) AS n FROM data");
-  return rows[0]?.n ?? 0;
+// ─── helpers ──────────────────────────────────────────────────────
+
+async function adoptPlaintext(plaintext) {
+  unlockedBytes = plaintext;
+  const csvText = new TextDecoder().decode(plaintext);
+  cachedSchema = deriveSchemaFromCsv(csvText);
+  cachedRowCount = countRows(csvText);
+  return { schema: cachedSchema, rows: cachedRowCount };
 }
 
+function countRows(csvText) {
+  const trimmed = csvText.replace(/\n+$/g, "");
+  if (!trimmed) return 0;
+  return Math.max(0, trimmed.split("\n").length - 1);
+}
+function deriveSchemaFromCsv(csvText) {
+  const head = csvText.split("\n", 1)[0];
+  const second = csvText.split("\n", 2)[1] ?? "";
+  const cols = parseRow(head);
+  const sampleCells = parseRow(second);
+  return cols.map((name, i) => ({ name, type: inferType(sampleCells[i]) }));
+}
 function inferType(cell) {
   if (cell === undefined || cell === "") return "text";
   if (/^-?\d+$/.test(cell)) return "int";
@@ -193,7 +240,6 @@ function inferType(cell) {
   if (/^\d{4}-\d{2}-\d{2}/.test(cell)) return "date";
   return "text";
 }
-
 function parseCsv(s) {
   const lines = s.trim().split("\n");
   if (!lines.length) return [];
@@ -208,28 +254,19 @@ function parseCsv(s) {
     return row;
   });
 }
-
 function parseRow(s) {
   const out = [];
   let cur = "";
   let inQ = false;
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
-    if (ch === '"') {
-      inQ = !inQ;
-      continue;
-    }
-    if (ch === "," && !inQ) {
-      out.push(cur);
-      cur = "";
-      continue;
-    }
+    if (ch === '"') { inQ = !inQ; continue; }
+    if (ch === "," && !inQ) { out.push(cur); cur = ""; continue; }
     cur += ch;
   }
   out.push(cur);
   return out;
 }
-
 function isNumeric(s) {
   return s !== "" && !isNaN(Number(s));
 }

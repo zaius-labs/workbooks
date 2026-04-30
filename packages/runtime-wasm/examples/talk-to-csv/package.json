@@ -9,6 +9,7 @@
     "encrypt-data": "node scripts/encrypt-sample.mjs"
   },
   "dependencies": {
+    "age-encryption": "^0.2.4",
     "svelte": "^5.0.0"
   },
   "devDependencies": {

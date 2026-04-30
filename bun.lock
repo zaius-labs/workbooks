@@ -175,6 +175,7 @@
       "name": "@work.books/example-talk-to-csv",
       "version": "0.1.0",
       "dependencies": {
+        "age-encryption": "^0.2.4",
         "svelte": "^5.0.0",
       },
       "devDependencies": {
