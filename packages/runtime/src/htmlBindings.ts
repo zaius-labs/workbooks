@@ -889,6 +889,17 @@ export async function mountHtmlWorkbook(opts: MountOptions): Promise<{
     },
   };
 
+  // Expose the runtime client globally as soon as it exists — long
+  // before the initial runAll resolves. SDK consumers (the cli's save
+  // handler, the studio's loroBackend) poll this; setting it here
+  // means their poll succeeds within ms of mount starting, not only
+  // after data resolution + cell DAG run finish. The poll also waits
+  // on getDocHandle, so registerDoc happening later in this function
+  // is fine.
+  if (typeof window !== "undefined") {
+    (window as Window & { __wbRuntime?: unknown }).__wbRuntime = client;
+  }
+
   // Forward-declared so the wrapper above can read it once we build it.
   const ctxRef: { current: WorkbookContext | null } = { current: null };
 
@@ -1002,15 +1013,10 @@ export async function mountHtmlWorkbook(opts: MountOptions): Promise<{
     bindAgentElement(agentEl as HTMLElement, ctx, spec);
   }
 
-  // Expose the runtime client globally so the cli's save handler
-  // (workbook-cli/src/runtime-inject/saveHandler.mjs) can call
-  // exportDoc/exportMemory on Cmd+S, refreshing every <wb-doc> and
-  // <wb-memory> element with current state before serializing the
-  // file. Same hook that the Svelte SDK's <WorkbookApp> sets, so
-  // both authoring paths get file-roundtrip identically.
-  if (typeof window !== "undefined") {
-    (window as Window & { __wbRuntime?: unknown }).__wbRuntime = client;
-  }
+  // (window.__wbRuntime is set immediately after the client is
+  // built, far above — this lets store constructors that race
+  // ahead of main.js's mountHtmlWorkbook await find the client
+  // within ms instead of waiting for runAll to resolve.)
 
   await executor.runAll();
   return { executor, ctx, spec };

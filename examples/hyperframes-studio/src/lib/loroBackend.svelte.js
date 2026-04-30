@@ -36,39 +36,53 @@ let _bootPromise = null;
 
 /**
  * Resolve the raw LoroDoc registered by the workbook runtime for our
- * <wb-doc id="hyperframes-state"> element. Idempotent — subsequent
- * calls reuse the cached promise.
+ * <wb-doc id="hyperframes-state"> element.
  *
- * Returns the LoroDoc; throws if the runtime never registered the
- * doc (e.g. main.js skipped mountHtmlWorkbook). Callers that prefer
- * graceful degradation can wrap in try/catch.
+ * Polls window.__wbRuntime + getDocHandle so this works regardless of
+ * whether the caller fires BEFORE or AFTER main.js completes its
+ * mountHtmlWorkbook await — composition / asset / userSkill store
+ * constructors race ahead of main.js at module-load time, and we
+ * don't want them to cache a failed promise.
+ *
+ * Idempotent — once resolved, subsequent calls reuse the cached doc.
+ * If a previous attempt threw, we retry on the next call.
  */
+const RUNTIME_POLL_TIMEOUT_MS = 10_000;
+const RUNTIME_POLL_INTERVAL_MS = 25;
+
 export function bootstrapLoro() {
+  if (_doc) return Promise.resolve(_doc);
   if (_bootPromise) return _bootPromise;
-  _bootPromise = (async () => {
-    // The runtime exposes its client at window.__wbRuntime after
-    // mountHtmlWorkbook resolves. main.js awaits both before we're
-    // called, so the handle should be present.
-    const rt = typeof window !== "undefined"
-      ? window.__wbRuntime
-      : null;
-    if (!rt || typeof rt.getDocHandle !== "function") {
-      throw new Error(
-        "loroBackend: window.__wbRuntime not initialized — " +
-        "did main.js call mountHtmlWorkbook before bootstrapLoro?",
-      );
+
+  const promise = (async () => {
+    const start = Date.now();
+    while (Date.now() - start < RUNTIME_POLL_TIMEOUT_MS) {
+      const rt = typeof window !== "undefined" ? window.__wbRuntime : null;
+      if (rt && typeof rt.getDocHandle === "function") {
+        const handle = rt.getDocHandle(DOC_ID);
+        if (handle && typeof handle.inner === "function") {
+          _doc = handle.inner();
+          return _doc;
+        }
+      }
+      await new Promise((r) => setTimeout(r, RUNTIME_POLL_INTERVAL_MS));
     }
-    const handle = rt.getDocHandle(DOC_ID);
-    if (!handle || typeof handle.inner !== "function") {
-      throw new Error(
-        `loroBackend: <wb-doc id="${DOC_ID}"> wasn't registered. ` +
-        `Make sure index.html has <wb-workbook><wb-doc id="${DOC_ID}" format="loro" /></wb-workbook>.`,
-      );
-    }
-    _doc = handle.inner();
-    return _doc;
+    // Timeout — clear the cached promise so the NEXT caller can retry
+    // (e.g. if the user reloads or the runtime mounts late).
+    _bootPromise = null;
+    throw new Error(
+      `loroBackend: timed out (${RUNTIME_POLL_TIMEOUT_MS}ms) waiting for ` +
+      `<wb-doc id="${DOC_ID}"> to register. Make sure index.html has ` +
+      `<wb-workbook><wb-doc id="${DOC_ID}" format="loro" /></wb-workbook> ` +
+      `and main.js calls bundle.mountHtmlWorkbook(...).`,
+    );
   })();
-  return _bootPromise;
+
+  // Clear cache on rejection so retries work; keep on success so we
+  // return the cached doc immediately on every subsequent call.
+  promise.catch(() => { _bootPromise = null; });
+  _bootPromise = promise;
+  return promise;
 }
 
 /** Synchronous access — returns null until bootstrapLoro() resolves. */

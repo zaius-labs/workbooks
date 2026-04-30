@@ -4142,6 +4142,9 @@ async function mountHtmlWorkbook(opts) {
       return wasmClient.runCell(enriched);
     }
   };
+  if (typeof window !== "undefined") {
+    window.__wbRuntime = client;
+  }
   const ctxRef = { current: null };
   const outputCache = /* @__PURE__ */ new Map();
   const dataResolver = opts.dataResolver ?? createWorkbookDataResolver();
@@ -4213,9 +4216,6 @@ async function mountHtmlWorkbook(opts) {
   }
   for (const agentEl of doc.querySelectorAll("wb-agent")) {
     bindAgentElement(agentEl, ctx, spec);
-  }
-  if (typeof window !== "undefined") {
-    window.__wbRuntime = client;
   }
   await executor.runAll();
   return { executor, ctx, spec };
