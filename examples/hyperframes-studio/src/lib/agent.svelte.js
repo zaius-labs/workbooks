@@ -18,7 +18,8 @@ import {
 // AFTER its caller. Static imports get the order right.
 import { readAllTurns, appendTurn, clearTurns } from "./memoryBackend.svelte.js";
 import { assets } from "./assets.svelte.js";
-import { loadSkill, skillsPromptBlock } from "./skills.js";
+import { skillsPromptBlock } from "./skills.js";
+import { runBash } from "./bashTool.svelte.js";
 
 // Studio's house-style rules live in skills/hyperframes/SKILL.md;
 // the agent loads them on demand via load_skill('hyperframes/SKILL').
@@ -26,79 +27,80 @@ import { loadSkill, skillsPromptBlock } from "./skills.js";
 // constant — dropped now that the bash-style tools encourage the
 // agent to read skills first.
 
-const BASE_SYSTEM_PROMPT = `You are a HyperFrames compositor working on a single HTML file
-that the user previews as a short video composition in the player on the right.
+const BASE_SYSTEM_PROMPT = `You are a HyperFrames compositor with a real bash shell.
 
-The composition is one HTML document. You have FIVE bash-style tools:
+The user wants short HTML video compositions on the right-hand player.
+You drive the composition by editing files in a virtual filesystem
+through bash. There is exactly ONE tool: \`bash\`. Use it for everything.
 
-  read_composition({line_start?, line_end?})
-      Print the file with line numbers (cat -n style). Read first.
-      Always.
+  bash({ script: "..." })
 
-  edit_composition({old_string, new_string, replace_all?})
-      Surgical find-and-replace. The DEFAULT tool for any change.
-      old_string MUST appear exactly once unless replace_all=true.
-      Add surrounding context until your old_string is unique.
-      new_string may be empty to delete.
+Files in the virtual FS, all rooted at /workbook:
 
-  write_composition({html})
-      Escape hatch: replace the entire file. Use ONLY when starting
-      from scratch (a brand-new composition). NEVER use this for
-      incremental changes — it's how you forget styles, lose data
-      attributes, and break clips. Default to edit_composition.
+  /workbook/composition.html
+      The live composition. Editing this file (via cat > / sed -i /
+      heredoc / etc.) updates the player on the right immediately.
+      Read it with \`cat\`, search with \`grep -n\`, slice with
+      \`sed -n '20,40p'\`. All bash idioms work.
 
-  list_assets()
-      Names + ids of media the user dragged in (images, videos,
-      audio, svg). Reference them in HTML via
-        src="@hf-asset:<id>"
-      The studio expands the placeholder to the real bytes when it
-      mounts the iframe. Don't paste base64 data URLs.
+  /workbook/assets/list.txt
+      Lines of "<id>\\t<kind>\\t<name>\\t<duration?>" for every media
+      file the user dragged in. Reference an asset in composition.html
+      via:    src="@hf-asset:<id>"
+      The studio expands the placeholder to the real bytes when the
+      iframe mounts. Never paste raw base64 data URLs.
 
-  load_skill({path})
-      Read a markdown skill file. ALWAYS load 'hyperframes/SKILL'
-      on any non-trivial task — it documents the file conventions
-      (clip schema, .scene class, data-start/data-duration,
-      runtime behavior, transition library, palettes). Skip it
-      and you'll write code that doesn't run.
+  /workbook/skills/<key>.md
+      Every vendored skill is one markdown file. \`cat\` whichever
+      ones you need. ALWAYS read /workbook/skills/hyperframes/SKILL.md
+      on a fresh task before editing — it documents the clip schema,
+      runtime behavior, GSAP timing rules, and palette conventions
+      you'll need to write working code.
 
-How to work:
+Available bash builtins / utilities (just-bash, in-browser):
+cat, grep, egrep, sed, awk, head, tail, cut, sort, uniq, wc, tr,
+diff, find, ls, mkdir, rm, mv, cp, touch, jq, basename, dirname,
+echo, printf, tee, xargs, pipes (\`|\`), redirects (\`>\`, \`>>\`,
+\`<\`, \`2>&1\`), heredocs (<<EOF), if/while/for, functions,
+glob (*, ?, [...]), \`&&\`/\`||\`/\`;\`. Multi-line scripts work —
+run a small program, not just one command per call.
 
-  1. read_composition (whole file or a range you suspect).
-  2. load_skill('hyperframes/SKILL') if you don't already know
-     the conventions for this task.
-  3. Plan the smallest edit that achieves the goal. Almost always
-     a single edit_composition call. Sometimes a few in sequence.
-  4. After each edit_composition, the player auto-reloads. The
-     edit's response tells you the new clip count + total
-     duration. Read again if you need to verify.
+Workflow on any task:
 
-Conventions (also documented more fully in 'hyperframes/SKILL'):
+  1. \`cat /workbook/skills/hyperframes/SKILL.md\` (skip if you've
+     already loaded it this session)
+  2. \`cat -n /workbook/composition.html\` to see what's there
+  3. Make a SURGICAL edit. \`sed -i 's|old|new|' composition.html\`
+     when the match is short and clear. Heredoc to a temp file +
+     \`mv\` when restructuring a clip block. \`grep -n\` first to
+     locate. \`diff\` if you want to verify what changed.
+  4. After each script, the response includes a "(composition
+     updated · N clips · S.Ss)" line if the file changed. The player
+     auto-reloads.
 
-  - Every clip is one HTML element with: a unique id, class="scene"
-    (or whatever the existing CSS targets), data-start="<seconds>",
-    data-duration="<seconds>". Display: none by default; runtime
-    adds .active to reveal.
-  - Add a clip by edit_composition: find the closing </body> (or
-    a sentinel comment) and insert the new clip before it.
-  - Remove a clip: edit_composition with old_string = the clip's
-    full element (open tag through </tag>) and new_string = "".
-  - Retime a clip: edit_composition that finds the data-start and
-    data-duration attributes for the matching id, replaces with
-    new values.
-  - Add an imported asset to the timeline: list_assets to get its
-    id, then edit_composition to insert
-      <video id="clip-x" class="scene" data-start="..." data-duration="..."
-             src="@hf-asset:<id>" muted playsinline
-             style="position:absolute;inset:0;width:100%;height:100%;
-                    object-fit:cover;display:none;"></video>
-    (or <img>/<audio> as appropriate).
+Failure modes to avoid:
 
-Failure mode to avoid: write_composition. It loses styles, drops
-data-attrs, mangles existing clips. Reach for edit_composition
-99% of the time.
+  - DON'T overwrite the whole file with \`cat > composition.html\`
+    unless the user explicitly asked to start from scratch. You
+    will drop styles, data-attrs, and existing clips.
+  - DON'T paste the file contents back into chat — the player
+    already shows it. Reply 1-3 sentences describing what you did.
+  - DON'T fabricate asset ids. Read /workbook/assets/list.txt first.
 
-Reply concisely (1-3 sentences). Don't paste HTML back into chat —
-the player shows it.`;
+Clip schema (the brief — load skills/hyperframes/SKILL.md for full):
+
+  Each visible clip is one HTML element with:
+    id="<unique>"  class="scene"  (or whatever the CSS targets)
+    data-start="<seconds>"  data-duration="<seconds>"
+    style="...display:none;..."   (runtime toggles .active to reveal)
+
+  Adding a clip from an asset:
+    <img id="hero" class="scene" data-start="0" data-duration="3"
+         src="@hf-asset:asset-abc123"
+         style="position:absolute;inset:0;width:100%;height:100%;
+                object-fit:cover;display:none;">
+
+Reply concisely (1-3 sentences). The player shows your work.`;
 
 /** Compose the system prompt at send time. Appends the dynamic
  *  skills frontmatter block (Pi-core / Anthropic Skills convention:
@@ -145,144 +147,33 @@ export function unregisterExtraTool(name) {
 
 export function buildTools() {
   return [
-    // ── read ──────────────────────────────────────────────────────
     {
       definition: {
-        name: "read_composition",
+        name: "bash",
         description:
-          "Read the composition HTML with line numbers (cat -n style). " +
-          "Use this BEFORE any edit so you can craft a unique old_string. " +
-          "Returns the full file by default; pass line_start / line_end " +
-          "to see a slice. Embedded data URLs are redacted to short " +
-          "`src=\"@hf-asset:<asset-id>\"` placeholders to keep your context " +
-          "small — those placeholders survive edit_composition and the " +
-          "studio expands them at submit.",
+          "Run a bash script against the workbook's virtual filesystem. " +
+          "Files: /workbook/composition.html (live, read+write), " +
+          "/workbook/assets/list.txt (read-only id→name listing), " +
+          "/workbook/skills/<key>.md (every skill, one file each — read-only). " +
+          "Standard utilities: cat, sed, grep, awk, head, tail, cut, sort, uniq, " +
+          "wc, tr, diff, find, ls, jq, echo, tee, xargs. Pipes, redirects, " +
+          "heredocs, if/while/for, functions, glob — full bash. Multi-line " +
+          "scripts work; run a small program if needed. Editing " +
+          "composition.html updates the player on the right immediately.",
         parameters: {
           type: "object",
           properties: {
-            line_start: { type: "number", description: "First line (1-indexed). Optional." },
-            line_end:   { type: "number", description: "Last line (inclusive). Optional." },
+            script: { type: "string", description: "Bash script to execute" },
           },
+          required: ["script"],
         },
       },
-      invoke: ({ line_start, line_end } = {}) => {
-        const redacted = redactDataUrlsForAgent(composition.html);
-        const lines = redacted.split("\n");
-        const total = lines.length;
-        const start = Math.max(1, Math.floor(line_start ?? 1));
-        const end = Math.min(total, Math.floor(line_end ?? total));
-        if (start > end) return `(empty range — file has ${total} lines)`;
-        const width = String(end).length;
-        const out = lines.slice(start - 1, end).map((line, i) => {
-          const n = String(start + i).padStart(width, " ");
-          return `${n}  ${line}`;
-        });
-        return out.join("\n") +
-          (end < total ? `\n… ${total - end} more lines` : "");
-      },
-    },
-    // ── edit ──────────────────────────────────────────────────────
-    {
-      definition: {
-        name: "edit_composition",
-        description:
-          "Surgical find-and-replace on the composition HTML. The default " +
-          "tool for ANY change. `old_string` MUST appear exactly once in " +
-          "the source (add surrounding context until it's unique) unless " +
-          "you pass replace_all=true. `new_string` may be empty to delete. " +
-          "Errors instead of overwriting if old_string isn't unique. " +
-          "ALWAYS read_composition first so your old_string is exact.",
-        parameters: {
-          type: "object",
-          properties: {
-            old_string: { type: "string", description: "Exact text to find. Include enough surrounding context to be unique." },
-            new_string: { type: "string", description: "Replacement text. May be empty to delete the match." },
-            replace_all: { type: "boolean", description: "Replace every occurrence. Default false." },
-          },
-          required: ["old_string", "new_string"],
-        },
-      },
-      invoke: ({ old_string, new_string, replace_all }) => {
-        const expandedOld = expandAssetPlaceholders(String(old_string ?? ""));
-        const expandedNew = expandAssetPlaceholders(String(new_string ?? ""));
-        const r = composition.editHtml(expandedOld, expandedNew, {
-          replaceAll: Boolean(replace_all),
-        });
-        if (!r.ok) return `error: ${r.error}`;
-        const total = composition.totalDuration;
-        const n = composition.clips.length;
-        return `edit applied · ${r.count} replacement${r.count === 1 ? "" : "s"} · ${n} clip${n === 1 ? "" : "s"} · ${total.toFixed(1)}s`;
-      },
-    },
-    // ── write (escape hatch — for restructure-from-scratch) ───────
-    {
-      definition: {
-        name: "write_composition",
-        description:
-          "Replace the ENTIRE composition with new HTML. ESCAPE HATCH — " +
-          "use this ONLY when restructuring from scratch (e.g. starting " +
-          "a totally new piece). For every other change, use " +
-          "edit_composition. Asset references stay as " +
-          "`src=\"@hf-asset:<id>\"` placeholders.",
-        parameters: {
-          type: "object",
-          properties: {
-            html: { type: "string", description: "Full composition HTML" },
-          },
-          required: ["html"],
-        },
-      },
-      invoke: ({ html }) => {
+      invoke: async ({ script }) => {
         try {
-          composition.set(expandAssetPlaceholders(String(html ?? "")));
+          return await runBash(String(script ?? ""));
         } catch (e) {
           return `error: ${e?.message ?? e}`;
         }
-        const n = composition.clips.length;
-        return `composition replaced · ${n} clip${n === 1 ? "" : "s"} · ${composition.totalDuration.toFixed(1)}s`;
-      },
-    },
-    // ── assets (read-only listing) ────────────────────────────────
-    {
-      definition: {
-        name: "list_assets",
-        description:
-          "List media files the user has imported. Returns id, kind " +
-          "(image|video|audio|svg), name, and natural duration. " +
-          "Reference assets in HTML via `src=\"@hf-asset:<id>\"` " +
-          "(never raw base64 — the studio expands placeholders at submit).",
-        parameters: { type: "object", properties: {} },
-      },
-      invoke: () => {
-        if (!assets.items.length) {
-          return "(no assets imported · ask the user to drop files in the Assets panel, " +
-                 "or use the URL input to link an external image/video/audio)";
-        }
-        return assets.items.map((a) =>
-          `${a.id}\t${a.kind}\t${a.name}${a.duration ? `\t${a.duration}s` : ""}`,
-        ).join("\n");
-      },
-    },
-    // ── skills (load on demand) ───────────────────────────────────
-    {
-      definition: {
-        name: "load_skill",
-        description:
-          "Load a skill markdown file. Skill keys come from the " +
-          "'Available skills' list at the bottom of the system prompt. " +
-          "Read 'hyperframes/SKILL' first on any non-trivial task — it's " +
-          "the house-style + cell conventions you'll need for HTML edits.",
-        parameters: {
-          type: "object",
-          properties: {
-            path: { type: "string", description: "Skill key (e.g. 'hyperframes' or 'hyperframes/references/captions')" },
-          },
-          required: ["path"],
-        },
-      },
-      invoke: ({ path }) => {
-        const md = loadSkill(String(path ?? ""));
-        return md ?? `error: no skill at path=${path}`;
       },
     },
     // Plugin-registered tools last (built-ins win on name collision).

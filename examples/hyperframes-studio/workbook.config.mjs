@@ -24,6 +24,14 @@ export default {
     // browsers, we'd need to disable singlefile too.)
     plugins: [tailwindcss(), wasm()],
     build: { target: "esnext" },
+    resolve: {
+      alias: [
+        // just-bash imports node:zlib for its gzip/gunzip/zcat
+        // commands (which the agent doesn't need for editing HTML).
+        // Stub the import to avoid pulling a polyfill into the bundle.
+        { find: "node:zlib", replacement: new URL("./src/lib/zlib-stub.js", import.meta.url).pathname },
+      ],
+    },
   },
   env: {
     OPENROUTER_API_KEY: {
