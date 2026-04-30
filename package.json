@@ -22,5 +22,8 @@
   "scripts": {
     "build": "pnpm -r --filter ./packages/* build",
     "typecheck": "pnpm -r --filter ./packages/* typecheck"
+  },
+  "devDependencies": {
+    "age-encryption": "^0.2"
   }
 }

@@ -27,6 +27,7 @@
  */
 
 import { sha256Hex } from "./modelArtifactResolver";
+import { decryptWithPassphrase, looksLikeAgeEnvelope } from "./encryption";
 import type { WorkbookData } from "./htmlBindings";
 
 /** What a cell sees after resolution. */
@@ -59,6 +60,16 @@ export interface WorkbookDataResolverOptions {
   allowedHosts?: string[] | null;
   /** Override fetch (auth headers, retries). Defaults to global fetch. */
   fetchBytes?: (url: string) => Promise<Uint8Array>;
+  /**
+   * Called when the resolver encounters a `<wb-data encryption="...">`
+   * block. Host wires its own UX (password modal, passkey ceremony,
+   * etc.) and returns the passphrase. Called once per resolver
+   * lifetime if a session-cache hit isn't available.
+   *
+   * If unset, encrypted blocks throw — the host hasn't opted in to
+   * the auth flow.
+   */
+  requestPassword?: () => Promise<string>;
 }
 
 const TEXT_MIMES = new Set<string>([
@@ -123,10 +134,56 @@ export function createWorkbookDataResolver(
     opts.allowedHosts === null ? null : opts.allowedHosts ?? [];
   const fetchBytes = opts.fetchBytes ?? defaultFetchBytes;
   const cache = new Map<string, ResolvedData>();
+  // Session-cache the passphrase across encrypted blocks: ask once,
+  // unlock all blocks. Reset to null on any decryption failure so the
+  // next attempt re-prompts (likely wrong passphrase). The cache is
+  // resolver-instance scoped — disposed when the resolver is.
+  let cachedPassword: string | null = null;
+
+  /** Get the passphrase for encrypted blocks, prompting via the
+   *  host's requestPassword callback only if we haven't already
+   *  cached one for this resolver lifetime. */
+  async function getPassword(): Promise<string> {
+    if (cachedPassword !== null) return cachedPassword;
+    if (!opts.requestPassword) {
+      throw new Error(
+        "workbook data: encrypted block encountered but no " +
+          "requestPassword callback was passed to " +
+          "createWorkbookDataResolver. The host must wire a passphrase UX.",
+      );
+    }
+    cachedPassword = await opts.requestPassword();
+    if (!cachedPassword) {
+      throw new Error("workbook data: empty passphrase from requestPassword");
+    }
+    return cachedPassword;
+  }
+
+  /** Try to decrypt; on failure, drop the cached password so the
+   *  next call re-prompts (the user likely typed it wrong). */
+  async function decryptOrReprompt(
+    ciphertext: Uint8Array,
+    blockId: string,
+  ): Promise<Uint8Array> {
+    if (!looksLikeAgeEnvelope(ciphertext)) {
+      throw new Error(
+        `workbook data ${blockId}: bytes don't look like an age v1 envelope`,
+      );
+    }
+    const password = await getPassword();
+    try {
+      return await decryptWithPassphrase(ciphertext, password);
+    } catch (e) {
+      cachedPassword = null;
+      throw new Error(
+        `workbook data ${blockId}: decryption failed (likely wrong passphrase): ` +
+          (e instanceof Error ? e.message : String(e)),
+      );
+    }
+  }
 
   async function fetchExternal(
     src: string,
-    expectedSha: string,
     declaredBytes: number | undefined,
   ): Promise<Uint8Array> {
     if (allow !== null && !hostAllowed(src, allow)) {
@@ -142,14 +199,23 @@ export function createWorkbookDataResolver(
           `declared ${declaredBytes}, got ${bytes.byteLength}`,
       );
     }
+    return bytes;
+  }
+
+  /** Verify bytes match the declared sha256. Used both for ciphertext
+   *  (non-encrypted blocks) and plaintext (after decryption). */
+  async function verifyDigest(
+    bytes: Uint8Array,
+    expectedSha: string,
+    blockId: string,
+  ): Promise<void> {
     const got = await sha256Hex(bytes);
     if (got !== expectedSha) {
       throw new Error(
-        `workbook data integrity check failed for ${src}: ` +
+        `workbook data integrity check failed for ${blockId}: ` +
           `expected ${expectedSha}, got ${got}`,
       );
     }
-    return bytes;
   }
 
   async function resolveOne(block: WorkbookData): Promise<ResolvedData> {
@@ -160,42 +226,32 @@ export function createWorkbookDataResolver(
     let text: string | null = null;
 
     if (block.source.kind === "inline-text") {
-      // Optional sha256 verification on the raw (uncompressed) string.
+      // Inline-text blocks aren't encryptable in Phase A — the
+      // ciphertext is binary regardless of source mime. Authors who
+      // want encryption must use base64 + sha256 form.
       if (block.source.sha256) {
         const enc = new TextEncoder().encode(block.source.content);
-        const got = await sha256Hex(enc);
-        if (got !== block.source.sha256) {
-          throw new Error(
-            `workbook data integrity check failed for ${block.id}: ` +
-              `expected ${block.source.sha256}, got ${got}`,
-          );
-        }
+        await verifyDigest(enc, block.source.sha256, block.id);
       }
-      // Compression on inline-text would mean the raw is base64-of-gzip
-      // — out of scope; document as a no-op for inline-text today.
       text = block.source.content;
     } else if (block.source.kind === "inline-base64") {
       bytes = decodeBase64(block.source.base64);
+      // If encrypted: decrypt FIRST, then sha256 attests to plaintext,
+      // then optionally decompress. Pipeline order matters — we want
+      // sha256 to reflect what the AUTHOR's CSV/etc. hashes to,
+      // independent of compression algorithm choice.
+      if (block.encryption === "age-v1") {
+        bytes = await decryptOrReprompt(bytes, block.id);
+      }
+      await verifyDigest(bytes, block.source.sha256, block.id);
       if (block.compression) bytes = await decompress(bytes, block.compression);
-      const got = await sha256Hex(bytes);
-      if (got !== block.source.sha256) {
-        throw new Error(
-          `workbook data integrity check failed for ${block.id}: ` +
-            `expected ${block.source.sha256}, got ${got}`,
-        );
-      }
     } else {
-      bytes = await fetchExternal(
-        block.source.src,
-        block.source.sha256,
-        block.source.bytes,
-      );
-      if (block.compression) {
-        bytes = await decompress(bytes, block.compression);
-        // Re-verify? No — sha256 was on the wire bytes (i.e. compressed
-        // form), which is the integrity-check authors will hash. After
-        // decompression we trust the gunzipped output.
+      bytes = await fetchExternal(block.source.src, block.source.bytes);
+      if (block.encryption === "age-v1") {
+        bytes = await decryptOrReprompt(bytes, block.id);
       }
+      await verifyDigest(bytes, block.source.sha256, block.id);
+      if (block.compression) bytes = await decompress(bytes, block.compression);
     }
 
     // Materialize into the shape the consuming cell expects.

@@ -82,6 +82,10 @@
       "types": "./src/workbookDataResolver.ts",
       "default": "./src/workbookDataResolver.ts"
     },
+    "./encryption": {
+      "types": "./src/encryption.ts",
+      "default": "./src/encryption.ts"
+    },
     "./workbookMemoryResolver": {
       "types": "./src/workbookMemoryResolver.ts",
       "default": "./src/workbookMemoryResolver.ts"
@@ -158,7 +162,8 @@
     "plotly.js-dist-min": "^2.0.0 || ^3.0.0",
     "three": "^0.160.0 || ^0.170.0 || ^0.180.0",
     "@sqlite.org/sqlite-wasm": "^3.45.0",
-    "loro-crdt": "^1.0.0"
+    "loro-crdt": "^1.0.0",
+    "age-encryption": "^0.2.0"
   },
   "peerDependenciesMeta": {
     "convex-svelte": {
@@ -201,6 +206,9 @@
       "optional": true
     },
     "loro-crdt": {
+      "optional": true
+    },
+    "age-encryption": {
       "optional": true
     }
   },

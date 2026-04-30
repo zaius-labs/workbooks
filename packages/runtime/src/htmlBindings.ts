@@ -153,14 +153,26 @@ interface AgentSpec {
  * `sha256` is required for any binary form (inline-base64 + external)
  * — it's the integrity guarantee. Inline-text may carry sha256
  * optionally; the runtime verifies if present.
+ *
+ * ENCRYPTION: any binary form (inline-base64 or external) may also
+ * carry `encryption="aes-gcm-pbkdf2-v1"`. When present, the bytes
+ * are an encrypted payload (header + AES-GCM ciphertext); the
+ * resolver fetches a passphrase via host callback, derives the key
+ * via PBKDF2, decrypts, then verifies sha256 against the plaintext.
+ * sha256 in this case attests to the plaintext, not the ciphertext.
  */
+export type WorkbookDataEncryption = "age-v1";
+
 export interface WorkbookData {
   id: string;
   mime: string;
   /** Optional row count hint for UI; never trusted by the runtime. */
   rows?: number;
-  /** Optional pre-decompression algorithm. */
+  /** Optional pre-decompression algorithm. Applied AFTER decryption. */
   compression?: "gzip" | "zstd";
+  /** Optional encryption envelope. Applied to inline-base64 + external
+   *  binary forms. The resolver requests a passphrase via callback. */
+  encryption?: WorkbookDataEncryption;
   source:
     | { kind: "inline-text"; content: string; sha256?: string }
     | { kind: "inline-base64"; base64: string; sha256: string }
@@ -514,6 +526,13 @@ export function parseWorkbookHtml(root: Element): WorkbookHtmlSpec {
 
     const srcAttr = el.getAttribute("src");
     const encoding = (el.getAttribute("encoding") ?? "").toLowerCase();
+    // Optional encryption envelope. Only "age-v1" supported in
+    // Phase A; future versions add to the allowlist. Encrypted
+    // blocks must be binary (inline-base64 or external) — no
+    // encrypted-text form (the ciphertext is binary regardless).
+    const encryptionAttr = el.getAttribute("encryption");
+    const encryption: WorkbookDataEncryption | undefined =
+      encryptionAttr === "age-v1" ? "age-v1" : undefined;
 
     let entry: WorkbookData | null = null;
 
@@ -522,7 +541,7 @@ export function parseWorkbookHtml(root: Element): WorkbookHtmlSpec {
       if (!sha256) continue;
       if (!isFetchableUrl(srcAttr)) continue;
       const bytes = parseBytesAttr(el.getAttribute("bytes"));
-      entry = { id, mime, rows, compression, source: { kind: "external", src: srcAttr, sha256, bytes } };
+      entry = { id, mime, rows, compression, encryption, source: { kind: "external", src: srcAttr, sha256, bytes } };
     } else if (encoding === "base64") {
       // Inline binary. sha256 required; cap base64 char count to bound
       // decoded payload at ~10 MB.
@@ -536,7 +555,7 @@ export function parseWorkbookHtml(root: Element): WorkbookHtmlSpec {
       const approxBytes = Math.floor((base64.length * 3) / 4);
       if (aggregateInlineBytes + approxBytes > MAX_AGGREGATE_INLINE_BYTES) continue;
       aggregateInlineBytes += approxBytes;
-      entry = { id, mime, rows, compression, source: { kind: "inline-base64", base64, sha256 } };
+      entry = { id, mime, rows, compression, encryption, source: { kind: "inline-base64", base64, sha256 } };
     } else if (TEXT_DATA_MIMES.has(mime)) {
       // Inline text. sha256 optional (editor-driven workbooks recompute
       // on save; readers verify when present).

@@ -19,15 +19,25 @@ async function help() {
     "Commands:",
     "  workbook dev [project]     start a Vite dev server with HMR",
     "  workbook build [project]   compile project into dist/<slug>.workbook.html",
+    "  workbook encrypt           emit an encrypted <wb-data> element from a file",
     "  workbook init <name>       (todo) scaffold a new workbook project",
     "",
-    "Options:",
+    "Build / dev options:",
     "  --port <n>      dev server port (default 5173)",
     "  --out <dir>     build output dir (default dist)",
     "  --runtime <p>   override path to workbook-runtime checkout (auto-detected)",
     "  --no-wasm       skip inlining wasm + runtime bundle (smaller, dev-only)",
     "",
-    "Run inside a project containing workbook.config.js (or pass [project]).",
+    "Encrypt options (`workbook encrypt`):",
+    "  --in <path>           input file to encrypt",
+    "  --out <path>          where to write the <wb-data> element",
+    "  --id <data-id>        data block id (the cells' reads= target)",
+    "  --mime <mime>         payload mime (text/csv, application/x-sqlite3, …)",
+    "  --password <s>        passphrase (visible in `ps`; prefer --password-stdin)",
+    "  --password-stdin      read passphrase from stdin (first line)",
+    "  --password-file <p>   read passphrase from first line of a file",
+    "",
+    "Run dev/build inside a project containing workbook.config.js (or pass [project]).",
     "",
   ].join("\n"));
 }
@@ -61,6 +71,12 @@ try {
       const flags = parseFlags(argv.slice(1));
       const { runBuild } = await import(path.join(cmdRoot, "build.mjs"));
       await runBuild({ project: flags._[0] ?? ".", ...flags });
+      break;
+    }
+    case "encrypt": {
+      const flags = parseFlags(argv.slice(1));
+      const { runEncrypt } = await import(path.join(cmdRoot, "encrypt.mjs"));
+      await runEncrypt(flags);
       break;
     }
     case "init": {

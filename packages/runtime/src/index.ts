@@ -155,10 +155,22 @@ export type {
   MountOptions,
   WorkbookCellRegistry,
   WorkbookData,
+  WorkbookDataEncryption,
   WorkbookMemory,
   WorkbookDoc,
   WorkbookHistory,
 } from "./htmlBindings";
+
+// age-format encryption helpers — used by the runtime resolver to
+// decrypt encrypted <wb-data encryption="age-v1"> blocks, and by the
+// CLI's `workbook encrypt` command at build time. age-encryption is
+// an optional peer dep; lazy-loaded when first needed.
+export {
+  AGE_ENCRYPTION_TAG,
+  encryptWithPassphrase,
+  decryptWithPassphrase,
+  looksLikeAgeEnvelope,
+} from "./encryption";
 
 // Model artifact resolver (P4.2) — content-addressed IndexedDB cache for
 // ML model weights. Cache-first fetch, SHA-256 integrity verification.
