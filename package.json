@@ -17,7 +17,6 @@
     "examples/notebook-mdx",
     "examples/dependency-chain",
     "examples/regress-headclose-in-js",
-    "examples/hyperframes-studio",
     "examples/talk-to-csv",
     "examples/earthquakes",
     "examples/stocks",
