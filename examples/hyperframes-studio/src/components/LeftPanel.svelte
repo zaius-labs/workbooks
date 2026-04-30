@@ -7,11 +7,16 @@
   import { assets } from "../lib/assets.svelte.js";
   import { agent } from "../lib/agent.svelte.js";
   import { isMcpMode } from "../lib/mcpBridge.svelte.js";
+  import { panelTabs } from "../lib/pluginApi.svelte.js";
 
   // Tab bar lives at the top of the left panel itself (Phase A.1
-  // restructure). All panels stay mounted; inactive ones are
+  // restructure). Built-in panels stay mounted; inactive ones are
   // CSS-hidden so chat streaming, asset lists, MCP form values,
   // and history cursors survive a swap.
+  // Plugin-registered tabs (panelTabs) are appended after built-ins
+  // and only mounted when active (plugins don't get the same
+  // background-tick guarantee — they opt in by handling visibility
+  // changes themselves).
 
   const mcpMode = isMcpMode();
 </script>
@@ -79,6 +84,18 @@
       </svg>
       <span>history</span>
     </button>
+    {#each panelTabs as tab (tab.pluginId + ":" + tab.id)}
+      <button
+        onclick={() => layout.setLeftTab(`plugin:${tab.id}`)}
+        class="lp-tab"
+        class:active={layout.leftTab === `plugin:${tab.id}`}
+        aria-pressed={layout.leftTab === `plugin:${tab.id}`}
+        title={tab.label}
+      >
+        {#if tab.icon}<span>{tab.icon}</span>{/if}
+        <span>{tab.label}</span>
+      </button>
+    {/each}
   </nav>
 
   <!-- Active panel. All four stay mounted; inactives are display:none. -->
@@ -94,6 +111,15 @@
   <div class="flex-1 flex flex-col min-h-0" class:hidden={layout.leftTab !== "history"}>
     <HistoryPanel />
   </div>
+  <!-- Plugin-registered tabs render lazily — only the active one
+       mounts. Plugins decide their own state-survival strategy. -->
+  {#each panelTabs as tab (tab.pluginId + ":" + tab.id)}
+    {#if layout.leftTab === `plugin:${tab.id}`}
+      <div class="flex-1 flex flex-col min-h-0">
+        <tab.component />
+      </div>
+    {/if}
+  {/each}
 </section>
 
 <style>

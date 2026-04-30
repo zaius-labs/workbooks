@@ -1,12 +1,27 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import ToolStep from "./ToolStep.svelte";
   import { agent } from "../lib/agent.svelte.js";
   import { env } from "../lib/env.svelte.js";
+  import {
+    chatInputActions,
+    chatSendHooks,
+    registerChatController,
+  } from "../lib/pluginApi.svelte.js";
 
   let input = $state("");
   let textareaEl;
   let scrollEl;
+
+  // Register a controller so plugins can drive the input + read
+  // thread state via wb.chat.setInput / .getInput / .getThread.
+  // Cleared on unmount.
+  const unregister = registerChatController({
+    setInput: (t) => { input = t; queueMicrotask(autoresize); },
+    getInput: () => input,
+    getThread: () => agent.thread,
+  });
+  onDestroy(unregister);
 
   let renderMarkdown = $state((s) => escapeHtml(String(s ?? "")));
   function escapeHtml(s) {
@@ -22,11 +37,37 @@
 
   async function send() {
     if (!input.trim()) return;
-    const text = input;
+    let text = input;
+
+    // Plugins can transform (or veto) the message before send via
+    // wb.chat.onSend(fn). Hooks run in registration order; if any
+    // returns null/false, the send is aborted (the user keeps their
+    // text in the input).
+    for (const hook of chatSendHooks) {
+      try {
+        const r = await hook.fn(text);
+        if (r === null || r === false) return;
+        if (typeof r === "string") text = r;
+      } catch (e) {
+        console.warn(`chat onSend hook from ${hook.pluginId} threw:`, e);
+      }
+    }
+
     input = "";
     autoresize();
     await agent.send(text);
     requestAnimationFrame(scrollToBottom);
+  }
+
+  function runInputAction(action) {
+    try {
+      const r = action.onClick();
+      if (r && typeof r.then === "function") {
+        r.catch((e) => console.warn(`chat input action ${action.pluginId}:`, e));
+      }
+    } catch (e) {
+      console.warn(`chat input action ${action.pluginId}:`, e);
+    }
   }
 
   function autoresize() {
@@ -135,6 +176,28 @@
                bg-transparent text-fg text-sm font-sans leading-relaxed
                focus:outline-none disabled:text-fg-muted placeholder:text-fg-faint"
       ></textarea>
+
+      <!-- Plugin-registered chat input actions — bottom-left of the
+           composer. Plugins push entries via wb.chat.addInputAction;
+           teardown removes them. -->
+      {#if chatInputActions.length > 0}
+        <div class="absolute left-2 bottom-2 flex gap-1">
+          {#each chatInputActions as action (action.pluginId + ":" + action.label)}
+            <button
+              type="button"
+              onclick={() => runInputAction(action)}
+              title={action.label + (action.shortcut ? ` (${action.shortcut})` : "")}
+              aria-label={action.label}
+              class="h-8 min-w-8 px-2 rounded-lg flex items-center justify-center
+                     border border-border bg-surface text-fg-muted cursor-pointer
+                     hover:text-fg hover:border-border-2 active:scale-95 transition
+                     font-mono text-[11px]"
+            >
+              {#if action.icon}<span>{action.icon}</span>{/if}
+            </button>
+          {/each}
+        </div>
+      {/if}
 
       <!-- Send button overlaid in the bottom-right of the composer. -->
       <button

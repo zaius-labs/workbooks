@@ -60,8 +60,10 @@ export function teardownPluginApi(api) {
 }
 
 // ── shared registries — surfaces feed into these stores ───────────
-// P2 wires UI components against these reactive arrays. Until then,
-// they accept registrations and let teardown undo them.
+// P2 wires UI components against these reactive arrays. Components
+// that own a runtime affordance (e.g. ChatPanel owns the textarea
+// state) register a controller via the `controllers` map so the
+// plugin API can drive them without each plugin holding direct refs.
 
 export const chatInputActions = $state([]);
 export const panelTabs = $state([]);
@@ -69,6 +71,25 @@ export const settingsSections = $state([]);
 export const timelineClipActions = $state([]);
 export const compositionDecorators = $state([]);
 export const chatSendHooks = $state([]);
+
+/**
+ * Component-supplied controllers for runtime affordances.
+ *
+ *   chat: { setInput(text), getInput(), getThread() }
+ *
+ * Components register on mount, clear on unmount. Plugin API
+ * reads the controllers when invoked. Module-level singletons
+ * because there's only ever one of each (one chat, one timeline)
+ * in a single mounted studio.
+ */
+const controllers = {
+  chat: null,
+};
+
+export function registerChatController(c) {
+  controllers.chat = c;
+  return () => { if (controllers.chat === c) controllers.chat = null; };
+}
 
 function appendAndTrack(api, list, item) {
   list.push(item);
@@ -149,16 +170,17 @@ export function createPluginApi(pluginId, store) {
       const hook = { pluginId, fn };
       appendAndTrack(api, chatSendHooks, hook);
     },
-    /** Programmatically set the chat textarea value. P2 wires the
-     *  underlying state. */
-    setInput(_text) {
-      // TODO P2: drive the chat input textarea state.
-      console.warn("wb.chat.setInput: stub (P2)");
+    /** Programmatically set the chat textarea value. */
+    setInput(text) {
+      controllers.chat?.setInput(String(text ?? ""));
     },
-    /** Read the current thread. */
+    /** Read the current input value. */
+    getInput() {
+      return controllers.chat?.getInput() ?? "";
+    },
+    /** Read the current thread (read-only snapshot). */
     getThread() {
-      // TODO P2: expose agent.thread via a plugin-safe view.
-      return [];
+      return controllers.chat?.getThread() ?? [];
     },
   };
 
