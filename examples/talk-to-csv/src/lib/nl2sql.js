@@ -118,6 +118,9 @@ export async function askLlm({
 
   const user = `Schema:\n${schemaText}${sampleText}\n\nQuestion: ${question}`;
 
+  // Intentional runtime call — the user pastes their OpenRouter key in
+  // the LLM panel; this is the entire point of the talk-to-csv example.
+  // workbook-disable-next-line workbook/portability/no-external-fetch
   const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {

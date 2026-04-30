@@ -15,10 +15,12 @@
 //   security     — sandbox / CSP / provenance violations
 
 import noRawArrowImport from "./rules/no-raw-arrow-import.mjs";
+import noExternalFetch from "./rules/no-external-fetch.mjs";
 
 /** @type {ReadonlyArray<Rule>} */
 export const RULES = Object.freeze([
   noRawArrowImport,
+  noExternalFetch,
 ]);
 
 /** @type {ReadonlyMap<string, Rule>} */
