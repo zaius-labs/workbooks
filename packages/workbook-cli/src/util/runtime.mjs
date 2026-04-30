@@ -42,8 +42,13 @@ export async function resolveRuntime(opts = {}) {
     );
   }
 
-  const sharedDir = path.join(runtimeWasm, "examples", "_shared");
-  const bundlePath = path.join(runtimeWasm, "examples", "reactive-cells", "runtime.bundle.js");
+  // examples/ lives at the repo root (was hoisted out of runtime-wasm
+  // in commit bad45b3). reactive-cells and _shared are runtime assets
+  // that happen to live alongside the user-facing examples; long term
+  // they should move into runtime-wasm/ as internal assets.
+  const examplesRoot = path.resolve(runtimeWasm, "..", "..", "examples");
+  const sharedDir = path.join(examplesRoot, "_shared");
+  const bundlePath = path.join(examplesRoot, "reactive-cells", "runtime.bundle.js");
   const bindgenPath = path.join(runtimeWasm, "pkg", "workbook_runtime.js");
   const wasmPath = path.join(runtimeWasm, "pkg", "workbook_runtime_bg.wasm");
   const designCssPath = path.join(sharedDir, "design.css");
