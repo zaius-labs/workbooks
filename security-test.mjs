@@ -385,6 +385,108 @@ async function main() {
     );
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // Phase E: WASM-side decrypt + handle registry
+  //
+  // Loads the runtime-wasm pkg, exercises the Rust-side decrypt
+  // path that keeps plaintext inside linear memory. Verifies:
+  //   - decrypt to handle round-trips through Polars-SQL
+  //   - sha256 verification works without exporting plaintext
+  //   - handle dispose removes bytes (subsequent ops see size 0)
+  //   - wrong password produces an error from Rust (not a panic)
+  // ─────────────────────────────────────────────────────────────
+
+  let wasm;
+  try {
+    wasm = await import("./packages/runtime-wasm/pkg/workbook_runtime.js");
+    // Node-friendly init: fetch() of file:// URLs doesn't work, so feed bytes
+    // directly via fs.
+    const fs = await import("node:fs/promises");
+    const url = await import("node:url");
+    const wasmPath = url.fileURLToPath(
+      new URL("./packages/runtime-wasm/pkg/workbook_runtime_bg.wasm", import.meta.url),
+    );
+    const wasmBytes = await fs.readFile(wasmPath);
+    await wasm.default({ module_or_path: wasmBytes });
+  } catch (e) {
+    console.log(`SKIP Phase E (runtime-wasm pkg not built): ${e?.message ?? e}`);
+    console.log(`\n${pass} pass / ${fail} fail`);
+    process.exit(fail > 0 ? 1 : 0);
+  }
+
+  // Re-encrypt the same plaintext with typage so we exercise the
+  // Rust decrypt against the canonical age format. (Phase A and
+  // Phase E should interoperate — that's the point of using age.)
+  const phaseECipher = await encryptWithPassphrase(PLAINTEXT, PASSWORD);
+
+  // ─── decrypt-to-handle round trip ───
+  {
+    const handleId = wasm.ageDecryptToHandle(phaseECipher, PASSWORD);
+    expect(
+      "handle decrypt: returns numeric id",
+      typeof handleId === "number" && handleId >= 0,
+    );
+    const size = wasm.handleSize(handleId);
+    expect(
+      "handle decrypt: size matches plaintext length",
+      size === PLAINTEXT.byteLength,
+      `got ${size} bytes`,
+    );
+    const expectedSha = await crypto.subtle.digest("SHA-256", PLAINTEXT)
+      .then((d) => [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join(""));
+    expect(
+      "handle sha256: matches plaintext digest (computed in Rust, never exported)",
+      wasm.handleSha256(handleId) === expectedSha,
+    );
+    // Escape hatch — verify it still produces correct bytes.
+    const exported = wasm.handleExport(handleId);
+    expect(
+      "handleExport: produces same plaintext (escape hatch round-trip)",
+      Buffer.compare(exported, PLAINTEXT) === 0,
+    );
+    // Dispose; subsequent ops should see slot empty.
+    expect("dispose: returns true on first call", wasm.handleDispose(handleId) === true);
+    expect("dispose: idempotent (false on second call)", wasm.handleDispose(handleId) === false);
+    expect("disposed handle: handleSize returns 0", wasm.handleSize(handleId) === 0);
+    expect("disposed handle: handleExport returns empty", wasm.handleExport(handleId).byteLength === 0);
+    expect("disposed handle: handleSha256 returns empty string", wasm.handleSha256(handleId) === "");
+  }
+
+  // ─── wrong password through Rust path ───
+  try {
+    wasm.ageDecryptToHandle(phaseECipher, WRONG_PASSWORD);
+    expect("Rust decrypt: wrong password rejected", false, "did NOT throw");
+  } catch (e) {
+    expect(
+      "Rust decrypt: wrong password rejected",
+      typeof e === "string" || e instanceof Error,
+    );
+  }
+
+  // ─── tampered ciphertext through Rust path ───
+  {
+    const tampered = new Uint8Array(phaseECipher);
+    tampered[Math.floor(tampered.length * 0.7)] ^= 0x01;
+    try {
+      wasm.ageDecryptToHandle(tampered, PASSWORD);
+      expect("Rust decrypt: byte-flip rejected", false, "did NOT throw");
+    } catch (e) {
+      expect("Rust decrypt: byte-flip rejected", true);
+    }
+  }
+
+  // ─── slot reuse: dispose + decrypt should reuse the same id ───
+  {
+    const id1 = wasm.ageDecryptToHandle(phaseECipher, PASSWORD);
+    wasm.handleDispose(id1);
+    const id2 = wasm.ageDecryptToHandle(phaseECipher, PASSWORD);
+    expect(
+      "Rust registry: disposed slot reused (slab semantics)",
+      id1 === id2,
+    );
+    wasm.handleDispose(id2);
+  }
+
   console.log(`\n${pass} pass / ${fail} fail`);
   process.exit(fail > 0 ? 1 : 0);
 }

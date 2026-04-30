@@ -131,6 +131,11 @@ image = { version = "0.25", optional = true, default-features = false, features 
 # (in deps) and a build-time cfg (in .cargo/config.toml). Pinning the
 # direct dep here ensures any transitive uses of 0.3 see the feature.
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+# getrandom 0.2 (transitively via ahash → arrow-array) needs the `js`
+# feature on wasm32 — without it the build errors with
+# "the wasm*-unknown-unknown targets are not supported by default".
+# Pin here so any 0.2 user picks up the feature.
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 ndarray = { version = "0.15", default-features = false }
 candle-transformers = { version = "0.10.2", default-features = false, optional = true }
 candle-onnx = { version = "0.10", default-features = false, optional = true }
@@ -153,6 +158,15 @@ strip = true
 # Alternative profile when bundle size isn't the bottleneck (e.g. Tier 3 hosted).
 inherits = "release"
 opt-level = 3
+
+[patch.crates-io]
+# Vendored fork of candle-onnx — patches the Resize op handler to
+# support linear + cubic interpolation modes (upstream 0.10.2 only
+# supports `nearest`, which blocks Depth Anything, SegFormer, and
+# most modern vision models). See vendor/candle-onnx/src/eval.rs
+# for the diff. Drop this patch when upstream candle-onnx merges
+# bilinear/bicubic resize support.
+candle-onnx = { path = "vendor/candle-onnx" }
 
 [package.metadata.wasm-pack.profile.release]
 # Modern Rust emits trunc_sat_f64 instructions; wasm-opt needs the

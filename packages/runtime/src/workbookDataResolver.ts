@@ -35,8 +35,9 @@ import type { WorkbookData } from "./htmlBindings";
 export interface ResolvedData {
   id: string;
   mime: string;
-  /** Text mimes get a string; binary mimes get bytes. */
-  value: string | Uint8Array;
+  /** Text mimes get a string; binary mimes get bytes; encrypted
+   *  binary blocks in wasmIsolation mode get an opaque handle. */
+  value: string | Uint8Array | WasmPlaintextHandle;
   /** True if served from in-memory cache (same id resolved earlier). */
   fromCache: boolean;
 }
@@ -112,6 +113,49 @@ export interface WorkbookDataResolverOptions {
    * walks away, and someone else sits down at the laptop.
    */
   passphraseIdleTimeoutMs?: number;
+  /**
+   * Phase E — keep decrypted plaintext inside WASM linear memory
+   * instead of JS heap. Cells with `reads=` references to encrypted
+   * blocks receive an opaque {kind: "wasm-handle", id, dispose}
+   * value rather than raw bytes; cell dispatchers that understand
+   * handles (Polars-SQL via runPolarsSqlIpcHandles) read bytes
+   * directly from the Rust registry.
+   *
+   * Requires the runtime WASM module — pass the `wasm` option (or
+   * loadRuntime() the JS exports) so the resolver can call into
+   * ageDecryptToHandle. If unset, the resolver falls back to the
+   * typage-based JS decrypt (Phase A behavior).
+   *
+   * Trade-offs:
+   *   - cells without handle support get an export() escape hatch
+   *     that copies bytes to JS — same exposure as Phase A.
+   *   - the analytical query path (Polars-SQL over encrypted CSVs,
+   *     SQLite TODO) keeps bytes in Rust. THIS is the win.
+   *
+   * Closes the "plaintext lives in JS heap" item in
+   * encryption.SECURITY.md.
+   */
+  wasmIsolation?: {
+    /** Loaded runtime WASM exports — the resolver dereferences
+     *  ageDecryptToHandle, handleDispose, etc. on this. */
+    wasm: import("./wasmBridge").WorkbookRuntimeWasm;
+  };
+}
+
+/** Phase E: an opaque reference to plaintext bytes living in WASM
+ *  linear memory. Cells receive these instead of Uint8Array when
+ *  the resolver is in wasmIsolation mode. */
+export interface WasmPlaintextHandle {
+  readonly kind: "wasm-handle";
+  readonly id: number;
+  /** Byte-length of the plaintext. */
+  readonly bytes: number;
+  /** Copy the plaintext into JS as a Uint8Array. Escape hatch for
+   *  cell paths that don't support handles natively. Defeats the
+   *  isolation property — call sparingly. */
+  export(): Uint8Array;
+  /** Drop the bytes from the registry. Idempotent. */
+  dispose(): void;
 }
 
 const TEXT_MIMES = new Set<string>([
@@ -187,6 +231,11 @@ export function createWorkbookDataResolver(
   // attacker with JS-execution privilege in the page can in
   // principle read it. Phase E (#46) moves the cache to WASM-side.
   let cachedPassword: string | null = null;
+  // Track all WasmPlaintextHandles we've issued so clear() / GC
+  // can dispose every Rust-side slot. Without this, a long session
+  // would leak plaintext bytes in WASM linear memory across
+  // workbook reloads.
+  const issuedHandles = new Set<WasmPlaintextHandle>();
   // Dedup concurrent prompts: if two encrypted blocks resolve in
   // parallel before the cache is filled, both would call
   // requestPassword without this single-flight promise.
@@ -242,6 +291,67 @@ export function createWorkbookDataResolver(
       clearTimeout(idleTimer);
       idleTimer = null;
     }
+  }
+
+  /** Phase E: decrypt via Rust, get back a handle, build the
+   *  WasmPlaintextHandle wrapper. Verifies sha256 inside Rust so
+   *  bytes never cross the boundary on the integrity-check step. */
+  async function decryptToHandle(
+    ciphertext: Uint8Array,
+    block: WorkbookData,
+  ): Promise<WasmPlaintextHandle> {
+    const wasm = opts.wasmIsolation!.wasm;
+    if (
+      !wasm.ageDecryptToHandle ||
+      !wasm.handleDispose ||
+      !wasm.handleSize ||
+      !wasm.handleExport ||
+      !wasm.handleSha256
+    ) {
+      throw new Error(
+        "wasmIsolation: runtime build missing handle-registry bindings " +
+          "(ageDecryptToHandle / handleDispose / handleSize / handleExport / handleSha256)",
+      );
+    }
+    const password = await getPassword();
+    let id: number;
+    try {
+      id = wasm.ageDecryptToHandle(ciphertext, password);
+      bumpIdleTimer();
+    } catch (e) {
+      cachedPassword = null;
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+      }
+      throw new Error(
+        `workbook data ${block.id}: decryption failed (likely wrong passphrase): ` +
+          (e instanceof Error ? e.message : String(e)),
+      );
+    }
+    // Verify plaintext sha256 against the declared digest WITHOUT
+    // exporting bytes — handleSha256 hashes inside Rust.
+    const sha256 = (block.source as { sha256: string }).sha256;
+    const got = wasm.handleSha256(id);
+    if (got !== sha256) {
+      // Tampered or wrong-content payload. Drop the slot before
+      // throwing so we don't leak the bytes that didn't match.
+      wasm.handleDispose(id);
+      throw new Error(
+        `workbook data integrity check failed for ${block.id}: ` +
+          `expected ${sha256}, got ${got}`,
+      );
+    }
+    const wasmRef = wasm;
+    const handle: WasmPlaintextHandle = {
+      kind: "wasm-handle",
+      id,
+      bytes: wasmRef.handleSize!(id),
+      export() { return wasmRef.handleExport!(id); },
+      dispose() { wasmRef.handleDispose!(id); },
+    };
+    issuedHandles.add(handle);
+    return handle;
   }
 
   /** Try to decrypt; on failure, drop the cached password so the
@@ -347,11 +457,9 @@ export function createWorkbookDataResolver(
 
     let bytes: Uint8Array | null = null;
     let text: string | null = null;
+    let handle: WasmPlaintextHandle | null = null;
 
     if (block.source.kind === "inline-text") {
-      // Inline-text blocks aren't encryptable in Phase A — the
-      // ciphertext is binary regardless of source mime. Authors who
-      // want encryption must use base64 + sha256 form.
       if (block.source.sha256) {
         const enc = new TextEncoder().encode(block.source.content);
         await verifyDigest(enc, block.source.sha256, block.id);
@@ -359,32 +467,43 @@ export function createWorkbookDataResolver(
       text = block.source.content;
     } else if (block.source.kind === "inline-base64") {
       bytes = decodeBase64(block.source.base64);
-      // Signature verify FIRST: bind the wrapper attributes (id, mime,
-      // encryption, sha256) + ciphertext bytes to the author's
-      // signature. Tamper with any → fail before we decrypt.
       verifyOrPolicyCheck(block, bytes);
-      // Decrypt FIRST among data transforms, then sha256 attests to
-      // plaintext, then optionally decompress. Order matters — we
-      // want sha256 to reflect what the AUTHOR's CSV/etc. hashes to,
-      // independent of compression algorithm choice.
-      if (block.encryption === "age-v1") {
+      if (block.encryption === "age-v1" && opts.wasmIsolation) {
+        // Phase E: bytes never cross to JS. Rust does decrypt +
+        // sha256 + holds plaintext.
+        handle = await decryptToHandle(bytes, block);
+        bytes = null;
+      } else if (block.encryption === "age-v1") {
         bytes = await decryptOrReprompt(bytes, block.id);
+        await verifyDigest(bytes, block.source.sha256, block.id);
+      } else {
+        await verifyDigest(bytes, block.source.sha256, block.id);
       }
-      await verifyDigest(bytes, block.source.sha256, block.id);
-      if (block.compression) bytes = await decompress(bytes, block.compression);
+      if (block.compression && bytes) {
+        bytes = await decompress(bytes, block.compression);
+      }
     } else {
       bytes = await fetchExternal(block.source.src, block.source.bytes);
       verifyOrPolicyCheck(block, bytes);
-      if (block.encryption === "age-v1") {
+      if (block.encryption === "age-v1" && opts.wasmIsolation) {
+        handle = await decryptToHandle(bytes, block);
+        bytes = null;
+      } else if (block.encryption === "age-v1") {
         bytes = await decryptOrReprompt(bytes, block.id);
+        await verifyDigest(bytes, block.source.sha256, block.id);
+      } else {
+        await verifyDigest(bytes, block.source.sha256, block.id);
       }
-      await verifyDigest(bytes, block.source.sha256, block.id);
-      if (block.compression) bytes = await decompress(bytes, block.compression);
+      if (block.compression && bytes) {
+        bytes = await decompress(bytes, block.compression);
+      }
     }
 
     // Materialize into the shape the consuming cell expects.
-    let value: string | Uint8Array;
-    if (text !== null) {
+    let value: string | Uint8Array | WasmPlaintextHandle;
+    if (handle !== null) {
+      value = handle;
+    } else if (text !== null) {
       value = text;
     } else if (bytes && TEXT_MIMES.has(block.mime)) {
       value = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
@@ -414,6 +533,12 @@ export function createWorkbookDataResolver(
     },
     clear() {
       cache.clear();
+      // Dispose every issued plaintext handle so the Rust-side
+      // registry doesn't leak across workbook unloads.
+      for (const h of issuedHandles) {
+        try { h.dispose(); } catch { /* idempotent — ignore */ }
+      }
+      issuedHandles.clear();
     },
     forgetPassphrase,
   };

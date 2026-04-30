@@ -158,6 +158,34 @@ export interface WorkbookRuntimeWasm {
   /** Inverse of arrowEncodeJsonRows. Walks every batch in the IPC
    *  stream, returns rows as a JSON-encoded array string. */
   arrowDecodeToJsonRows?: (bytes: Uint8Array) => string;
+  // ─── Phase E: Rust-side age decrypt + handle registry ─────────
+  // Plaintext stays in WASM linear memory; JS gets opaque handle
+  // IDs and uses them via the handle-aware paths below.
+  /** Decrypt an age envelope; plaintext stored under a fresh handle
+   *  in Rust-side registry. Returns the handle id. */
+  ageDecryptToHandle?: (ciphertext: Uint8Array, passphrase: string) => number;
+  /** Compat path — decrypt + return plaintext to JS. Used by code
+   *  that hasn't migrated to handles. Crosses the boundary. */
+  ageDecryptToBytes?: (ciphertext: Uint8Array, passphrase: string) => Uint8Array;
+  /** Free the bytes at a handle. Returns true if slot was occupied. */
+  handleDispose?: (id: number) => boolean;
+  /** Plaintext byte-length at a handle; 0 if disposed/unknown. */
+  handleSize?: (id: number) => number;
+  /** Escape hatch — copy bytes out to JS. Use sparingly; defeats
+   *  the isolation property. */
+  handleExport?: (id: number) => Uint8Array;
+  /** Lowercase-hex SHA-256 of the plaintext at this handle. Used
+   *  to verify the digest matches the `<wb-data sha256="...">`
+   *  attribute without exporting bytes — the integrity check
+   *  stays Rust-side. Empty string for unknown handles. */
+  handleSha256?: (id: number) => string;
+  /** Polars-SQL over handle-addressed Arrow IPC tables. Bytes never
+   *  cross to JS. Same shape as runPolarsSqlIpc but values are
+   *  handle ids instead of Uint8Arrays. */
+  runPolarsSqlIpcHandles?: (
+    sql: string,
+    tableHandles: Record<string, number>,
+  ) => CellOutput[];
   // ----- Prolly Tree (<wb-history>) primitives -----
   /** Initialize an empty history with a single root commit. */
   prollyInit?: (message: string) => Uint8Array;
