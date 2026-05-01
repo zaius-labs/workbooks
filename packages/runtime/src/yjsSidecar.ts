@@ -63,30 +63,27 @@ let yjsPromise: Promise<YjsModule> | null = null;
 async function loadYjs(): Promise<YjsModule> {
   if (!yjsPromise) {
     yjsPromise = (async () => {
-      // 1. globalThis.__wb_yjs — host-provided. The user's app does
-      //    `import * as Y from "yjs"; globalThis.__wb_yjs = Y` in its
-      //    entry, BEFORE @work.books/runtime evaluates. Required when
-      //    the runtime is loaded as a Blob URL (which can't resolve
-      //    bare-specifier imports).
+      // globalThis.__wb_yjs — host-provided. The user's app does
+      // `import * as Y from "yjs"; globalThis.__wb_yjs = Y` in its
+      // entry, BEFORE @work.books/runtime evaluates.
+      //
+      // Why no dynamic-import fallback (cf. loroSidecar): yjs isn't
+      // a vendor/workbooks dep, so Rollup can't statically resolve
+      // `await import("yjs")` from this module — it errors at build
+      // time even with `/* @vite-ignore */`. We rely entirely on the
+      // host registering the module on globalThis.
       type GlobalYjsHost = { __wb_yjs?: YjsModule };
       const g = (typeof globalThis !== "undefined"
         ? (globalThis as typeof globalThis & GlobalYjsHost)
         : null);
       if (g && g.__wb_yjs) return g.__wb_yjs;
 
-      // 2. dynamic import — fallback for hosts whose module graph can
-      //    resolve "yjs" (tests, dev-server with a real bundler).
-      try {
-        const mod = (await import(/* @vite-ignore */ "yjs")) as unknown as YjsModule;
-        return mod;
-      } catch {
-        throw new Error(
-          "wb-doc format=\"yjs\" requires yjs. In a single-file workbook, " +
-          "import it in your main.js and expose it as " +
-          "`globalThis.__wb_yjs = await import('yjs')` BEFORE " +
-          "calling mountHtmlWorkbook.",
-        );
-      }
+      throw new Error(
+        "wb-doc format=\"yjs\" requires yjs. In a single-file workbook, " +
+        "import yjs in your main.js and expose it as " +
+        "`globalThis.__wb_yjs = await import('yjs')` BEFORE " +
+        "calling mountHtmlWorkbook.",
+      );
     })();
   }
   return yjsPromise;
