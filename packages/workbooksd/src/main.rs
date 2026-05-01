@@ -29,7 +29,7 @@
 
 use axum::{
     body::Bytes,
-    extract::{Path as AxPath, State},
+    extract::{DefaultBodyLimit, Path as AxPath, State},
     http::StatusCode,
     response::{Html, IntoResponse, Redirect},
     routing::{get, post, put},
@@ -225,12 +225,22 @@ async fn daemon_main() {
                 .allow_headers(Any),
         );
 
+    // Real workbooks ship with the WASM runtime inlined → ~21 MB on disk
+    // and growing. axum defaults body cap to 2 MB, which would fail every
+    // real save with "length limit exceeded". Bump to 256 MB (matches the
+    // sanity cap we used in the C polyglot for the same reason); anything
+    // above that is suspect and worth bouncing.
+    const SAVE_BODY_LIMIT: usize = 256 * 1024 * 1024;
+
     let app = Router::new()
         .merge(health_router)
         .route("/open", post(open_handler))
         .route("/wb/:token", get(redirect_to_slash))
         .route("/wb/:token/", get(serve_workbook))
-        .route("/wb/:token/save", put(save_workbook))
+        .route(
+            "/wb/:token/save",
+            put(save_workbook).layer(DefaultBodyLimit::max(SAVE_BODY_LIMIT)),
+        )
         .with_state(state);
 
     let addr: SocketAddr = format!("{BIND_HOST}:{BIND_PORT}").parse().unwrap();
