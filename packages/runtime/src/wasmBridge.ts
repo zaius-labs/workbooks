@@ -257,7 +257,7 @@ export interface RuntimeClient {
    * Register a CRDT doc handle by id. Called once per <wb-doc> at
    * mount; subsequent docMutate calls dispatch by id.
    */
-  registerDoc?(id: string, handle: import("./loroSidecar").LoroDocHandle): Promise<void>;
+  registerDoc?(id: string, handle: import("./yjsSidecar").LoroDocHandle): Promise<void>;
   /**
    * Apply structured ops to a registered doc as a single op-log
    * entry. Returns the new snapshot bytes + sha256 + length so the
@@ -265,7 +265,7 @@ export interface RuntimeClient {
    */
   docMutate?(
     id: string,
-    ops: import("./loroSidecar").DocOp[],
+    ops: import("./yjsSidecar").DocOp[],
   ): Promise<{ sha256: string; bytes: number; snapshot: Uint8Array }>;
   /** Export the current state of a doc as snapshot bytes for save. */
   exportDoc?(id: string): Promise<Uint8Array>;
@@ -281,7 +281,7 @@ export interface RuntimeClient {
    * null-check; the runtime registers docs at mount time, so this is
    * available once the workbook has booted.
    */
-  getDocHandle?(id: string): import("./loroSidecar").LoroDocHandle | undefined;
+  getDocHandle?(id: string): import("./yjsSidecar").LoroDocHandle | undefined;
   /**
    * List the ids of all registered <wb-doc> handles. Used by the wb.*
    * storage SDK's resolver to find a "default doc" when authors call
@@ -332,7 +332,7 @@ export function createRuntimeClient(opts: RuntimeClientOptions): RuntimeClient {
   const memoryBuffers = new Map<string, Uint8Array>();
   // CRDT doc handles registered at mount. The handle owns the live
   // LoroDoc; the client just routes mutate / export / read calls to it.
-  const docHandles = new Map<string, import("./loroSidecar").LoroDocHandle>();
+  const docHandles = new Map<string, import("./yjsSidecar").LoroDocHandle>();
 
   function ensureWasm(): Promise<WorkbookRuntimeWasm> {
     if (!wasmPromise) {

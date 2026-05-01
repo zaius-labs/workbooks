@@ -2,34 +2,113 @@
  * Yjs CRDT sidecar — wraps `yjs` (pure JS, no WASM) for `<wb-doc>`
  * blocks declared with `format="yjs"`.
  *
- * The shape mirrors the previous loroSidecar so callers (resolver,
- * runtime client, autosave, SDK bootstrap) remain mostly unchanged:
- * each sidecar exposes a `LoroDocHandle`-like wrapper around a Y.Doc.
- *
- * Why Yjs as the new default:
- *   - tiny vs Loro's WASM (~3 MB) — pure JS, ~50 KB minified,
+ * Why Yjs:
+ *   - tiny (~50 KB minified) vs the previous Loro WASM (~3 MB),
  *   - first-class y-indexeddb provider (no hand-rolled IDB layer),
  *   - mature broadcast/websocket/webrtc providers if/when sync lands.
  *
  * Update format: bytes coming in are produced by `Y.encodeStateAsUpdate(doc)`;
  * applied via `Y.applyUpdate(doc, bytes)`. Empty bytes = a fresh Y.Doc.
+ *
+ * NOTE on naming: the public types (`LoroDocHandle`, `LoroPath`,
+ * `LoroPathStep`, `LoroDispatcher`, `DocOp`, `topLevel`) keep the
+ * `Loro*` prefix as legacy nomenclature from before the Phase-2 swap.
+ * Renaming touches every consumer in the runtime + SDK, so we hold
+ * the names stable until a wider sweep makes sense.
  */
 
 import * as Y from "yjs";
-import type { LoroDocHandle, DocOp, LoroPath } from "./loroSidecar";
 
-export interface YjsDispatcher {
+// ---------------------------------------------------------------------------
+// Backend-agnostic doc op + handle types. Used by the resolver, the wasm
+// bridge, the SDK, and any host integration that talks docMutate. Lives
+// here (next to the only living implementation) since the Loro backend
+// was dropped in Phase 2 of core-0or.
+// ---------------------------------------------------------------------------
+
+/**
+ * One step in a path through nested containers. Each step navigates
+ * Map.get(key) or List.get(index); the value at each step must be
+ * another container (Map / List / Text) for the walk to continue.
+ */
+export type LoroPathStep =
+  | { kind: "map"; key: string }
+  | { kind: "list"; index: number };
+
+/**
+ * Path from doc root to a target container. `root` declares the
+ * top-level container's kind + name. `steps` descend through nested
+ * containers; an empty / omitted `steps` means the root is itself
+ * the target.
+ */
+export interface LoroPath {
+  root: { kind: "map" | "list" | "text"; name: string };
+  steps?: LoroPathStep[];
+}
+
+/**
+ * Structured op patch for container mutations. Cells + agent tools
+ * emit these via the host's docMutate API; the active backend (Yjs)
+ * walks the path, applies the op on the target container, and
+ * commits a single op-log entry per call.
+ *
+ * Each op's kind asserts the FINAL container's type — `map_set`
+ * requires the path to resolve to a Map, `list_push` to a List,
+ * etc. Mismatch surfaces as a runtime error.
+ */
+export type DocOp =
+  | { kind: "map_set"; target: LoroPath; key: string; value: unknown }
+  | { kind: "map_delete"; target: LoroPath; key: string }
+  | { kind: "list_push"; target: LoroPath; value: unknown }
+  | { kind: "list_insert"; target: LoroPath; index: number; value: unknown }
+  | { kind: "list_delete"; target: LoroPath; index: number; count: number }
+  | { kind: "text_insert"; target: LoroPath; index: number; text: string }
+  | { kind: "text_delete"; target: LoroPath; index: number; count: number };
+
+/**
+ * Convenience constructor for the common case: a top-level container
+ * with no nested descent. `topLevel("map", "agentState")` is shorthand
+ * for `{ root: { kind: "map", name: "agentState" } }`.
+ */
+export function topLevel(
+  kind: "map" | "list" | "text",
+  name: string,
+): LoroPath {
+  return { root: { kind, name } };
+}
+
+/**
+ * Backend-agnostic CRDT doc handle. The Yjs sidecar wraps a Y.Doc
+ * with this shape; `inner()` returns the backend's native doc
+ * instance (Y.Doc today).
+ */
+export interface LoroDocHandle {
+  /** Current state as a plain JS value (for cell consumption). */
+  toJSON(): unknown;
+  /** Export current state as backend-specific update bytes for save. */
+  exportSnapshot(): Uint8Array;
   /**
-   * Load a doc from update bytes (Y.encodeStateAsUpdate output). Same
-   * id loaded twice returns the cached handle unless `force` is set.
-   * Bytes of length 0 produce a fresh empty Y.Doc.
+   * Apply one or more structured ops as a single op-log entry.
+   * Returns the new snapshot bytes after commit so the host can
+   * re-encode and persist.
    */
+  mutate(ops: DocOp[]): Uint8Array;
+  /** Internal handle — exposed for advanced host integrations. */
+  inner(): unknown;
+}
+
+/**
+ * Generic dispatcher contract — the Yjs sidecar implements this. Kept
+ * as a named interface so the resolver's options remain extensible if
+ * a future backend ships behind a feature flag.
+ */
+export interface LoroDispatcher {
   load(opts: { id: string; bytes: Uint8Array; force?: boolean }): Promise<LoroDocHandle>;
-  /** Get an already-loaded handle by id. */
   get(id: string): LoroDocHandle | undefined;
-  /** Drop every cached handle. Call on unmount. */
   dispose(): void;
 }
+
+export type YjsDispatcher = LoroDispatcher;
 
 function walkPath(doc: Y.Doc, path: LoroPath): unknown {
   let cur: unknown;

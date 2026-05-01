@@ -278,25 +278,26 @@ export type {
 } from "./workbookMemoryResolver";
 
 // Workbook doc resolver — materializes <wb-doc> CRDT blocks into
-// loaded handles. Default backend is Yjs (pure-JS, ~50 KB); the
-// resolver dispatches by `format=` so legacy `format="loro"` files
-// can still parse if a host supplies its own port.
+// loaded handles. Backend is Yjs (pure-JS, ~50 KB); legacy
+// `format="loro"` was dropped in Phase 2 of core-0or.
+//
+// Doc op + handle types (LoroDocHandle, LoroPath, DocOp, …) keep the
+// `Loro*` prefix as legacy nomenclature — the rename is deferred.
 export { createWorkbookDocResolver } from "./workbookDocResolver";
 export type {
   ResolvedDoc,
   WorkbookDocResolver,
   WorkbookDocResolverOptions,
 } from "./workbookDocResolver";
-export { createYjsDispatcher } from "./yjsSidecar";
-export type { YjsDispatcher } from "./yjsSidecar";
-export { createLoroDispatcher, topLevel } from "./loroSidecar";
+export { createYjsDispatcher, topLevel } from "./yjsSidecar";
 export type {
+  YjsDispatcher,
   LoroDispatcher,
   LoroDocHandle,
   DocOp,
   LoroPath,
   LoroPathStep,
-} from "./loroSidecar";
+} from "./yjsSidecar";
 
 // Autosave helpers — exportWorkbookHtml walks <wb-doc>/<wb-memory>/
 // <wb-history> elements and writes their current bytes back into the

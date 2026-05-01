@@ -1,8 +1,9 @@
 /**
  * Workbook doc resolver — materializes `<wb-doc>` blocks into loaded
- * CRDT handles. Phase 2 default backend is Yjs (`format="yjs"`); the
- * legacy `format="loro"` dispatch is kept as a no-op for old workbook
- * files in transit, but new authoring should use yjs.
+ * CRDT handles. Phase 2 of core-0or made Yjs the only backend; the
+ * legacy `format="loro"` path was dropped (pre-1.0 product) and old
+ * workbook files migrate via host-side ports (see color.wave's
+ * one-time IDB migration).
  *
  * Cells consume docs read-only via `reads=` — they receive a JSON
  * projection of the current state. Host-driven mutation goes through
@@ -12,11 +13,10 @@
 
 import { sha256Hex } from "./modelArtifactResolver";
 import {
-  type LoroDispatcher,
+  createYjsDispatcher,
+  type YjsDispatcher,
   type LoroDocHandle,
-  createLoroDispatcher,
-} from "./loroSidecar";
-import { createYjsDispatcher, type YjsDispatcher } from "./yjsSidecar";
+} from "./yjsSidecar";
 import type { WorkbookDoc } from "./htmlBindings";
 
 export interface ResolvedDoc {
@@ -44,8 +44,6 @@ export interface WorkbookDocResolverOptions {
   fetchBytes?: (url: string) => Promise<Uint8Array>;
   /** Pre-built Yjs dispatcher (e.g. shared across resolvers). */
   yjsDispatcher?: YjsDispatcher;
-  /** Pre-built (legacy) Loro dispatcher. Optional; defaults to throwing stub. */
-  loroDispatcher?: LoroDispatcher;
 }
 
 function hostAllowed(rawUrl: string, allow: ReadonlyArray<string>): boolean {
@@ -79,7 +77,6 @@ export function createWorkbookDocResolver(
     opts.allowedHosts === null ? null : opts.allowedHosts ?? [];
   const fetchBytes = opts.fetchBytes ?? defaultFetchBytes;
   const yjs = opts.yjsDispatcher ?? createYjsDispatcher();
-  const loro = opts.loroDispatcher ?? createLoroDispatcher();
   const cache = new Map<string, ResolvedDoc>();
 
   async function fetchExternal(
@@ -137,8 +134,6 @@ export function createWorkbookDocResolver(
     let handle: LoroDocHandle;
     if (block.format === "yjs") {
       handle = await yjs.load({ id: block.id, bytes });
-    } else if (block.format === "loro") {
-      handle = await loro.load({ id: block.id, bytes });
     } else {
       throw new Error(`unsupported wb-doc format: ${(block as { format: string }).format}`);
     }
@@ -159,7 +154,6 @@ export function createWorkbookDocResolver(
     clear() {
       cache.clear();
       yjs.dispose();
-      loro.dispose();
     },
   };
 }

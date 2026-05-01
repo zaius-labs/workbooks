@@ -5,8 +5,8 @@
    * through Cmd+S, no browser cache layer.
    *
    * Internally renders a <wb-doc> custom element. Once mounted, the
-   * runtime parses the element and registers a CRDT handle (Yjs by
-   * default since Phase 2 of core-0or). On Cmd+S, the save handler
+   * runtime parses the element and registers a Yjs handle (the only
+   * backend since Phase 2 of core-0or). On Cmd+S, the save handler
    * calls exportDoc(id) and writes the current state back into the
    * element before snapshotting.
    *
@@ -18,13 +18,8 @@
    *   // Read the registered handle:
    *   const composition = useDoc("composition");
    *
-   * Format options:
-   *   - "yjs" (default) — Yjs, pure-JS hierarchical CRDT.
-   *   - "loro" — legacy backend; runtime no longer ships it. Hosts
-   *     supplying their own port can still parse files with this format.
-   *
-   * Optional `initial` is base64-encoded backend-specific update bytes
-   * to seed the doc; most authors omit this.
+   * Optional `initial` is base64-encoded Yjs update bytes to seed the
+   * doc; most authors omit this.
    */
 
   import { requireAuthoringContext } from "./context";
@@ -32,16 +27,14 @@
   type Props = {
     /** Stable doc id. Cells + other components reference it by id. */
     id: string;
-    /** CRDT format. "yjs" by default; "loro" is legacy. */
-    format?: "yjs" | "loro";
-    /** Retention horizon — Loro-only; ignored for Yjs. */
-    historyHorizon?: number;
+    /** CRDT format. Only "yjs" is supported. */
+    format?: "yjs";
     /** Base64-encoded initial bytes (rare; usually omitted). */
     initial?: string;
     /** sha256 hex of `initial` — runtime verifies. */
     sha256?: string;
   };
-  let { id, format = "yjs", historyHorizon, initial, sha256 }: Props = $props();
+  let { id, format = "yjs", initial, sha256 }: Props = $props();
 
   // Pull the context only to fail fast if <Doc> is used outside
   // <WorkbookApp>. We don't need anything from it — registration
@@ -52,7 +45,6 @@
 <wb-doc
   id={id}
   format={format}
-  history-horizon={historyHorizon}
   encoding={initial ? "base64" : undefined}
   sha256={sha256}
 >{initial ?? ""}</wb-doc>
