@@ -124,7 +124,7 @@ if git diff --cached --quiet; then
   echo "  (no binary changes to commit)"
 else
   git commit -m "release: workbooksd $VERSION (macOS arm64+x86_64, signed + notarized)"
-  git push origin HEAD:main
+  git push origin HEAD:"$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD)"
 fi
 
 echo "[release] tagging $TAG..."
