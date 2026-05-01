@@ -1,5 +1,5 @@
 {
-  "name": "workbooks-site",
+  "name": "@workbooks/site",
   "private": true,
   "version": "0.0.1",
   "type": "module",
