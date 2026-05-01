@@ -79,6 +79,7 @@ export function app<T extends Record<string, any>>(
 ): T {
   // Lazy holders. Materialized on first prop access.
   let store: any = null;
+  let root: any = null;
   let reactor: Reactor | null = null;
 
   const ensure = () => {
@@ -92,30 +93,42 @@ export function app<T extends Record<string, any>>(
       );
     }
 
-    // Build the shape descriptor SyncedStore needs. The library reads
-    // from the input shape's *types* (array vs object vs xml) to pick
-    // Y.Array vs Y.Map vs Y.XmlFragment. Plain primitives at the leaves
-    // of objects are stored as Y.Map values.
-    store = syncedStore(shape as any, doc);
+    // SyncedStore disallows primitives at the doc root — every top-
+    // level key must be a Y type (Y.Map, Y.Array, Y.Text, Y.XmlFragment).
+    // Authors writing `wb.app({ count: 0, theme: "dark" })` are passing
+    // primitives at the top level, which is the natural shape. We
+    // accommodate by wrapping the entire user shape inside a single
+    // well-known Y.Map (`__wb_app`); the Proxy below hides the wrap so
+    // authors still write `app.count` instead of `app.__wb_app.count`.
+    store = syncedStore({ [ROOT_KEY]: shape as any }, doc);
+    root = (store as any)[ROOT_KEY];
 
-    // Apply defaults — only on properties that don't yet exist in the
-    // underlying Y types. SyncedStore creates Y.Maps/Arrays/etc. on
-    // first access; we walk the input shape and seed each top-level key.
+    // Apply defaults — write into the wrapping map only for keys that
+    // don't yet exist (existing user state always wins).
+    const rootMap = getYjsValue(root) as Y.Map<unknown> | undefined;
     for (const [key, value] of Object.entries(shape)) {
-      const yValue = getYjsValue((store as any)[key]);
-      if (yValue instanceof Y.Map && yValue.size === 0 && value && typeof value === "object" && !Array.isArray(value)) {
+      const yChild = getYjsValue(root[key]);
+      if (yChild instanceof Y.Map && yChild.size === 0 && value && typeof value === "object" && !Array.isArray(value)) {
+        // Object → seed nested fields onto the child Y.Map.
         doc.transact(() => {
           for (const [k, v] of Object.entries(value)) {
-            (store as any)[key][k] = v;
+            root[key][k] = v;
           }
         });
-      } else if (yValue instanceof Y.Array && yValue.length === 0 && Array.isArray(value) && value.length > 0) {
-        doc.transact(() => {
-          (store as any)[key].push(...value);
-        });
+      } else if (yChild instanceof Y.Array && yChild.length === 0 && Array.isArray(value) && value.length > 0) {
+        // Array → seed items onto the child Y.Array.
+        doc.transact(() => { root[key].push(...value); });
+      } else if (rootMap && !rootMap.has(key) && (
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean" ||
+        value === null
+      )) {
+        // Primitive → seed onto the root Y.Map.
+        doc.transact(() => { root[key] = value; });
       }
-      // Y.Text seeding handled at the wb.text() layer; primitives are
-      // map values stored in the parent — already handled above.
+      // Y.Text seeding is handled at the wb.text() layer; primitives
+      // and structured values cover everything else.
     }
 
     // Svelte reactivity bridge: a $state.raw counter that bumps on
@@ -123,42 +136,48 @@ export function app<T extends Record<string, any>>(
     // Svelte reactive contexts register the dep; mutations cause
     // re-runs.
     reactor = new Reactor();
-    observeDeep(store, () => reactor!.bump());
+    observeDeep(root, () => reactor!.bump());
   };
 
   // Outer Proxy. Each operation lazily materializes the store, then
-  // delegates. The reactor read fires inside Svelte's reactive scope
-  // (component render / $effect / $derived), so deps register
-  // correctly the first time the store is touched from there.
+  // delegates to the wrapped root. The reactor read fires inside
+  // Svelte's reactive scope (component render / $effect / $derived),
+  // so deps register correctly the first time the store is touched
+  // from there.
   return new Proxy({} as any, {
     get(_target, prop) {
       ensure();
       reactor!.read();
-      return Reflect.get(store, prop);
+      return Reflect.get(root, prop);
     },
     set(_target, prop, value) {
       ensure();
-      return Reflect.set(store, prop, value);
+      return Reflect.set(root, prop, value);
     },
     has(_target, prop) {
       ensure();
-      return Reflect.has(store, prop);
+      return Reflect.has(root, prop);
     },
     deleteProperty(_target, prop) {
       ensure();
-      return Reflect.deleteProperty(store, prop);
+      return Reflect.deleteProperty(root, prop);
     },
     ownKeys(_target) {
       ensure();
       reactor!.read();
-      return Reflect.ownKeys(store);
+      return Reflect.ownKeys(root);
     },
     getOwnPropertyDescriptor(_target, prop) {
       ensure();
-      return Reflect.getOwnPropertyDescriptor(store, prop);
+      return Reflect.getOwnPropertyDescriptor(root, prop);
     },
   }) as T;
 }
+
+/** Internal key under which the user's shape lives inside the Y.Doc.
+ *  Stable across versions — changing it would invalidate every saved
+ *  workbook's wb.app state. Treat as a wire-format constant. */
+const ROOT_KEY = "__wb_app";
 
 /**
  * Tiny class wrapping a single $state.raw counter. Class form is
