@@ -59,80 +59,103 @@ export interface AppOptions {
  * after hydration. Existing user state always wins. This mirrors the
  * `initial` semantics on `wb.text` and `wb.value`.
  *
- * MUST be called inside a `<WorkbookReady>` boundary — without it the
- * Y.Doc may not be bound, and SyncedStore needs a doc at construction
- * time. The boundary throws a clear error if you try to use this
- * outside its mounted context.
+ * Lazy by default — safe to call at module load (e.g. in a singleton
+ * `export const layout = new LayoutStore()`). The Proxy returned here
+ * defers the underlying SyncedStore + Y.Doc binding to the first
+ * read or write, which always happens during a Svelte component
+ * render. Bundlers like vite-plugin-singlefile flatten dynamic
+ * imports into the main chunk, so module-level singletons can run
+ * before the host's runtime mount; this keeps wb.app() compatible
+ * with that order.
+ *
+ * If a Y.Doc still isn't bound at first access, the Proxy throws
+ * with a clear message — at that point the bug is real (missing
+ * <wb-doc>, or runtime mount never ran), not a timing race. Wrap in
+ * <WorkbookReady> if you want the throw to never surface to users.
  */
 export function app<T extends Record<string, any>>(
   shape: T,
   opts: AppOptions = {},
 ): T {
-  const doc = resolveDocSync(opts.doc ?? null);
-  if (!doc) {
-    throw new Error(
-      "wb.app() called outside <WorkbookReady>. Wrap the component tree " +
-      "in <WorkbookReady> so the Y.Doc binds before this runs.",
-    );
-  }
+  // Lazy holders. Materialized on first prop access.
+  let store: any = null;
+  let reactor: Reactor | null = null;
 
-  // Build the shape descriptor SyncedStore needs. The library reads
-  // from the input shape's *types* (array vs object vs xml) to pick
-  // Y.Array vs Y.Map vs Y.XmlFragment. Plain primitives at the leaves
-  // of objects are stored as Y.Map values.
-  const store = syncedStore(shape as any, doc);
-
-  // Apply defaults — only on properties that don't yet exist in the
-  // underlying Y types. SyncedStore creates Y.Maps/Arrays/etc. on
-  // first access; we walk the input shape and seed each top-level key.
-  for (const [key, value] of Object.entries(shape)) {
-    const yValue = getYjsValue((store as any)[key]);
-    if (yValue instanceof Y.Map && yValue.size === 0 && value && typeof value === "object" && !Array.isArray(value)) {
-      // Object key on an empty Y.Map → seed.
-      doc.transact(() => {
-        for (const [k, v] of Object.entries(value)) {
-          (store as any)[key][k] = v;
-        }
-      });
-    } else if (yValue instanceof Y.Array && yValue.length === 0 && Array.isArray(value) && value.length > 0) {
-      // Array key on an empty Y.Array → seed if defaults non-empty.
-      doc.transact(() => {
-        (store as any)[key].push(...value);
-      });
+  const ensure = () => {
+    if (store) return;
+    const doc = resolveDocSync(opts.doc ?? null);
+    if (!doc) {
+      throw new Error(
+        "wb.app() accessed before the workbook Y.Doc was bound. " +
+        "Either wrap your component tree in <WorkbookReady>, or make " +
+        "sure mountHtmlWorkbook(...) has run before any read/write.",
+      );
     }
-    // Y.Text seeding handled at the wb.text() layer; primitives are
-    // map values stored in the parent — already handled above.
-  }
 
-  // Svelte reactivity bridge: a $state.raw counter that bumps on every
-  // observed mutation. Reads through this counter inside Svelte
-  // reactive contexts register the dep; mutations cause re-runs.
-  // The counter lives in a closure-bound class so the rune compiles.
-  const reactor = new Reactor();
-  observeDeep(store, () => reactor.bump());
+    // Build the shape descriptor SyncedStore needs. The library reads
+    // from the input shape's *types* (array vs object vs xml) to pick
+    // Y.Array vs Y.Map vs Y.XmlFragment. Plain primitives at the leaves
+    // of objects are stored as Y.Map values.
+    store = syncedStore(shape as any, doc);
 
-  // Wrap the SyncedStore in a Proxy that routes reads through the
-  // reactor (registering the dep) before delegating to SyncedStore.
-  // Writes go straight through.
-  return new Proxy(store as any, {
-    get(target, prop, receiver) {
-      reactor.read(); // register Svelte dependency
-      return Reflect.get(target, prop, receiver);
+    // Apply defaults — only on properties that don't yet exist in the
+    // underlying Y types. SyncedStore creates Y.Maps/Arrays/etc. on
+    // first access; we walk the input shape and seed each top-level key.
+    for (const [key, value] of Object.entries(shape)) {
+      const yValue = getYjsValue((store as any)[key]);
+      if (yValue instanceof Y.Map && yValue.size === 0 && value && typeof value === "object" && !Array.isArray(value)) {
+        doc.transact(() => {
+          for (const [k, v] of Object.entries(value)) {
+            (store as any)[key][k] = v;
+          }
+        });
+      } else if (yValue instanceof Y.Array && yValue.length === 0 && Array.isArray(value) && value.length > 0) {
+        doc.transact(() => {
+          (store as any)[key].push(...value);
+        });
+      }
+      // Y.Text seeding handled at the wb.text() layer; primitives are
+      // map values stored in the parent — already handled above.
+    }
+
+    // Svelte reactivity bridge: a $state.raw counter that bumps on
+    // every observed mutation. Reads through this counter inside
+    // Svelte reactive contexts register the dep; mutations cause
+    // re-runs.
+    reactor = new Reactor();
+    observeDeep(store, () => reactor!.bump());
+  };
+
+  // Outer Proxy. Each operation lazily materializes the store, then
+  // delegates. The reactor read fires inside Svelte's reactive scope
+  // (component render / $effect / $derived), so deps register
+  // correctly the first time the store is touched from there.
+  return new Proxy({} as any, {
+    get(_target, prop) {
+      ensure();
+      reactor!.read();
+      return Reflect.get(store, prop);
     },
-    set(target, prop, value, receiver) {
-      // SyncedStore's own Proxy handles Y.Doc writes; observeDeep fires.
-      return Reflect.set(target, prop, value, receiver);
+    set(_target, prop, value) {
+      ensure();
+      return Reflect.set(store, prop, value);
     },
-    has(target, prop) { return Reflect.has(target, prop); },
-    deleteProperty(target, prop) {
-      return Reflect.deleteProperty(target, prop);
+    has(_target, prop) {
+      ensure();
+      return Reflect.has(store, prop);
     },
-    ownKeys(target) {
-      reactor.read();
-      return Reflect.ownKeys(target);
+    deleteProperty(_target, prop) {
+      ensure();
+      return Reflect.deleteProperty(store, prop);
     },
-    getOwnPropertyDescriptor(target, prop) {
-      return Reflect.getOwnPropertyDescriptor(target, prop);
+    ownKeys(_target) {
+      ensure();
+      reactor!.read();
+      return Reflect.ownKeys(store);
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+      ensure();
+      return Reflect.getOwnPropertyDescriptor(store, prop);
     },
   }) as T;
 }
