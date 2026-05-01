@@ -12,6 +12,22 @@
 // rather than maintaining their own copy.
 export * from "./types";
 
+// Author-facing storage SDK — `wb.text` / `wb.collection` / `wb.value`.
+// Three applied-storage primitives backed by Loro CRDT containers. Hides
+// raw Loro from authors and centralizes the diff-shrink + dedup-by-id
+// patterns the host apps used to ship inline. Phase 1 is structural-
+// only; pluggable backends + bundle-size wins land in P2/P3.
+export { wb } from "./storage";
+export type {
+  WbText,
+  WbTextOptions,
+  WbCollection,
+  WbCollectionOptions,
+  WbRecord,
+  WbValue,
+  WbValueOptions,
+} from "./storage";
+
 // Authoring SDK — declarative Svelte components for composing live
 // workbooks. <WorkbookApp>, <Cell>, <Input>, <Output>, plus runes-based
 // hooks (useCell, useDAG, useRuntime, useExecutor) for advanced cases.

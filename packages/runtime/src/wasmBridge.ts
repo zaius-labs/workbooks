@@ -282,6 +282,13 @@ export interface RuntimeClient {
    * available once the workbook has booted.
    */
   getDocHandle?(id: string): import("./loroSidecar").LoroDocHandle | undefined;
+  /**
+   * List the ids of all registered <wb-doc> handles. Used by the wb.*
+   * storage SDK's resolver to find a "default doc" when authors call
+   * `wb.text("composition")` without specifying a doc id explicitly.
+   * Returns an empty array if no docs are registered.
+   */
+  listDocIds?(): string[];
 }
 
 export interface RuntimeClientOptions {
@@ -616,6 +623,13 @@ export function createRuntimeClient(opts: RuntimeClientOptions): RuntimeClient {
       // changes round-trip back into the .workbook.html file via the
       // save handler's exportDoc() call on Cmd+S.
       return docHandles.get(id);
+    },
+
+    listDocIds() {
+      // Surfaces the registered ids for the wb.* storage SDK's
+      // default-doc resolution. Returns iteration order matching
+      // registerDoc() call order.
+      return Array.from(docHandles.keys());
     },
   };
 }

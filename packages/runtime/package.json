@@ -102,6 +102,10 @@
       "types": "./src/loroSidecar.ts",
       "default": "./src/loroSidecar.ts"
     },
+    "./storage": {
+      "types": "./src/storage/index.ts",
+      "default": "./src/storage/index.ts"
+    },
     "./workbookHistoryResolver": {
       "types": "./src/workbookHistoryResolver.ts",
       "default": "./src/workbookHistoryResolver.ts"
