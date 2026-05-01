@@ -19,7 +19,7 @@
  * grained reactivity; vanilla consumers poll or subscribe.
  */
 
-import { resolveDoc, Y } from "./bootstrap";
+import { resolveDoc, awaitHydration, Y } from "./bootstrap";
 
 export interface WbTextOptions {
   /** Doc id this text belongs to. Defaults to the first registered doc. */
@@ -117,6 +117,19 @@ export function createText(id: string, opts: WbTextOptions = {}): WbText {
   const readyPromise = (async () => {
     doc = await resolveDoc(opts.doc ?? null);
     text = doc.getText(id);
+
+    // Wait for the host's hydration signal before deciding whether
+    // to seed `initial`. Without this gate, we race substrate's WAL
+    // apply: doc is registered (resolveDoc returns) but the saved
+    // state hasn't been applied yet → Y.Text looks empty → we seed
+    // → substrate then replays the WAL on top → both sets of items
+    // coexist (different clientIDs) → one initial copy duplicates
+    // on every reload. (Real bug: colorwave timeline row+1 per
+    // refresh, May 2026.) Hosts without a hydration step (no
+    // substrate, no autosave) hit awaitHydration's internal timeout
+    // and the seed proceeds — same behavior as before this gate.
+    await awaitHydration(opts.doc ?? null);
+
     const hydratedValue = text.toString();
 
     // First-fire post-hydration: emit the loaded value to any

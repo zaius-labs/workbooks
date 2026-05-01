@@ -28,6 +28,12 @@ export type {
   WbValueOptions,
 } from "./storage";
 
+// Hydration gate — host apps (substrate, autosave, etc.) call
+// `markDocHydrated()` after applying any saved state to a registered
+// Y.Doc, so seed-on-empty primitives (wb.text initial, etc.) don't
+// race the WAL apply and double-insert.
+export { markDocHydrated, awaitHydration } from "./storage/bootstrap";
+
 // Authoring SDK — declarative Svelte components for composing live
 // workbooks. <WorkbookApp>, <Cell>, <Input>, <Output>, plus runes-based
 // hooks (useCell, useDAG, useRuntime, useExecutor) for advanced cases.

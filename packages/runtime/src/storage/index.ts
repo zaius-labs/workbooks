@@ -60,3 +60,8 @@ export type {
   WbValue,
   WbValueOptions,
 };
+
+// Hydration gate — re-exported here so hosts that only consume the
+// storage subpath (no Svelte components, no yjs sidecar) can still
+// signal "WAL apply is done; seed-on-empty primitives may proceed."
+export { markDocHydrated, awaitHydration } from "./bootstrap";

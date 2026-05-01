@@ -42,6 +42,30 @@ const POLL_INTERVAL_MS = 25;
 // from across the codebase share one Y.Doc reference.
 const docCache = new Map<string, Promise<Y.Doc>>();
 
+// Per-doc hydration gate. The host (substrate.bootstrap, autoSave,
+// or whoever owns the WAL replay) calls markDocHydrated(id) AFTER
+// applying any saved state to the Y.Doc. Primitives that need to
+// distinguish "doc is fresh and empty (seed defaults)" from "doc
+// is empty after hydration (don't seed — user actually emptied it)"
+// await awaitHydration() before that check.
+//
+// Without this gate, seed-on-empty primitives race substrate's WAL
+// apply: they see the Y.Doc registered but not yet hydrated, seed
+// their initial value, then substrate replays the saved WAL on top
+// and the seed coexists with the restored state — duplicating one
+// initial copy on every reload. Was a real bug (see colorwave row
+// duplication, May 2026).
+const hydrationResolvers = new Map<string, () => void>();
+const hydrationPromises = new Map<string, Promise<void>>();
+function getOrCreateHydrationPromise(id: string): Promise<void> {
+  let p = hydrationPromises.get(id);
+  if (!p) {
+    p = new Promise<void>((resolve) => hydrationResolvers.set(id, resolve));
+    hydrationPromises.set(id, p);
+  }
+  return p;
+}
+
 function getRuntime(): RuntimeApi | null {
   if (typeof window === "undefined") return null;
   const w = window as Window & { __wbRuntime?: RuntimeApi };
@@ -135,6 +159,56 @@ export function resolveDoc(docId: string | null = null): Promise<Y.Doc> {
   promise.catch(() => { docCache.delete(cacheKey); });
   docCache.set(cacheKey, promise);
   return promise;
+}
+
+/**
+ * Mark a registered doc as hydrated. Called by the substrate /
+ * autosave layer after applying any saved state. Resolves the
+ * promise returned by `awaitHydration(id)` so seed-on-empty
+ * primitives stop blocking.
+ *
+ * Idempotent — calling twice is a no-op.
+ *
+ * @param id Doc id, or null for the default doc.
+ */
+export function markDocHydrated(id: string | null = null): void {
+  const rt = getRuntime();
+  const resolved = id ?? (rt ? findFirstDocId(rt) : null) ?? "__default__";
+  // Ensure the promise exists (in case awaitHydration hasn't been
+  // called yet) so awaiters that arrive later still see "resolved".
+  getOrCreateHydrationPromise(resolved);
+  const r = hydrationResolvers.get(resolved);
+  if (r) {
+    r();
+    hydrationResolvers.delete(resolved);
+  }
+}
+
+/**
+ * Await the hydration signal for a registered doc. Resolves
+ * immediately if `markDocHydrated` was already called for this id.
+ *
+ * Use case: primitives that seed an initial value when the
+ * underlying shared type is empty must wait until the host has
+ * had a chance to populate the doc from saved state. Otherwise
+ * the seed runs against an empty-but-not-yet-hydrated doc and
+ * coexists with the restored state.
+ *
+ * If the host never calls markDocHydrated (e.g. a workbook with no
+ * substrate/autosave layer), this would hang forever — so we cap
+ * the wait at the same POLL_TIMEOUT_MS used for resolveDoc and
+ * resolve anyway. "No hydration after 10s" is treated as "no
+ * hydration is coming," and the seed proceeds. This is conservative
+ * but compatible with the historical "seed immediately" behavior.
+ */
+export function awaitHydration(id: string | null = null): Promise<void> {
+  const rt = getRuntime();
+  const resolved = id ?? (rt ? findFirstDocId(rt) : null) ?? "__default__";
+  const p = getOrCreateHydrationPromise(resolved);
+  return Promise.race([
+    p,
+    new Promise<void>((resolve) => setTimeout(resolve, POLL_TIMEOUT_MS)),
+  ]);
 }
 
 /**
