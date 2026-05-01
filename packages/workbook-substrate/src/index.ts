@@ -24,6 +24,22 @@ export type {
   SqliteSessionBindOptions,
   SqliteSessionBinding,
 } from "./mutate";
+export type {
+  SubstrateTransport,
+  CommitRequest,
+  CommitResult,
+  WriteSemantics,
+  FileImage,
+} from "./transport";
+export { PwaFsaTransport } from "./transports/t2-pwa-fsa";
+export { FsaSessionTransport } from "./transports/t3-fsa-session";
+export type { T3Options } from "./transports/t3-fsa-session";
+export { OpfsDownloadTransport } from "./transports/t4-opfs-download";
+export type { T4Options } from "./transports/t4-opfs-download";
+export { ReadOnlyTransport } from "./transports/t5-readonly";
+export { negotiate } from "./transports/negotiator";
+export type { NegotiateOptions, NegotiateResult } from "./transports/negotiator";
+
 export { compact, shouldCompact } from "./compact";
 export type { TargetEncoder, CompactOptions } from "./compact";
 export {
