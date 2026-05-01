@@ -40,6 +40,9 @@ export { ReadOnlyTransport } from "./transports/t5-readonly";
 export { negotiate } from "./transports/negotiator";
 export type { NegotiateOptions, NegotiateResult } from "./transports/negotiator";
 
+export { mountInstallBanner } from "./install-banner";
+export type { InstallBannerOptions, InstallBannerHandle } from "./install-banner";
+
 export { compact, shouldCompact } from "./compact";
 export type { TargetEncoder, CompactOptions } from "./compact";
 export {
