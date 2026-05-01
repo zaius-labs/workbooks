@@ -223,10 +223,20 @@ async function verifyChain(
   // Trailing-op recovery: if the LAST op fails CID verify, we discard it
   // (mutates the wal array in place) and don't fail. If anything earlier
   // fails, the file is corrupt.
+  //
+  // When a target has NO snapshot yet (first op for a fresh target),
+  // the writer uses a stable sentinel parent CID (32 zeros) — see
+  // mutate.ts. The parser must agree on that sentinel; otherwise the
+  // first op's parent_cid !== expected (`undefined`) and every saved
+  // file fails to load on the next session. Was a real bug.
+  const NO_PARENT_SENTINEL = "blake3-" + "0".repeat(32);
   const lastCid = new Map<string, Cid>(Object.entries(meta.snapshot_cid_by_target));
   for (let i = 0; i < wal.length; i++) {
     const op = wal[i];
-    const expectedParent = lastCid.get(op.target) ?? meta.snapshot_cid_by_target[op.target];
+    const expectedParent =
+      lastCid.get(op.target)
+      ?? meta.snapshot_cid_by_target[op.target]
+      ?? NO_PARENT_SENTINEL;
     if (expectedParent !== op.parent_cid) {
       if (i === wal.length - 1) {
         wal.pop(); // trailing-op recovery
