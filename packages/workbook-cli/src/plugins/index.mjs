@@ -15,3 +15,5 @@
 
 export { default as workbookPlugin } from "./workbookInline.mjs";
 export { default as workbookVirtualModulesPlugin } from "./virtualModules.mjs";
+export { default as substratePlugin } from "./substrate.mjs";
+export { resolveWorkbookId, generateUlid } from "./substrate.mjs";
