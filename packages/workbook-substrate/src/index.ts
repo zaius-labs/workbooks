@@ -12,3 +12,15 @@ export {
   DEFAULT_SQLITE_CONFLICT_POLICY,
 } from "./hydrate";
 export type { YjsLike, YDocLike, SqliteLike, HydrateSqliteOptions } from "./hydrate";
+export {
+  createMutator,
+  bindYjsAutoEmit,
+  bindSqliteSessionAutoEmit,
+} from "./mutate";
+export type {
+  SubstrateMutator,
+  CommitListener,
+  YjsBindOptions,
+  SqliteSessionBindOptions,
+  SqliteSessionBinding,
+} from "./mutate";
