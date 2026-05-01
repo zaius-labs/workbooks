@@ -59,7 +59,7 @@ export interface WriteSemantics {
   rewriteCostPerCommit: "delta" | "full";
   fingerprintAfterClose: "deterministic" | "queryable";
   /** Tier label for telemetry / status indicator. */
-  tier: "T2" | "T3" | "T4" | "T5";
+  tier: "T1" | "T2" | "T3" | "T4" | "T5";
   /** User-visible status string for the menubar pill. */
   status: "saved-in-file" | "needs-permission" | "download-to-keep" | "read-only";
 }

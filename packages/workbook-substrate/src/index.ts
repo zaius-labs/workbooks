@@ -31,6 +31,7 @@ export type {
   WriteSemantics,
   FileImage,
 } from "./transport";
+export { LocalhostRunnerTransport } from "./transports/t1-localhost-runner";
 export { PwaFsaTransport } from "./transports/t2-pwa-fsa";
 export { FsaSessionTransport } from "./transports/t3-fsa-session";
 export type { T3Options } from "./transports/t3-fsa-session";

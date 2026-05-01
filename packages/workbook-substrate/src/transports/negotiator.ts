@@ -10,6 +10,7 @@
 // Within a session, the chosen transport is fixed.
 
 import type { SubstrateTransport } from "../transport";
+import { LocalhostRunnerTransport } from "./t1-localhost-runner";
 import { PwaFsaTransport } from "./t2-pwa-fsa";
 import { FsaSessionTransport } from "./t3-fsa-session";
 import { OpfsDownloadTransport } from "./t4-opfs-download";
@@ -32,9 +33,28 @@ export interface NegotiateResult {
   reasoning: string;
 }
 
-/** Pick a transport. Async because T2 prepares against launchQueue. */
+/** Pick a transport. Async because T2 prepares against launchQueue
+ *  and T1 probes the runner endpoint. */
 export async function negotiate(opts: NegotiateOptions): Promise<NegotiateResult> {
   const allowPwa = opts.allowPwa !== false;
+
+  // T1: Localhost runner (polyglot APE binary). Probe /_runner/info on
+  // the current origin. Highest priority — silent autosave, no prompts.
+  {
+    const probe = await LocalhostRunnerTransport.detect();
+    if (probe.available) {
+      const t1 = new LocalhostRunnerTransport();
+      try {
+        await t1.prepare();
+        return {
+          transport: t1,
+          reasoning: `T1: workbook runner detected (${probe.info?.runner}); silent autosave via PUT /save`,
+        };
+      } catch (e) {
+        // fall through to next tier
+      }
+    }
+  }
 
   // T2: PWA-installed FSA via launchQueue
   if (allowPwa && PwaFsaTransport.isInPwaContext() && typeof (globalThis as any).launchQueue !== "undefined") {
