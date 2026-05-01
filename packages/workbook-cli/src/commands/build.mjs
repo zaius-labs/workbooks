@@ -95,17 +95,6 @@ export async function runBuild(opts = {}) {
     );
   }
 
-  // Polyglot stage — default ON. Wraps the .workbook.html in a
-  // Cosmopolitan APE binary that hosts the workbook over localhost
-  // and saves edits back to itself. Three artifacts per platform.
-  // Skip with --no-polyglot, or when cosmocc isn't installed (a soft
-  // skip with an instructional log line so authors know it's missing).
-  const wantPolyglot = opts.polyglot !== false && opts["no-polyglot"] !== true;
-  if (wantPolyglot) {
-    const { runPolyglotPackage } = await import("./build-polyglot.mjs");
-    await runPolyglotPackage({ outDir, slug: config.slug });
-  }
-
   process.stdout.write(`[workbook] build complete · slug=${config.slug} → ${path.relative(process.cwd(), outDir)}\n`);
 }
 

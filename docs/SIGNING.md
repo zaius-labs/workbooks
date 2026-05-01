@@ -1,3 +1,10 @@
+> **Note:** Some sections below describe the original polyglot APE-binary
+> runner (`packages/workbook-runner`), which has been replaced by
+> `packages/workbooksd` — a small Rust background daemon that serves
+> workbooks over localhost. The substrate transport contract still
+> applies; only the host process changed. See packages/workbooksd/
+> for the current implementation.
+
 # Code Signing for Workbook Polyglot Binaries
 
 **TL;DR:** if you're shipping the `.html` output, you never need certs. If you're shipping the polyglot binaries (`<name>-mac.zip`, `<name>-win.exe`, `<name>-linux`) to public users, signing eliminates the first-launch Gatekeeper / SmartScreen warning. Without signing, users see the warning once per file, then it works silently forever. Many authors ship unsigned and that's a fine choice.

@@ -1,3 +1,10 @@
+> **Note:** Some sections below describe the original polyglot APE-binary
+> runner (`packages/workbook-runner`), which has been replaced by
+> `packages/workbooksd` — a small Rust background daemon that serves
+> workbooks over localhost. The substrate transport contract still
+> applies; only the host process changed. See packages/workbooksd/
+> for the current implementation.
+
 # Workbook Substrate
 
 **Status:** v0 — released for early adopters; format may evolve, runtime contract is stable.

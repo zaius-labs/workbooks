@@ -30,8 +30,6 @@ async function help() {
     "  --out <dir>     build output dir (default dist)",
     "  --runtime <p>   override path to workbook-runtime checkout (auto-detected)",
     "  --no-wasm       skip inlining wasm + runtime bundle (smaller, dev-only)",
-    "  --no-polyglot   skip the cross-platform polyglot binary wrap",
-    "                  (output stays HTML-only; default ON when cosmocc is installed)",
     "  --encrypt       wrap the artifact in a passphrase lock screen (age-v1).",
     "                  Pair with --password-stdin / --password-file or set",
     "                  the env var declared by encrypt.passwordEnv in",
