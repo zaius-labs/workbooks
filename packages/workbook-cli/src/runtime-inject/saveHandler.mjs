@@ -327,14 +327,23 @@
 
   // -------- keybind --------
 
+  // Authors can call this directly if they want a custom save button.
+  // Set FIRST so the keybind below sees `window.workbookSave === save`
+  // when no override has run, and sees a different ref when one has.
+  window.workbookSave = save;
+
   document.addEventListener("keydown", (e) => {
     const isSave = (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey &&
       (e.key === "s" || e.key === "S");
     if (!isSave) return;
     e.preventDefault();
-    save();
+    // Delegate to whatever's currently on window.workbookSave. If a
+    // host (e.g. a substrate-enabled workbook) has reassigned it,
+    // their save fn runs and the wb-saved-state envelope path is
+    // bypassed entirely — Y.Doc / WAL is already the canonical state,
+    // capturing forms/localStorage on top would be duplicate work.
+    // If untouched, this calls our local `save()`.
+    const fn = typeof window.workbookSave === "function" ? window.workbookSave : save;
+    fn();
   }, { capture: true });
-
-  // Authors can call this directly if they want a custom save button.
-  window.workbookSave = save;
 })();
