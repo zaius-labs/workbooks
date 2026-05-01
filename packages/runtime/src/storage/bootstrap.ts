@@ -73,6 +73,29 @@ function unwrap(handle: YDocHandleLike | undefined): Y.Doc | null {
 }
 
 /**
+ * Synchronous variant of {@link resolveDoc}. Returns the cached or
+ * already-registered Y.Doc, or `null` if the runtime hasn't bound it
+ * yet. Use this only inside contexts that guarantee the doc is bound
+ * — e.g. children of `<WorkbookReady>` boundary, or after a
+ * `await wb.ready()` gate.
+ *
+ * Why this exists: SyncedStore (the backing for `wb.app`) needs the
+ * Y.Doc at construction time. We can't .await inside a Svelte 5
+ * `$state.raw` class field declaration. The boundary component
+ * pattern lets the SDK stay synchronous inside the boundary.
+ */
+export function resolveDocSync(docId: string | null = null): Y.Doc | null {
+  // Fast path: already-resolved promise's value
+  // (Promises don't expose a sync "is fulfilled" check, so we look at
+  // the runtime directly each time. Resolution is cheap once mounted.)
+  const rt = getRuntime();
+  if (!rt || typeof rt.getDocHandle !== "function") return null;
+  const id = docId ?? findFirstDocId(rt);
+  if (id == null) return null;
+  return unwrap(rt.getDocHandle(id));
+}
+
+/**
  * Resolve a `Y.Doc` for the given doc id. Pass `null` to resolve
  * "the default doc" — the first one registered by the runtime
  * (introspected via listDocIds when available).

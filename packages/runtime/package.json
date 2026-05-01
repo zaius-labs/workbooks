@@ -228,11 +228,12 @@
     "vite": "^6.0.0"
   },
   "dependencies": {
-    "dompurify": "^3.2.0",
-    "fflate": "^0.8.0",
     "@noble/ed25519": "^3",
     "@noble/hashes": "^2",
-    "yjs": "^13.6.0",
-    "y-indexeddb": "^9.0.0"
+    "@syncedstore/core": "^0.6.0",
+    "dompurify": "^3.2.0",
+    "fflate": "^0.8.0",
+    "y-indexeddb": "^9.0.0",
+    "yjs": "^13.6.0"
   }
 }
