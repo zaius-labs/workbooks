@@ -30,8 +30,9 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ICON_PATH = path.resolve(HERE, "..", "..", "templates", "default-icon.svg");
 const SAVE_HANDLER_PATH = path.resolve(HERE, "..", "runtime-inject", "saveHandler.mjs");
+const INSTALL_TOAST_PATH = path.resolve(HERE, "..", "runtime-inject", "installToast.mjs");
 
-// Cache the save-handler source after first read — it doesn't change
+// Cache the inject sources after first read — they don't change
 // during a build run.
 let _saveHandlerSrc = null;
 async function readSaveHandler() {
@@ -39,13 +40,25 @@ async function readSaveHandler() {
   _saveHandlerSrc = await fs.readFile(SAVE_HANDLER_PATH, "utf8");
   return _saveHandlerSrc;
 }
+let _installToastSrc = null;
+async function readInstallToast() {
+  if (_installToastSrc !== null) return _installToastSrc;
+  _installToastSrc = await fs.readFile(INSTALL_TOAST_PATH, "utf8");
+  return _installToastSrc;
+}
 
-// Sentinels for the save-handler block — kept separate from the
-// runtime sentinels so we can update either independently on re-runs.
+// Sentinels for each injected block — kept separate so we can update
+// any one independently on re-runs without disturbing the others.
 function makeSaveSentinels() {
   return {
     BEGIN: "<!-- BEGIN workbook-save-handler -->",
     END: "<!-- END workbook-save-handler -->",
+  };
+}
+function makeInstallToastSentinels() {
+  return {
+    BEGIN: "<!-- BEGIN workbook-install-toast -->",
+    END: "<!-- END workbook-install-toast -->",
   };
 }
 
@@ -386,6 +399,19 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
         ? `${SAVE_BEGIN}\n<script>${escapeForScript(saveHandlerSrc)}</script>\n${SAVE_END}`
         : "";
 
+      // Install-Workbooks toast — fixed bottom-left card that shows up
+      // when the file is opened via file:// (or any non-daemon URL),
+      // prompting the user to install workbooksd. Self-suppresses when
+      // loaded via http://127.0.0.1:47119/wb/<token>/ or inside an
+      // iframe. Disable per-workbook via config.installToast.enabled =
+      // false (e.g. for cloud-only workbooks where the CTA doesn't apply).
+      const installToastEnabled = config.installToast?.enabled !== false;
+      const installToastSrc = installToastEnabled ? await readInstallToast() : null;
+      const { BEGIN: TOAST_BEGIN, END: TOAST_END } = makeInstallToastSentinels();
+      const installToastBlock = installToastSrc
+        ? `${TOAST_BEGIN}\n<script>${escapeForScript(installToastSrc)}</script>\n${TOAST_END}`
+        : "";
+
       // Compose the full head-injection block: save handler first
       // (so Cmd+S works as soon as the page parses, even if the
       // runtime fails to boot), then the portable assets. Both go
@@ -399,9 +425,12 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
         makeAssetTag("bindgen-src", "text/plain", escapeForScript(assets.bindgenJs)),
         makeAssetTag("runtime-bundle-src", "text/plain", escapeForScript(assets.bundleSrc)),
       ].join("\n");
-      const wrapped = saveBlock
-        ? `${saveBlock}\n${BEGIN}\n${portableBlock}\n${END}`
-        : `${BEGIN}\n${portableBlock}\n${END}`;
+      // Compose ordered blocks: save handler → install toast → portable
+      // assets. Save first so Cmd+S works even if the others fail.
+      const headBlocks = [saveBlock, installToastBlock, `${BEGIN}\n${portableBlock}\n${END}`]
+        .filter(Boolean)
+        .join("\n");
+      const wrapped = headBlocks;
 
       for (const file of htmlFiles) {
         let src = await fs.readFile(file, "utf8");

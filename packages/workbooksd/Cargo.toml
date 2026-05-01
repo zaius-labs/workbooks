@@ -1,0 +1,27 @@
+[package]
+name = "workbooksd"
+version = "0.0.1"
+edition = "2021"
+description = "Background daemon that serves and saves .workbook.html files for the local browser"
+license = "MIT"
+
+[[bin]]
+name = "workbooksd"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "signal"] }
+tower-http = { version = "0.5", features = ["cors"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+getrandom = "0.2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

@@ -1,0 +1,277 @@
+name: workbooksd release
+
+# Build the workbooksd Rust daemon for all supported targets, sign each
+# (Apple Developer ID for macOS, Microsoft Trusted Signing for Windows),
+# checksum, and ship the binaries to workbooks.sh/dl/ via the existing
+# workbooks-site deploy.
+#
+# Triggers on a tag matching `workbooksd-v*` (e.g. workbooksd-v0.1.0):
+#   git tag workbooksd-v0.1.0 && git push origin workbooksd-v0.1.0
+#
+# Required secrets (for full signing pipeline — workflow runs unsigned
+# if any group is missing, with a warning):
+#
+#   Apple (Developer ID + Notarization):
+#     APPLE_DEV_ID_CERT_P12      base64-encoded .p12 of the Developer ID
+#                                Application certificate
+#     APPLE_DEV_ID_CERT_PASSWORD password for the .p12 above
+#     APPLE_DEV_ID_NAME          full identity, e.g.
+#                                "Developer ID Application: Your Name (TEAMID)"
+#     APPLE_NOTARY_API_KEY       base64 of an App Store Connect API key (.p8)
+#     APPLE_NOTARY_API_KEY_ID    the key ID from App Store Connect
+#     APPLE_NOTARY_API_ISSUER    the issuer UUID from App Store Connect
+#
+#   Microsoft Trusted Signing (Windows):
+#     AZURE_CLIENT_ID            service principal app id
+#     AZURE_TENANT_ID            azure tenant id
+#     AZURE_CLIENT_SECRET        service principal secret
+#     TRUSTED_SIGNING_ENDPOINT   e.g. https://eus.codesigning.azure.net/
+#     TRUSTED_SIGNING_ACCOUNT    Trusted Signing account name
+#     TRUSTED_SIGNING_PROFILE    certificate profile name
+#
+#   Built-in (already on the repo for signal-web):
+#     GITHUB_TOKEN
+#     CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+
+on:
+  push:
+    tags: ['workbooksd-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version label (e.g. v0.1.0)'
+        required: true
+
+concurrency:
+  group: workbooksd-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14            # native arm64
+            sign: apple
+          - target: x86_64-apple-darwin
+            os: macos-13            # native x86_64
+            sign: apple
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            sign: none
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            sign: trusted
+            ext: .exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/workbooksd -> target
+          key: ${{ matrix.target }}
+
+      - name: Build release
+        working-directory: packages/workbooksd
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Strip (Unix)
+        if: runner.os != 'Windows'
+        working-directory: packages/workbooksd
+        run: strip target/${{ matrix.target }}/release/workbooksd || true
+
+      # ── macOS code-signing + notarization (conditional) ──────────
+      - name: Apple sign + notarize (Developer ID)
+        if: matrix.sign == 'apple' && env.APPLE_DEV_ID_CERT_P12 != ''
+        env:
+          APPLE_DEV_ID_CERT_P12: ${{ secrets.APPLE_DEV_ID_CERT_P12 }}
+          APPLE_DEV_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEV_ID_CERT_PASSWORD }}
+          APPLE_DEV_ID_NAME: ${{ secrets.APPLE_DEV_ID_NAME }}
+          APPLE_NOTARY_API_KEY: ${{ secrets.APPLE_NOTARY_API_KEY }}
+          APPLE_NOTARY_API_KEY_ID: ${{ secrets.APPLE_NOTARY_API_KEY_ID }}
+          APPLE_NOTARY_API_ISSUER: ${{ secrets.APPLE_NOTARY_API_ISSUER }}
+        run: |
+          set -euxo pipefail
+          BIN="packages/workbooksd/target/${{ matrix.target }}/release/workbooksd"
+
+          # 1. Import the Developer ID cert into a fresh ephemeral keychain
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PW=$(uuidgen)
+          security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN_PATH"
+          echo "$APPLE_DEV_ID_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_DEV_ID_CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PW" "$KEYCHAIN_PATH"
+
+          # 2. Sign the binary with hardened runtime
+          codesign --sign "$APPLE_DEV_ID_NAME" \
+                   --options runtime \
+                   --timestamp \
+                   --force \
+                   "$BIN"
+          codesign --verify --strict --verbose=2 "$BIN"
+
+          # 3. Notarize via App Store Connect API key (CI-friendly, no
+          #    app-specific password). Bare Mach-O binaries can be
+          #    notarized in a zip envelope.
+          echo "$APPLE_NOTARY_API_KEY" | base64 --decode > "$RUNNER_TEMP/notary-key.p8"
+          ZIP="$RUNNER_TEMP/workbooksd.zip"
+          ditto -c -k --keepParent "$BIN" "$ZIP"
+          xcrun notarytool submit "$ZIP" \
+            --key "$RUNNER_TEMP/notary-key.p8" \
+            --key-id "$APPLE_NOTARY_API_KEY_ID" \
+            --issuer "$APPLE_NOTARY_API_ISSUER" \
+            --wait
+          # Bare Mach-O can't be stapled; notarization is checked online
+          # by Gatekeeper at first launch.
+
+      - name: Apple signing (skipped — secrets not configured)
+        if: matrix.sign == 'apple' && env.APPLE_DEV_ID_CERT_P12 == ''
+        env:
+          APPLE_DEV_ID_CERT_P12: ${{ secrets.APPLE_DEV_ID_CERT_P12 }}
+        run: |
+          echo "::warning title=Apple signing skipped::APPLE_DEV_ID_CERT_P12 secret not set; binary will be unsigned."
+
+      # ── Windows code-signing via Microsoft Trusted Signing (conditional) ─
+      - name: Microsoft Trusted Signing (Windows)
+        if: matrix.sign == 'trusted' && env.AZURE_CLIENT_ID != ''
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.TRUSTED_SIGNING_PROFILE }}
+          files-folder: packages/workbooksd/target/${{ matrix.target }}/release
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Trusted Signing (skipped — secrets not configured)
+        if: matrix.sign == 'trusted' && env.AZURE_CLIENT_ID == ''
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        shell: bash
+        run: |
+          echo "::warning title=Microsoft Trusted Signing skipped::AZURE_CLIENT_ID secret not set; binary will be unsigned."
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: workbooksd-${{ matrix.target }}
+          path: packages/workbooksd/target/${{ matrix.target }}/release/workbooksd${{ matrix.ext || '' }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Aggregate + commit binaries
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Stage binaries into site/src/dl/
+        run: |
+          set -eux
+          mkdir -p site/src/dl
+          for target in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu; do
+            src="artifacts/workbooksd-$target/workbooksd"
+            dst="site/src/dl/workbooksd-$target"
+            if [ -f "$src" ]; then
+              cp "$src" "$dst"
+              chmod +x "$dst"
+            fi
+          done
+          # Windows artifact has .exe suffix
+          if [ -f artifacts/workbooksd-x86_64-pc-windows-msvc/workbooksd.exe ]; then
+            cp artifacts/workbooksd-x86_64-pc-windows-msvc/workbooksd.exe \
+               site/src/dl/workbooksd-x86_64-pc-windows-msvc.exe
+          fi
+          ls -la site/src/dl/
+
+      - name: Generate sha256.txt manifest
+        working-directory: site/src/dl
+        run: |
+          sha256sum workbooksd-* | sort > sha256.txt
+          echo "--- sha256.txt ---"
+          cat sha256.txt
+
+      - name: Commit + push
+        run: |
+          set -eux
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site/src/dl/
+          if git diff --cached --quiet; then
+            echo "no binary changes to commit"
+            exit 0
+          fi
+          version="${GITHUB_REF_NAME:-${{ github.event.inputs.version }}}"
+          git commit -m "release: workbooksd binaries for $version (signed + checksummed)"
+          git push origin HEAD:main
+
+  github-release:
+    name: GitHub Release (backup)
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/workbooksd-v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Rename artifacts for release
+        run: |
+          set -eux
+          mkdir release
+          for target in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu; do
+            src="artifacts/workbooksd-$target/workbooksd"
+            if [ -f "$src" ]; then
+              cp "$src" "release/workbooksd-$target"
+              chmod +x "release/workbooksd-$target"
+            fi
+          done
+          if [ -f artifacts/workbooksd-x86_64-pc-windows-msvc/workbooksd.exe ]; then
+            cp artifacts/workbooksd-x86_64-pc-windows-msvc/workbooksd.exe \
+               release/workbooksd-x86_64-pc-windows-msvc.exe
+          fi
+          ( cd release && sha256sum workbooksd-* > sha256.txt )
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          fail_on_unmatched_files: false
+          generate_release_notes: true

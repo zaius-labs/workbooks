@@ -1,8 +1,0 @@
-{
-  "name": "@work.books/runner",
-  "version": "0.1.0-pre.1",
-  "private": true,
-  "description": "Workbook polyglot runner — Cosmopolitan APE binary that hosts a workbook over localhost and saves it back to itself",
-  "type": "module",
-  "files": ["src", "scripts", "README.md"]
-}

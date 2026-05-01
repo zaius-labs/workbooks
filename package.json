@@ -5,9 +5,9 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/zaius-labs/workbooks.git"
+    "url": "https://github.com/shinyobjectz-sh/workbooks.git"
   },
-  "homepage": "https://github.com/zaius-labs/workbooks",
+  "homepage": "https://workbooks.sh",
   "workspaces": [
     "packages/*",
     "examples/svelte-app",

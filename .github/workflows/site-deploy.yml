@@ -1,0 +1,59 @@
+name: workbooks.sh deploy
+
+# Auto-deploy the workbooks-site lander + install.sh + dl/ binaries to
+# Cloudflare Pages (project: workbooks-shell, custom domain workbooks.sh).
+#
+# Triggers:
+#   - push to main affecting site/** (the lander itself)
+#   - push to main affecting packages/workbooksd/install/** (install.sh
+#     gets copied into dist/install at build time, so changes there must
+#     re-deploy)
+#   - workflow_dispatch for manual rolls
+#
+# Path filters keep this from re-running on every unrelated commit. The
+# release workflow (workbooksd-release.yml) commits binaries into
+# site/src/dl/, which lands in the path filter and
+# transparently redeploys the site with the fresh binaries.
+#
+# Required secrets (already set on this repo for signal-web):
+#   - CLOUDFLARE_API_TOKEN  (Pages:Edit + Account:Read)
+#   - CLOUDFLARE_ACCOUNT_ID
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - packages/workbooksd/install/**
+      - .github/workflows/site-deploy.yml
+  workflow_dispatch: {}
+
+concurrency:
+  group: workbooks-site-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build + deploy to workbooks.sh
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Build (copy src + install.sh into dist/)
+        working-directory: site
+        run: bun run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: site
+          command: pages deploy dist --project-name=workbooks-shell --branch=main
