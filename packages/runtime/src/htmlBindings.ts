@@ -241,7 +241,7 @@ export interface WorkbookMemory {
  */
 export interface WorkbookDoc {
   id: string;
-  format: "loro";
+  format: "loro" | "yjs";
   /**
    * Optional shallow-snapshot history horizon — the number of
    * recent ops to retain in full DAG form before older history is
@@ -404,7 +404,7 @@ const MAX_MEMORY_BLOCKS = 16;
 /** `<wb-doc>` caps. Even tighter — a workbook with many CRDT docs is
  *  unusual, and each doc carries hierarchical state that scales fast. */
 const MAX_DOC_BLOCKS = 8;
-const ALLOWED_DOC_FORMATS = new Set<WorkbookDoc["format"]>(["loro"]);
+const ALLOWED_DOC_FORMATS = new Set<WorkbookDoc["format"]>(["loro", "yjs"]);
 
 /** `<wb-history>` caps. A workbook should have at most one history
  *  block (the chain of commits that produced it). The cap is 2 to
