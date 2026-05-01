@@ -131,7 +131,20 @@ export function bindYjsAutoEmit(
   opts: YjsBindOptions,
 ): () => void {
   const target = opts.target ?? "composition";
-  let lastVector = opts.Y.encodeStateVector(opts.doc);
+  // CRITICAL: the FIRST capture must be a full-state update, not a
+  // delta from the doc's current state vector. Why: when
+  // bindYjsAutoEmit fires, the host (e.g. colorwave) has already
+  // written state to the Y.Doc (wb.text initial values, module-load
+  // wb.* primitives, etc.). If we captured a delta from the
+  // CURRENT vector, every subsequent delta would reference items
+  // that exist in THIS doc but not in a fresh doc doing replay —
+  // the items get queued as pending and never apply. State
+  // silently fails to hydrate. (`new Uint8Array()` is NOT the empty
+  // state vector — yjs's varint decoder errors on zero-length input.
+  // Pass undefined to mean "encode full state".)
+  //
+  // After the first capture, subsequent deltas chain off it normally.
+  let lastVector: Uint8Array | undefined = undefined;
   const handler = () => {
     // Compute the diff since the last commit and emit it.
     const update = opts.Y.encodeStateAsUpdateV2(opts.doc, lastVector);
