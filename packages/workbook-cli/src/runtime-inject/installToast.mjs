@@ -58,6 +58,55 @@
   const KEY = "wb.installToast.dismissed";
   try { if (sessionStorage.getItem(KEY)) return; } catch { /* private mode */ }
 
+  // Self-redirect: if we're on file:// (or any non-daemon origin) but
+  // workbooksd is reachable on localhost, hand it our disk path and
+  // navigate to the daemon URL it mints. This is what makes the file
+  // truly self-editing — Launch Services / OS file associations are
+  // bypassed entirely; the page itself bootstraps into a save-capable
+  // session.
+  //
+  // Falls through to the install toast on any failure (no daemon, CORS
+  // blocked, fetch error). One-shot per page load — no retry loop.
+  //
+  // Loop guard: once the user dismisses, we don't redirect either —
+  // sessionStorage check above already covers it. Also guard against
+  // bouncing back: if location.search includes ?wb-no-redirect we
+  // skip the probe (lets users escape if something goes sideways).
+  if (location.protocol === "file:" && !/[?&]wb-no-redirect\b/.test(location.search)) {
+    // file:// gives us location.pathname = /Users/.../foo.workbook.html
+    // (URL-encoded). Decode for the daemon. On Windows this is
+    // /C:/Users/... — strip the leading slash so it looks like a real
+    // path. The daemon canonicalizes either way, so a stray leading
+    // slash is harmless on macOS.
+    let diskPath;
+    try { diskPath = decodeURIComponent(location.pathname); } catch { diskPath = location.pathname; }
+    if (/^\/[A-Za-z]:\//.test(diskPath)) diskPath = diskPath.slice(1); // Windows
+    if (diskPath.endsWith(".workbook.html")) {
+      // Don't await — show toast immediately as "trying"; redirect on success.
+      (async () => {
+        try {
+          const probe = await fetch("http://127.0.0.1:47119/health", { cache: "no-store" });
+          if (!probe.ok) throw new Error("health " + probe.status);
+          const r = await fetch("http://127.0.0.1:47119/open", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ path: diskPath }),
+          });
+          if (!r.ok) throw new Error("/open " + r.status);
+          const j = await r.json();
+          if (j && typeof j.url === "string" && j.url.startsWith("http://127.0.0.1:47119/wb/")) {
+            location.replace(j.url);
+            return; // page is going away
+          }
+          throw new Error("bad daemon response");
+        } catch (e) {
+          // Silent fall-through to the install toast below.
+          console.log("[wb] daemon redirect skipped:", e && e.message);
+        }
+      })();
+    }
+  }
+
   const cfg = Object.assign(
     {
       title: "Workbooks not installed",

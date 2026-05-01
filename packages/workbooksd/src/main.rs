@@ -213,11 +213,20 @@ async fn daemon_main() {
 
     let state = AppState::default();
 
-    // Permissive CORS for /health only — file:// pages probing for the
-    // daemon need it. Bound workbook routes live on a separate Router
-    // with no CORS layer (same-origin from the browser's perspective).
-    let health_router = Router::new()
+    // Permissive CORS for /health AND /open — both are public-facing
+    // endpoints that file:// pages need to call. /health is the
+    // presence probe; /open is what self-redirecting workbooks POST
+    // to ("here's my disk path, give me a daemon URL"). Bound /wb/*
+    // routes stay same-origin (page is loaded under the daemon's
+    // origin already, no CORS needed).
+    //
+    // /open from any origin is fine: it only mints a token bound to
+    // a path the caller already chose. It never leaks data — the
+    // attack surface is "any local process or page can ask the
+    // daemon to bind a path" which it could already do via curl.
+    let public_router = Router::new()
         .route("/health", get(health))
+        .route("/open", post(open_handler))
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
@@ -233,8 +242,7 @@ async fn daemon_main() {
     const SAVE_BODY_LIMIT: usize = 256 * 1024 * 1024;
 
     let app = Router::new()
-        .merge(health_router)
-        .route("/open", post(open_handler))
+        .merge(public_router)
         .route("/wb/:token", get(redirect_to_slash))
         .route("/wb/:token/", get(serve_workbook))
         .route(
