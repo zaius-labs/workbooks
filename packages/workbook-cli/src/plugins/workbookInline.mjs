@@ -19,6 +19,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolveRuntime, readRuntimeAssets } from "../util/runtime.mjs";
+import { checkVariant } from "../util/variantCheck.mjs";
 import {
   escapeForScript,
   makeSentinels,
@@ -454,6 +455,29 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
 
       for (const file of htmlFiles) {
         let src = await fs.readFile(file, "utf8");
+
+        // Variant-coverage check — runs against the bundled JS
+        // BEFORE the wasm bytes are injected (so we don't grep our
+        // own d.ts strings). Best-effort regex match; warnings only,
+        // never blocks the build. Disable per-workbook with
+        // `wasmVariantCheck: false` (e.g. intentional feature-
+        // detected fallbacks).
+        if (config.wasmVariantCheck !== false) {
+          try {
+            const { warnings } = await checkVariant({
+              runtimeDir: runtime.runtimeWasm,
+              variant: config.wasmVariant ?? "default",
+              bundleSrc: src,
+            });
+            for (const w of warnings) {
+              process.stderr.write(`[workbook] ${w}\n`);
+            }
+          } catch (e) {
+            // Don't fail the build on a buggy analyzer.
+            process.stderr.write(`[workbook] variant check skipped: ${e?.message ?? e}\n`);
+          }
+        }
+
         // Anchor on SLOT_PORTABLE if present (the transformIndexHtml
         // pre-pass put it there). Falls back to a </head> regex when
         // the source HTML never went through transformIndexHtml.

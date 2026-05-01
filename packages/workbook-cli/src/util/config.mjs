@@ -167,6 +167,12 @@ export async function loadConfig(projectDir) {
       `workbook.config: 'wasmVariant' must be one of: ${[...VALID_WASM_VARIANTS].join(", ")} (got '${wasmVariant}')`,
     );
   }
+  // Variant-coverage check is on by default — warns at build time
+  // when the chosen variant doesn't ship a symbol the bundle
+  // references. Workbooks that intentionally feature-detect against
+  // optional surfaces (e.g. `if (wasm.arrowEncodeJsonRows) { ... }`)
+  // can opt out with `wasmVariantCheck: false` to silence.
+  const wasmVariantCheck = cfg.wasmVariantCheck !== false;
 
   return {
     root,
@@ -181,6 +187,7 @@ export async function loadConfig(projectDir) {
     icons,                      // null means "use the default workbook glyph"
     runtimeFeatures: cfg.runtimeFeatures ?? [],
     wasmVariant,
+    wasmVariantCheck,
     vite: cfg.vite ?? {},
     // Inline assets unless explicitly disabled; --no-wasm flag flips this.
     inlineRuntime: cfg.inlineRuntime ?? true,
