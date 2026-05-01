@@ -77,23 +77,23 @@ fetch() {
   fi
 }
 
-# Verify the SHA-256 of $1 matches the entry for $(basename $1) in the
-# manifest fetched from $WORKBOOKS_DOMAIN/dl/sha256.txt. Aborts the
-# install on mismatch — corrupted, MITM'd, or simply unrecognized
-# binaries are refused.
+# Verify the SHA-256 of $1 matches the entry for $2 (the canonical
+# asset name, e.g. workbooksd-aarch64-apple-darwin) in the manifest
+# fetched from $WORKBOOKS_DOMAIN/dl/sha256.txt. Aborts on mismatch —
+# corrupted, MITM'd, or unrecognized binaries are refused.
 verify_checksum() {
   bin="$1"
-  name="$(basename "$bin")"
+  expected_name="$2"
   manifest="$bin.sha256.manifest"
   fetch "https://$WORKBOOKS_DOMAIN/dl/sha256.txt" "$manifest" || {
     say "[install] warning: could not fetch sha256 manifest; skipping verification"
     rm -f "$manifest"
     return 0
   }
-  expected=$(awk -v n="$name" '$2 == n { print $1 }' "$manifest")
+  expected=$(awk -v n="$expected_name" '$2 == n { print $1 }' "$manifest")
   rm -f "$manifest"
   if [ -z "$expected" ]; then
-    die "no checksum entry for $name in /dl/sha256.txt — refusing to install"
+    die "no checksum entry for $expected_name in /dl/sha256.txt — refusing to install"
   fi
   if command -v shasum >/dev/null 2>&1; then
     actual=$(shasum -a 256 "$bin" | awk '{print $1}')
@@ -104,19 +104,20 @@ verify_checksum() {
   fi
   if [ "$expected" != "$actual" ]; then
     rm -f "$bin"
-    die "checksum mismatch for $name (expected $expected, got $actual)"
+    die "checksum mismatch for $expected_name (expected $expected, got $actual)"
   fi
   say "[install] checksum ok ($expected)"
 }
 
 download_binary() {
   target="$1"
-  url="https://$WORKBOOKS_DOMAIN/dl/workbooksd-$target"
+  asset="workbooksd-$target"
+  url="https://$WORKBOOKS_DOMAIN/dl/$asset"
   say "[install] downloading $url"
   mkdir -p "$WORKBOOKS_BIN_DIR"
   tmp="$WORKBOOKS_BIN.tmp.$$"
   fetch "$url" "$tmp" || die "download failed: $url"
-  verify_checksum "$tmp"
+  verify_checksum "$tmp" "$asset"
   chmod +x "$tmp"
   mv "$tmp" "$WORKBOOKS_BIN"
   say "[install] binary → $WORKBOOKS_BIN"
