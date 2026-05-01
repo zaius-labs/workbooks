@@ -1,9 +1,8 @@
-
+https://github.com/user-attachments/assets/777b474b-2eac-4f2f-8c20-a34444c959f2)
 
 # Workbooks
 
 <p align="center">
-  <a href="[assets/readme-banner.mp4](https://github.com/user-attachments/assets/777b474b-2eac-4f2f-8c20-a34444c959f2)">
     <img src="assets/readme-banner-poster.jpg" alt="Workbooks — 95-second explainer (click to play)" width="100%" />
   </a>
 </p>
