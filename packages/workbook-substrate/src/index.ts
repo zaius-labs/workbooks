@@ -24,3 +24,13 @@ export type {
   SqliteSessionBindOptions,
   SqliteSessionBinding,
 } from "./mutate";
+export { compact, shouldCompact } from "./compact";
+export type { TargetEncoder, CompactOptions } from "./compact";
+export {
+  identityKeyOf,
+  keyString,
+  MemoryIdentityStore,
+  migrateIdentity,
+  gcOrphans,
+} from "./identity";
+export type { IdentityKey, IdentityStore } from "./identity";
