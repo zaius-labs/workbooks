@@ -12,6 +12,22 @@
 // rather than maintaining their own copy.
 export * from "./types";
 
+// Author-facing storage SDK — `wb.text` / `wb.collection` / `wb.value`.
+// Three applied-storage primitives backed by Yjs CRDT containers. Ported
+// from the colorwave fork (shinyobjectz-sh/workbooks); see
+// vendor/workbooks/packages/runtime/src/storage/ for the wire-format
+// contract.
+export { wb } from "./storage";
+export type {
+  WbText,
+  WbTextOptions,
+  WbCollection,
+  WbCollectionOptions,
+  WbRecord,
+  WbValue,
+  WbValueOptions,
+} from "./storage";
+
 // Authoring SDK — declarative Svelte components for composing live
 // workbooks. <WorkbookApp>, <Cell>, <Input>, <Output>, plus runes-based
 // hooks (useCell, useDAG, useRuntime, useExecutor) for advanced cases.
