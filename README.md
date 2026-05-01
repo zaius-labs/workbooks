@@ -1,10 +1,9 @@
 # Workbooks
 
 <p align="center">
-  <video src="https://github.com/shinyobjectz-sh/workbooks/raw/main/assets/readme-banner.mp4"
-         poster="assets/readme-banner-poster.jpg"
-         muted autoplay loop playsinline
-         width="100%"></video>
+  <a href="assets/readme-banner.mp4">
+    <img src="assets/readme-banner-poster.jpg" alt="Workbooks — 95-second explainer (click to play)" width="100%" />
+  </a>
 </p>
 
 Plain HTML files that save themselves.
