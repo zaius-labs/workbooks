@@ -11,11 +11,8 @@ const CACHE_NAME = "workbooks-shell-v1";
 const SHELL_ASSETS = [
   "/",
   "/index.html",
-  "/launch.html",
-  "/launcher.js",
   "/manifest.json",
-  "/icon-192.png",
-  "/icon-512.png",
+  "/icon.svg",
 ];
 
 self.addEventListener("install", (event) => {

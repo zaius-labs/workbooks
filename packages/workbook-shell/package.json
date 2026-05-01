@@ -10,7 +10,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "preview": "node scripts/serve.mjs"
+    "preview": "node scripts/serve.mjs",
+    "deploy": "wrangler pages deploy public --project-name workbooks-shell --branch main --commit-dirty=true"
   }
 }

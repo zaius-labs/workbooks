@@ -1,0 +1,11 @@
+# Cloudflare Pages headers — keep the service worker scope at /,
+# avoid caching the SW itself (so updates land), and serve the manifest
+# with the right MIME type so browsers register the PWA.
+
+/sw.js
+  Service-Worker-Allowed: /
+  Cache-Control: no-cache
+
+/manifest.json
+  Content-Type: application/manifest+json
+  Cache-Control: public, max-age=300

@@ -1,0 +1,5 @@
+# PWA file_handlers action: /launch is the action declared in manifest.json
+# but the shell's launchQueue consumer lives on /. Redirect /launch → /
+# so the launchQueue receives the file regardless of which entrypoint
+# the OS dispatched.
+/launch  /  302
