@@ -48,6 +48,12 @@ use crate::AppState;
 /// install layout.
 const WB_FETCH_SCRIPT: &str = include_str!("../static/wb-fetch.sh");
 
+/// MCP server (Node 18+ ESM, no deps) installed alongside
+/// wb-fetch. Exposes structured tools to MCP-aware hosts;
+/// translates calls into HTTP requests against the same /proxy
+/// endpoint wb-fetch uses, honoring the same permission gates.
+const WB_MCP_SERVER: &str = include_str!("../static/wb-mcp-server.mjs");
+
 /// Per-adapter installation status reported to the browser. The
 /// browser uses this to render the "Manage → Agents" UI: which
 /// providers are present, whether the user has logged in, and the
@@ -485,13 +491,19 @@ async fn run_relay(
     if let Err(e) = tokio::fs::write(&wb_fetch_path, WB_FETCH_SCRIPT).await {
         eprintln!("[acp/{}] write wb-fetch: {e}", adapter.id);
     }
+    let wb_mcp_path = bin_dir.join("wb-mcp-server");
+    if let Err(e) = tokio::fs::write(&wb_mcp_path, WB_MCP_SERVER).await {
+        eprintln!("[acp/{}] write wb-mcp-server: {e}", adapter.id);
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = tokio::fs::metadata(&wb_fetch_path).await {
-            let mut perms = meta.permissions();
-            perms.set_mode(0o755);
-            let _ = tokio::fs::set_permissions(&wb_fetch_path, perms).await;
+        for p in [&wb_fetch_path, &wb_mcp_path] {
+            if let Ok(meta) = tokio::fs::metadata(p).await {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o755);
+                let _ = tokio::fs::set_permissions(p, perms).await;
+            }
         }
     }
 

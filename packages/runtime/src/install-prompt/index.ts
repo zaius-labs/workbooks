@@ -141,14 +141,16 @@ export function detectInstallTarget(baseUrl = "https://workbooks.sh"): InstallTa
     };
   }
   if (os === "windows") {
-    // .msi/.exe TODO — release pipeline doesn't build a Windows
-    // artifact yet. Falls back to the install page.
+    // Workbooks.msi is the per-user installer (no UAC prompt) with the
+    // .workbook.html file association and Run-at-login registration
+    // baked in. Signed via Microsoft Trusted Signing in the release
+    // pipeline so SmartScreen passes silently.
     return {
       os,
       label: "Windows",
       iconSvg: WINDOWS_ICON,
-      dlUrl: null,
-      installCmd: null,
+      dlUrl: `${baseUrl}/dl/Workbooks.msi`,
+      installCmd: `iwr -useb ${baseUrl}/install.ps1 | iex`,
       installUrl,
     };
   }

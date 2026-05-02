@@ -53,6 +53,11 @@ git push origin workbooksd-v0.0.1
 The workflow at `.github/workflows/workbooksd-release.yml`:
 - Runs the matrix (macos-14, macos-13, ubuntu-latest, windows-latest)
 - Signs each platform's binary if the corresponding secret group is set
+- On Windows, also packages the signed `workbooksd.exe` into
+  `Workbooks.msi` via `cargo-wix`, then signs the MSI itself with
+  Trusted Signing
+- Ships `Workbooks.msi` + `install.ps1` + the bare `.exe` to
+  `site/src/dl/` alongside the macOS / Linux assets
 - Otherwise builds unsigned and emits a workflow warning
 
 **Required CI secrets** (none of these are needed for Path A):

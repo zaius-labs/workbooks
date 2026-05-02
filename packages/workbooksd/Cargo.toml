@@ -9,6 +9,16 @@ license = "MIT"
 name = "workbooksd"
 path = "src/main.rs"
 
+# cargo-wix config — used by the workbooksd-release workflow on the
+# Windows runner to package the signed workbooksd.exe into Workbooks.msi.
+# See packages/workbooksd/wix/main.wxs for the manifest itself. The
+# upgrade-guid here MUST match Wix/Product/UpgradeCode in main.wxs;
+# changing it would break the upgrade chain for already-installed users.
+[package.metadata.wix]
+name = "Workbooks"
+upgrade-guid = "C1F4D9A8-2B7E-4E68-9B2A-7B0E6A2C51F1"
+path-guid = "5A91F742-3D6B-4A7E-9F2D-8C1E5F4A0E62"
+
 [dependencies]
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "signal", "process", "io-util"] }

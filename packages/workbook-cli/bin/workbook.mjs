@@ -22,6 +22,9 @@ async function help() {
     "  workbook check [project]   lint a workbook source tree (--reporter=json for tools)",
     "  workbook explain <rule>    show rationale + fix for a check rule",
     "  workbook encrypt           emit an encrypted <wb-data> element from a file",
+    "  workbook seal              wrap a workbook in a Workbooks Studio envelope",
+    "  workbook unseal            (testing) decrypt a sealed workbook with a known DEK",
+    "  workbook inspect <path>    show metadata of a sealed workbook (no decryption)",
     "  workbook keygen            generate an Ed25519 author keypair for signing",
     "  workbook init <name>       scaffold a new workbook project (--template=spa)",
     "",
@@ -122,6 +125,24 @@ try {
       const flags = parseFlags(argv.slice(1));
       const { runEncrypt } = await import(path.join(cmdRoot, "encrypt.mjs"));
       await runEncrypt(flags);
+      break;
+    }
+    case "seal": {
+      const flags = parseFlags(argv.slice(1));
+      const { runSeal } = await import(path.join(cmdRoot, "seal.mjs"));
+      await runSeal(flags);
+      break;
+    }
+    case "unseal": {
+      const flags = parseFlags(argv.slice(1));
+      const { runUnseal } = await import(path.join(cmdRoot, "unseal.mjs"));
+      await runUnseal(flags);
+      break;
+    }
+    case "inspect": {
+      const flags = parseFlags(argv.slice(1));
+      const { runInspect } = await import(path.join(cmdRoot, "inspect.mjs"));
+      await runInspect(flags);
       break;
     }
     case "keygen": {

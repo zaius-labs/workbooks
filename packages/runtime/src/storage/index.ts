@@ -77,6 +77,7 @@ export { markDocHydrated, awaitHydration } from "./bootstrap";
 export {
   listPermissions,
   approvePermissions,
+  revokePermissions,
   iconUrl,
   WbPermissionsError,
 } from "./permissions";

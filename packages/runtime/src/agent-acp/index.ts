@@ -125,15 +125,33 @@ export async function seed(opts: { files: Record<string, string> }): Promise<voi
 /** Notification from the daemon's file watcher: a file in the
  *  scratch dir changed (because the agent edited it). The browser
  *  decides what to do with it — typically routes to a workbook-
- *  state setter so the change appears live in the running app. */
+ *  state setter so the change appears live in the running app.
+ *
+ *  Two shapes:
+ *   - text: `{ path, content, binary: false }` — UTF-8 file content
+ *   - binary: `{ path, content_b64, mime, size, binary: true }` —
+ *     base64-encoded bytes plus a MIME hint, e.g. when the agent
+ *     drops a generated PNG / WAV into the scratch dir. The browser
+ *     can decode the base64 and route to its asset store. */
 export interface FileChangedNotification {
   /** Relative path inside the scratch dir, e.g. "composition.html"
-   *  or "skills/fal-ai/SKILL.md". */
+   *  or "skills/fal-ai/SKILL.md" or "out/render-001.png". */
   path: string;
-  /** Full new content of the file. The daemon coalesces bursts
-   *  (open-write-rename triplets) so each notification represents
-   *  a logical "this is the current value." */
-  content: string;
+  /** Whether this notification carries text or binary content.
+   *  `false` → use `content`. `true` → use `content_b64` + `mime`. */
+  binary: boolean;
+  /** UTF-8 content. Present when `binary === false`. The daemon
+   *  coalesces bursts (open-write-rename triplets) so each
+   *  notification represents a logical "this is the current value." */
+  content?: string;
+  /** Base64-encoded bytes. Present when `binary === true`. */
+  content_b64?: string;
+  /** MIME guess from the file extension (e.g. "image/png").
+   *  Falls back to "application/octet-stream" if unrecognized. */
+  mime?: string;
+  /** Decoded byte length (helps the consumer reject oversized
+   *  files without first base64-decoding). */
+  size?: number;
 }
 
 /** GET /wb/<token>/agent/adapters — list installed ACP adapters

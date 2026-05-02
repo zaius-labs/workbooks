@@ -176,11 +176,64 @@ jobs:
         run: |
           echo "::warning title=Microsoft Trusted Signing skipped::AZURE_CLIENT_ID secret not set; binary will be unsigned."
 
+      # ── Windows: package signed exe into Workbooks.msi via cargo-wix ─
+      # Runs after the .exe has been signed (above) so the MSI embeds
+      # a signed binary. The MSI itself is then signed below.
+      - name: Install cargo-wix (Windows)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          cargo install cargo-wix --version "^0.3" --locked
+
+      - name: Build Workbooks.msi (Windows)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        working-directory: packages/workbooksd
+        shell: pwsh
+        run: |
+          # --no-build: reuse the cargo build output we already produced.
+          # --nocapture: surface candle/light output so failures are
+          #              actually debuggable in the run log.
+          cargo wix --no-build --nocapture `
+            --target x86_64-pc-windows-msvc `
+            --output target\wix\Workbooks.msi
+          if (-not (Test-Path target\wix\Workbooks.msi)) {
+            throw "MSI not produced at target\wix\Workbooks.msi"
+          }
+
+      - name: Microsoft Trusted Signing — MSI (Windows)
+        if: matrix.target == 'x86_64-pc-windows-msvc' && env.AZURE_CLIENT_ID != ''
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.TRUSTED_SIGNING_PROFILE }}
+          files-folder: packages/workbooksd/target/wix
+          files-folder-filter: msi
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: workbooksd-${{ matrix.target }}
           path: packages/workbooksd/target/${{ matrix.target }}/release/workbooksd${{ matrix.ext || '' }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload MSI artifact (Windows)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: workbooksd-msi
+          path: packages/workbooksd/target/wix/Workbooks.msi
           if-no-files-found: error
           retention-days: 7
 
@@ -213,17 +266,30 @@ jobs:
               chmod +x "$dst"
             fi
           done
-          # Windows artifact has .exe suffix
+          # Windows: bare exe (curl|sh + install.ps1 path) + MSI installer.
           if [ -f artifacts/workbooksd-x86_64-pc-windows-msvc/workbooksd.exe ]; then
             cp artifacts/workbooksd-x86_64-pc-windows-msvc/workbooksd.exe \
                site/src/dl/workbooksd-x86_64-pc-windows-msvc.exe
+          fi
+          if [ -f artifacts/workbooksd-msi/Workbooks.msi ]; then
+            cp artifacts/workbooksd-msi/Workbooks.msi site/src/dl/Workbooks.msi
+          fi
+          # Ship install.ps1 alongside install.sh so iwr|iex installs work.
+          if [ -f packages/workbooksd/install/install.ps1 ]; then
+            cp packages/workbooksd/install/install.ps1 site/src/dl/install.ps1
           fi
           ls -la site/src/dl/
 
       - name: Generate sha256.txt manifest
         working-directory: site/src/dl
         run: |
-          sha256sum workbooksd-* | sort > sha256.txt
+          # Manifest covers all installable assets so install.sh /
+          # install.ps1 can verify whichever one they downloaded.
+          if ls Workbooks.msi >/dev/null 2>&1; then
+            sha256sum workbooksd-* Workbooks.msi | sort > sha256.txt
+          else
+            sha256sum workbooksd-* | sort > sha256.txt
+          fi
           echo "--- sha256.txt ---"
           cat sha256.txt
 
@@ -268,7 +334,13 @@ jobs:
             cp artifacts/workbooksd-x86_64-pc-windows-msvc/workbooksd.exe \
                release/workbooksd-x86_64-pc-windows-msvc.exe
           fi
-          ( cd release && sha256sum workbooksd-* > sha256.txt )
+          if [ -f artifacts/workbooksd-msi/Workbooks.msi ]; then
+            cp artifacts/workbooksd-msi/Workbooks.msi release/Workbooks.msi
+          fi
+          if [ -f packages/workbooksd/install/install.ps1 ]; then
+            cp packages/workbooksd/install/install.ps1 release/install.ps1
+          fi
+          ( cd release && sha256sum workbooksd-* Workbooks.msi 2>/dev/null > sha256.txt || sha256sum workbooksd-* > sha256.txt )
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

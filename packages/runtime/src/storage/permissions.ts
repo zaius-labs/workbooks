@@ -108,6 +108,41 @@ export async function approvePermissions(ids: string[]): Promise<PermissionsList
   };
 }
 
+/** Remove the given ids from this workbook's granted list.
+ *  Idempotent. Use this when the user un-checks a permission they
+ *  previously approved — the next /secret/* or /proxy call from
+ *  this session will start refusing again. */
+export async function revokePermissions(ids: string[]): Promise<PermissionsList> {
+  const b = resolveBinding();
+  if (!b) throw new WbPermissionsError("not bound to a daemon session");
+  let res: Response;
+  try {
+    res = await fetch(`${b.origin}/wb/${b.token}/permissions/revoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+  } catch (e) {
+    throw new WbPermissionsError("daemon unreachable", e);
+  }
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new WbPermissionsError(
+      `permissions revoke: ${res.status} ${res.statusText} ${txt}`.trim(),
+    );
+  }
+  const j = (await res.json()) as {
+    requested?: PermissionDecl[];
+    granted?: string[];
+    needs_approval?: boolean;
+  };
+  return {
+    requested: j.requested ?? [],
+    granted: j.granted ?? [],
+    needsApproval: !!j.needs_approval,
+  };
+}
+
 /** Convenience for icon URLs — daemon-served, baked-in adapter
  *  glyphs. The browser keeps them out of the workbook bundle so
  *  every workbook stays light. Returns null when not bound to a

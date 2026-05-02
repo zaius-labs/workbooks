@@ -1,0 +1,153 @@
+<?xml version='1.0' encoding='windows-1252'?>
+<!--
+  Workbooks.msi — Microsoft Installer for the workbooksd daemon.
+
+  Per-user scope by design:
+    - Installs to %LocalAppData%\Programs\Workbooks (no admin / UAC prompt)
+    - Registers .workbook.html file association in HKCU
+    - Registers Run-at-login in HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+
+  This matches the macOS .pkg's user-scoped LaunchAgent pattern. A
+  per-machine MSI (HKLM, Program Files, system service) would be cleaner
+  for shared machines but requires admin every install — friction we
+  don't want for a single-user dev tool.
+
+  Built via cargo-wix in CI:
+    cargo wix --no-build --nocapture
+
+  Signed via Microsoft Trusted Signing in CI after MSI is produced.
+
+  Stable upgrade chain via UpgradeCode (DO NOT change). The Product Id
+  uses '*' so each version gets a fresh ProductCode and old versions are
+  replaced via MajorUpgrade.
+-->
+<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
+  <Product
+    Id='*'
+    Name='Workbooks'
+    UpgradeCode='C1F4D9A8-2B7E-4E68-9B2A-7B0E6A2C51F1'
+    Manufacturer='Workbooks'
+    Language='1033'
+    Codepage='1252'
+    Version='$(var.Version)'>
+
+    <Package
+      Id='*'
+      Keywords='Installer'
+      Description='Workbooks background daemon'
+      Manufacturer='Workbooks'
+      InstallerVersion='450'
+      Languages='1033'
+      Compressed='yes'
+      InstallScope='perUser'
+      SummaryCodepage='1252' />
+
+    <MediaTemplate EmbedCab='yes' />
+
+    <MajorUpgrade
+      AllowSameVersionUpgrades='yes'
+      DowngradeErrorMessage='A newer version of Workbooks is already installed.' />
+
+    <!-- Per-user install: LocalAppData, no UAC prompt. -->
+    <Property Id='ALLUSERS' Value='' />
+    <Property Id='MSIINSTALLPERUSER' Value='1' />
+
+    <!-- Directory layout. LocalAppDataFolder is %LOCALAPPDATA%. -->
+    <Directory Id='TARGETDIR' Name='SourceDir'>
+      <Directory Id='LocalAppDataFolder'>
+        <Directory Id='ProgramsFolder' Name='Programs'>
+          <Directory Id='INSTALLDIR' Name='Workbooks'>
+
+            <Component Id='WorkbooksdExe' Guid='3E8C9D27-1A84-49B0-B6F0-3D8F0F3E8E1A'>
+              <File
+                Id='WorkbooksdExeFile'
+                Source='target\$(var.Profile)\workbooksd.exe'
+                Name='workbooksd.exe'
+                KeyPath='yes'
+                Vital='yes'>
+                <!-- File association: .workbook.html → "workbooksd.exe open %1".
+                     ProgId carries a friendly name shown in the "Open with…"
+                     picker. AppId-style ProgID format is "Workbooks.Document.1". -->
+                <Shortcut
+                  Id='ExeShortcut'
+                  Directory='INSTALLDIR'
+                  Name='Workbooks Daemon'
+                  WorkingDirectory='INSTALLDIR'
+                  Advertise='no' />
+              </File>
+            </Component>
+
+            <!-- Per-user file association in HKCU\Software\Classes.
+                 Doesn't require admin and only affects the installing user. -->
+            <Component Id='FileAssociation' Guid='6F3D2E58-7F19-4E91-A6B3-2B7E91E51F62'>
+              <RegistryKey Root='HKCU' Key='Software\Classes\Workbooks.Document.1'>
+                <RegistryValue Type='string' Value='Workbook' />
+                <RegistryKey Key='shell\open\command'>
+                  <RegistryValue
+                    Type='string'
+                    Value='&quot;[INSTALLDIR]workbooksd.exe&quot; open &quot;%1&quot;' />
+                </RegistryKey>
+                <RegistryKey Key='DefaultIcon'>
+                  <RegistryValue Type='string' Value='[INSTALLDIR]workbooksd.exe,0' />
+                </RegistryKey>
+              </RegistryKey>
+              <RegistryKey Root='HKCU' Key='Software\Classes\.workbook.html'>
+                <RegistryValue Type='string' Value='Workbooks.Document.1' />
+              </RegistryKey>
+              <!-- Anchor for the component when the only "files" are
+                   registry entries. -->
+              <RegistryValue
+                Root='HKCU'
+                Key='Software\Workbooks\Install'
+                Name='FileAssociationInstalled'
+                Type='integer'
+                Value='1'
+                KeyPath='yes' />
+            </Component>
+
+            <!-- Run-at-login. HKCU\...\Run is the standard per-user
+                 startup entry — runs as the user, no service needed,
+                 no UAC. Mirrors the launchd user agent on macOS. -->
+            <Component Id='RunAtLogin' Guid='B2A05E14-9F3D-4C8C-87A4-59E1B7C0D9A7'>
+              <RegistryValue
+                Root='HKCU'
+                Key='Software\Microsoft\Windows\CurrentVersion\Run'
+                Name='Workbooksd'
+                Type='string'
+                Value='&quot;[INSTALLDIR]workbooksd.exe&quot;'
+                KeyPath='yes' />
+            </Component>
+
+          </Directory>
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <!-- All components live under one Feature so the user sees a single
+         install option (no feature tree UI). -->
+    <Feature Id='Workbooks' Title='Workbooks' Level='1'>
+      <ComponentRef Id='WorkbooksdExe' />
+      <ComponentRef Id='FileAssociation' />
+      <ComponentRef Id='RunAtLogin' />
+    </Feature>
+
+    <!-- Notify Explorer the .workbook.html association changed.
+         Without this, users see the new association only after a
+         logout/login cycle. -->
+    <CustomAction
+      Id='RefreshShellAssoc'
+      Directory='INSTALLDIR'
+      ExeCommand='[SystemFolder]cmd.exe /c "echo refresh > nul"'
+      Execute='deferred'
+      Return='ignore'
+      Impersonate='yes' />
+    <InstallExecuteSequence>
+      <Custom Action='RefreshShellAssoc' After='InstallFiles'>NOT Installed</Custom>
+    </InstallExecuteSequence>
+
+    <!-- Quiet install UI: progress bar + license. Matches the .pkg
+         "agree → install" feel without an unnecessary feature picker. -->
+    <UIRef Id='WixUI_Minimal' />
+    <WixVariable Id='WixUILicenseRtf' Value='wix\License.rtf' />
+  </Product>
+</Wix>
