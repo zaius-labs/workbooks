@@ -27,6 +27,21 @@ done; the other two take ~5 minutes in two browser tabs.
      → Generate a "Developer ID Application" cert, download, double-click
      to install into Keychain.
 
+  1b. Developer ID INSTALLER certificate (for signing the .pkg installer).
+      Same Apple developer account, but a SEPARATE cert from the
+      Application one. Bare shell scripts can't carry stapleable
+      Gatekeeper tickets, so the only Gatekeeper-friendly double-
+      clickable installer is a .pkg — and pkgs are signed with the
+      Installer cert, not the Application cert.
+
+      Verify:
+        security find-identity -p basic -v | grep "Developer ID Installer"
+
+      Generate at the same URL — pick "Developer ID Installer" this
+      time. Double-click the .cer to install. (No env-file entry
+      needed: the build script derives the Installer name from the
+      Application name by swapping "Application" → "Installer".)
+
   2. App Store Connect API key (one-time):
      - Open https://appstoreconnect.apple.com
      - Users and Access → Integrations → Team Keys

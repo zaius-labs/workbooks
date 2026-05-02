@@ -1,0 +1,65 @@
+#!/bin/sh
+# Postinstall — runs as ROOT after the .pkg unpacks files into
+# /usr/local/bin and /Applications. Two responsibilities:
+#
+#   1. Bootstrap the user-scoped launchd agent for the desktop user
+#      (NOT root). The .pkg can't write a LaunchAgent plist as a
+#      payload because its install scope is system-wide; we drop
+#      one into ~user/Library/LaunchAgents at install time instead.
+#
+#   2. Refresh Launch Services so /Applications/Workbooks.app's
+#      .workbook.html UTI is registered without requiring a logout.
+#
+# Idempotent: safe to re-run on upgrade. Existing LaunchAgent is
+# bootout'd before re-bootstrap so it picks up new binary path /
+# version.
+
+set -e
+
+CONSOLE_UID=$(stat -f%u /dev/console)
+CONSOLE_USER=$(id -un "$CONSOLE_UID" 2>/dev/null || echo root)
+CONSOLE_HOME=$(dscl . -read /Users/"$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
+[ -z "$CONSOLE_HOME" ] && CONSOLE_HOME="/Users/$CONSOLE_USER"
+
+BIN="/usr/local/bin/workbooksd"
+PLIST_DIR="$CONSOLE_HOME/Library/LaunchAgents"
+PLIST="$PLIST_DIR/sh.workbooks.workbooksd.plist"
+LOG_DIR="$CONSOLE_HOME/Library/Logs"
+LOG_FILE="$LOG_DIR/workbooksd.log"
+
+# Run as the console user where possible (for ownership); but the
+# directories live under their home, so create-as-them.
+sudo -u "$CONSOLE_USER" /bin/sh -c "mkdir -p '$PLIST_DIR' '$LOG_DIR'"
+
+# Write the plist owned by the user.
+sudo -u "$CONSOLE_USER" /bin/sh -c "cat > '$PLIST'" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>sh.workbooks.workbooksd</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$BIN</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$LOG_FILE</string>
+  <key>StandardErrorPath</key><string>$LOG_FILE</string>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>
+EOF
+
+# Reload (best-effort — bootout fails silently if not registered).
+launchctl bootout "gui/$CONSOLE_UID/sh.workbooks.workbooksd" >/dev/null 2>&1 || true
+launchctl bootstrap "gui/$CONSOLE_UID" "$PLIST" >/dev/null 2>&1 || {
+  echo "[postinstall] launchctl bootstrap failed; user may need to log out/in" >&2
+}
+
+# Launch Services refresh so /Applications/Workbooks.app's
+# .workbook.html UTI is picked up without a reboot.
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
+[ -x "$LSREGISTER" ] && "$LSREGISTER" -f /Applications/Workbooks.app >/dev/null 2>&1 || true
+
+exit 0

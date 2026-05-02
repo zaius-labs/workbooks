@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<installer-gui-script minSpecVersion="2">
+    <title>Workbooks {{VERSION}}</title>
+    <organization>sh.workbooks</organization>
+    <domains enable_localSystem="true"/>
+    <options customize="never" require-scripts="false" rootVolumeOnly="true" hostArchitectures="x86_64,arm64"/>
+    <!-- macOS 10.13 High Sierra is the lowest version we test
+         against; the daemon only needs POSIX + launchd, but the
+         keyring crate's macOS support starts there. -->
+    <volume-check>
+        <allowed-os-versions>
+            <os-version min="10.13"/>
+        </allowed-os-versions>
+    </volume-check>
+    <!-- A single component: the workbooksd .pkg built by pkgbuild. -->
+    <choices-outline>
+        <line choice="default">
+            <line choice="sh.workbooks.workbooksd"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="sh.workbooks.workbooksd" visible="false">
+        <pkg-ref id="sh.workbooks.workbooksd"/>
+    </choice>
+    <pkg-ref id="sh.workbooks.workbooksd" version="{{VERSION}}" onConclusion="none">component.pkg</pkg-ref>
+</installer-gui-script>
