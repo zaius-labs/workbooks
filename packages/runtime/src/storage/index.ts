@@ -82,3 +82,12 @@ export type {
   WbFetchRequest,
   WbFetchResponse,
 } from "./secret";
+
+// Page-side leak defenses — register/scrub/refuse layer that
+// complements the daemon's keychain isolation. Call
+// installLeakDefenses() once at app start.
+export {
+  installLeakDefenses,
+  registerSecretValue,
+  unregisterSecretValue,
+} from "./leak-defense";

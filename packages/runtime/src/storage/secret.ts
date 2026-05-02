@@ -43,7 +43,10 @@
 
 export interface WbSecretApi {
   /** Persist a secret value into the keychain under `id`. Returns once
-   *  the daemon has acknowledged. Replaces any prior value at that id. */
+   *  the daemon has acknowledged. Replaces any prior value at that id.
+   *  The value is registered with the page-side leak defense for the
+   *  duration of the call so any console.log / cross-origin fetch
+   *  that accidentally captures it gets scrubbed / refused. */
   set(id: string, value: string): Promise<void>;
   /** Remove a secret from the keychain. Idempotent — deleting a
    *  non-existent secret is a no-op. */
@@ -53,6 +56,10 @@ export interface WbSecretApi {
   list(): Promise<string[]>;
   /** Convenience helper — true if `list()` includes `id`. */
   has(id: string): Promise<boolean>;
+  /** Get a redacted preview ("••••xyz4") for UI display. Daemon
+   *  computes the masked form server-side; the page never sees the
+   *  full value. Returns null when the secret isn't set. */
+  preview(id: string): Promise<string | null>;
 }
 
 export interface WbFetchAuth {
@@ -132,12 +139,24 @@ async function expectOk(res: Response, what: string): Promise<void> {
   throw new WbSecretError(`${what}: ${res.status} ${res.statusText} ${body}`.trim());
 }
 
+import { registerSecretValue, unregisterSecretValue } from "./leak-defense";
+
 export const secret: WbSecretApi = {
   async set(id, value) {
     const b = resolveDaemonBinding();
     if (!b) throw new WbSecretError("not bound to a daemon session");
-    const res = await postJson(`${b.origin}/wb/${b.token}/secret/set`, { id, value });
-    await expectOk(res, "secret/set");
+    // Track the value with the page-side leak defense for the
+    // duration of the round-trip. Any console.log / cross-origin
+    // fetch that accidentally captures it during this window gets
+    // scrubbed or refused. Unregister in finally — even on failure
+    // the caller's local copy will be GC'd shortly.
+    registerSecretValue(value);
+    try {
+      const res = await postJson(`${b.origin}/wb/${b.token}/secret/set`, { id, value });
+      await expectOk(res, "secret/set");
+    } finally {
+      unregisterSecretValue(value);
+    }
   },
 
   async delete(id) {
@@ -164,6 +183,23 @@ export const secret: WbSecretApi = {
   async has(id) {
     const ids = await this.list();
     return ids.includes(id);
+  },
+
+  async preview(id) {
+    const b = resolveDaemonBinding();
+    if (!b) throw new WbSecretError("not bound to a daemon session");
+    let res: Response;
+    try {
+      res = await fetch(
+        `${b.origin}/wb/${b.token}/secret/preview/${encodeURIComponent(id)}`,
+      );
+    } catch (e) {
+      throw new WbSecretError("daemon unreachable", e);
+    }
+    if (res.status === 404) return null;
+    await expectOk(res, "secret/preview");
+    const json = (await res.json()) as { masked?: string };
+    return typeof json.masked === "string" ? json.masked : null;
   },
 };
 

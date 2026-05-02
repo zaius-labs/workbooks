@@ -347,6 +347,7 @@ async fn daemon_main() {
         .route("/wb/:token/secret/set", post(secret_set_handler))
         .route("/wb/:token/secret/delete", post(secret_delete_handler))
         .route("/wb/:token/secret/list", get(secret_list_handler))
+        .route("/wb/:token/secret/preview/:id", get(secret_preview_handler))
         .route(
             "/wb/:token/proxy",
             post(proxy_handler).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
@@ -955,6 +956,80 @@ async fn secret_delete_handler(
 #[derive(Serialize)]
 struct SecretListResp {
     ids: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct SecretPreviewResp {
+    masked: String,
+}
+
+/// Daemon-side reveal: return a redacted preview ("fa••••xyzy") so
+/// the UI can show "this key is set" with enough fingerprint to
+/// confirm WHICH key without exposing the full value to browser
+/// memory. Strategy:
+///   - len < 8: return all bullets, no fingerprint (too short to
+///     reveal any chars safely).
+///   - len 8–11: first 1 + bullets + last 2.
+///   - len ≥ 12: first 2 + bullets + last 4.
+fn mask_preview(value: &SecretString) -> String {
+    let v = value.expose_secret();
+    let n = v.chars().count();
+    if n < 8 {
+        return "•".repeat(n.max(4));
+    }
+    let chars: Vec<char> = v.chars().collect();
+    if n < 12 {
+        let prefix: String = chars.iter().take(1).collect();
+        let suffix: String = chars.iter().skip(n - 2).collect();
+        return format!("{prefix}••••••{suffix}");
+    }
+    let prefix: String = chars.iter().take(2).collect();
+    let suffix: String = chars.iter().skip(n - 4).collect();
+    format!("{prefix}••••••••{suffix}")
+}
+
+async fn secret_preview_handler(
+    State(state): State<AppState>,
+    AxPath((token, id)): AxPath<(String, String)>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(resp) = require_daemon_origin(&headers) {
+        return resp;
+    }
+    let path = match path_for_token(&state, &token).await {
+        Some(p) => p,
+        None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
+    };
+    if id == SECRET_INDEX_ID {
+        return (StatusCode::BAD_REQUEST, "reserved secret id").into_response();
+    }
+    let entry = match keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(&path, &id)) {
+        Ok(e) => e,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("keychain open: {e}"),
+            )
+                .into_response();
+        }
+    };
+    let value = match entry.get_password() {
+        Ok(v) => SecretString::new(v.into()),
+        Err(keyring::Error::NoEntry) => {
+            return (StatusCode::NOT_FOUND, "secret not set").into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("keychain read: {e}"),
+            )
+                .into_response();
+        }
+    };
+    let masked = mask_preview(&value);
+    // value drops here, zeroizing.
+    audit_log(&path, "secret-preview", Some(&id), None);
+    (StatusCode::OK, axum::Json(SecretPreviewResp { masked })).into_response()
 }
 
 async fn secret_list_handler(
