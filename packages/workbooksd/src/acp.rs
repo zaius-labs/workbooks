@@ -350,6 +350,20 @@ pub async fn ws_handler(
         None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
     };
 
+    // Permission gate: if the workbook DECLARED an `agents`
+    // permission and the user hasn't approved it, refuse.
+    // Workbooks that didn't declare anything pass through (legacy
+    // behavior — daemon doesn't gate workbooks built before the
+    // permissions feature).
+    if !crate::check_permission(&state, &token, "agents").await {
+        return (
+            StatusCode::FORBIDDEN,
+            "permission 'agents' is requested by this workbook but not approved. \
+             Surface the permissions dialog and have the user approve before retrying.",
+        )
+            .into_response();
+    }
+
     let adapter = match detect_adapters().into_iter().find(|a| a.id == adapter_id) {
         Some(a) => a,
         None => return (StatusCode::NOT_FOUND, "unknown adapter").into_response(),

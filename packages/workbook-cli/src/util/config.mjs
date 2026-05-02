@@ -156,6 +156,51 @@ export async function loadConfig(projectDir) {
     }
   }
 
+  // Permissions — declared by the workbook author, surfaced to the
+  // user as a one-time approval dialog the first time the daemon
+  // serves the file. Each entry needs a `reason` string explaining
+  // WHY the workbook needs the capability; the dialog quotes that
+  // string verbatim so users see plain English, not jargon.
+  //
+  // Recognized ids:
+  //   agents   — open ACP sessions to Claude Code / Codex / etc.
+  //   autosave — write-back to the .workbook.html file as the user
+  //              edits (default behavior on for save-capable apps,
+  //              but still declared so the dialog explains it)
+  //   secrets  — store + use API keys via the keychain proxy
+  //   network  — make HTTPS calls (already host-allowlisted by the
+  //              `secrets` declaration below)
+  //
+  // Workbooks that don't declare permissions get a transparent-
+  // pass — the daemon doesn't gate anything. Declaring permissions
+  // is opt-in; once you do, the daemon enforces (today: agents
+  // gate; future phases extend to the rest).
+  const permissions = {};
+  if (cfg.permissions !== undefined && cfg.permissions !== null) {
+    if (typeof cfg.permissions !== "object" || Array.isArray(cfg.permissions)) {
+      throw new Error("workbook.config: 'permissions' must be an object");
+    }
+    const KNOWN = new Set(["agents", "autosave", "secrets", "network"]);
+    for (const [id, decl] of Object.entries(cfg.permissions)) {
+      if (!KNOWN.has(id)) {
+        throw new Error(
+          `workbook.config: unknown permission id ${JSON.stringify(id)} ` +
+          `(known: ${[...KNOWN].join(", ")})`,
+        );
+      }
+      const reason = (decl && typeof decl === "object" && typeof decl.reason === "string")
+        ? decl.reason
+        : null;
+      if (!reason) {
+        throw new Error(
+          `workbook.config: permissions.${id} requires a 'reason: string' ` +
+          `explaining why this capability is needed (shown to the user).`,
+        );
+      }
+      permissions[id] = { reason };
+    }
+  }
+
   // Wasm variant — picks which pre-built slice of runtime-wasm to
   // inline. SPA-shape workbooks save megabytes by opting into a
   // smaller variant; data-app workbooks (sql/ML) need the default.
@@ -218,6 +263,7 @@ export async function loadConfig(projectDir) {
     wasmVariant,
     wasmVariantCheck,
     secrets,
+    permissions,
     vite: cfg.vite ?? {},
     // Inline assets unless explicitly disabled; --no-wasm flag flips this.
     inlineRuntime: cfg.inlineRuntime ?? true,

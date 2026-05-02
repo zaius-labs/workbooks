@@ -452,9 +452,19 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
         ? ""
         : `<meta name="wb-secrets-policy" content="${policyB64}">`;
 
+      // Permissions meta tag — same shape as secrets-policy. Daemon
+      // reads on serve to gate /agent, /secret, etc. on user
+      // approval. Hoisted out of the compression sandwich the same
+      // way (see compress.mjs::extractHeadEssentials).
+      const permsJson = JSON.stringify(config.permissions ?? {});
+      const permsB64 = Buffer.from(permsJson, "utf8").toString("base64");
+      const permsMeta = permsJson === "{}"
+        ? ""
+        : `<meta name="wb-permissions" content="${permsB64}">`;
+
       // Compose ordered blocks: save handler → install toast → portable
       // assets. Save first so Cmd+S works even if the others fail.
-      const headBlocks = [policyMeta, saveBlock, installToastBlock, `${BEGIN}\n${portableBlock}\n${END}`]
+      const headBlocks = [policyMeta, permsMeta, saveBlock, installToastBlock, `${BEGIN}\n${portableBlock}\n${END}`]
         .filter(Boolean)
         .join("\n");
       const wrapped = headBlocks;

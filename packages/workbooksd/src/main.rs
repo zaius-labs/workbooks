@@ -57,6 +57,7 @@ use axum::{
 };
 
 mod acp;
+mod permissions;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -154,6 +155,10 @@ struct Session {
     /// enforces it: a secret listed here can only be sent to one
     /// of the named hosts. Hosts support `*.example.com` wildcards.
     secrets_policy: Option<SecretsPolicy>,
+    /// Per-workbook permissions parsed from the served HTML's
+    /// `<meta name="wb-permissions">` tag. Populated by
+    /// serve_workbook; gates /agent/* and (future phases) /secret/*.
+    permissions: Option<permissions::Permissions>,
 }
 
 /// Map of secret-id → list of host patterns the daemon will splice
@@ -224,6 +229,7 @@ impl SessionStore {
             path,
             last_access: Instant::now(),
             secrets_policy: None,
+            permissions: None,
         });
         evicted
     }
@@ -254,6 +260,21 @@ impl SessionStore {
         if let Some(s) = self.map.get_mut(token) {
             s.secrets_policy = Some(policy);
         }
+    }
+
+    /// Cache the parsed permissions block on the session so the
+    /// /permissions endpoints don't re-read the file each call.
+    pub(crate) fn set_permissions(&mut self, token: &str, perms: permissions::Permissions) {
+        if let Some(s) = self.map.get_mut(token) {
+            s.permissions = Some(perms);
+        }
+    }
+
+    pub(crate) fn permissions_for(&mut self, token: &str) -> Option<permissions::Permissions> {
+        self.map.get_mut(token).and_then(|s| {
+            s.last_access = Instant::now();
+            s.permissions.clone()
+        })
     }
 }
 
@@ -324,6 +345,7 @@ async fn daemon_main() {
     let public_router = Router::new()
         .route("/health", get(health))
         .route("/open", post(open_handler))
+        .route("/icons/:id", get(icon_handler))
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
@@ -360,6 +382,8 @@ async fn daemon_main() {
             "/wb/:token/agent/seed",
             post(acp::seed_handler).layer(DefaultBodyLimit::max(32 * 1024 * 1024)),
         )
+        .route("/wb/:token/permissions", get(permissions_list_handler))
+        .route("/wb/:token/permissions/approve", post(permissions_approve_handler))
         .with_state(state);
 
     let addr: SocketAddr = format!("{BIND_HOST}:{BIND_PORT}").parse().unwrap();
@@ -379,6 +403,38 @@ async fn daemon_main() {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+// Icon serving — baked into the binary with include_str! so workbooks
+// don't have to inline Claude / Codex / native marks in every shipped
+// .workbook.html file. Pages reference them as
+// `<img src="http://127.0.0.1:47119/icons/claude.svg">` (or the
+// corresponding /icons/<id> path). Adds ~7 KB to the daemon binary
+// total. Source SVGs in packages/workbooksd/static/icons/.
+const ICON_CLAUDE: &str = include_str!("../static/icons/claude.svg");
+const ICON_CODEX: &str = include_str!("../static/icons/codex.svg");
+const ICON_NATIVE: &str = include_str!("../static/icons/native.svg");
+
+async fn icon_handler(AxPath(id): AxPath<String>) -> impl IntoResponse {
+    // Strip optional .svg extension so /icons/claude and
+    // /icons/claude.svg both resolve.
+    let key = id.trim_end_matches(".svg");
+    let body = match key {
+        "claude" => ICON_CLAUDE,
+        "codex" => ICON_CODEX,
+        "native" => ICON_NATIVE,
+        _ => return (StatusCode::NOT_FOUND, "unknown icon").into_response(),
+    };
+    (
+        StatusCode::OK,
+        [
+            ("content-type", "image/svg+xml"),
+            // 1-day cache — icons are immutable per daemon version.
+            ("cache-control", "public, max-age=86400, immutable"),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 #[derive(Deserialize, Serialize)]
@@ -436,7 +492,12 @@ async fn serve_workbook(
             // workbook without a spec / policy stays in legacy mode
             // (any HTTPS host) — Phase 3 may flip that to deny-by-default.
             let policy = parse_secrets_policy(&html);
-            state.sessions.lock().await.set_policy(&token, policy);
+            let perms = permissions::parse_from_html(&html);
+            {
+                let mut s = state.sessions.lock().await;
+                s.set_policy(&token, policy);
+                s.set_permissions(&token, perms);
+            }
 
             audit_log(&path, "serve", None, None);
 
@@ -825,6 +886,69 @@ fn acquire_lockfile() -> Result<std::fs::File, String> {
     let _ = writeln!(f, "{}", std::process::id());
     f.flush().ok();
     Ok(f)
+}
+
+// ── permissions ──────────────────────────────────────────────────
+
+async fn permissions_list_handler(
+    State(state): State<AppState>,
+    AxPath(token): AxPath<String>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(resp) = require_daemon_origin(&headers) {
+        return resp;
+    }
+    let path = match path_for_token(&state, &token).await {
+        Some(p) => p,
+        None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
+    };
+    let perms = state
+        .sessions
+        .lock()
+        .await
+        .permissions_for(&token)
+        .unwrap_or_default();
+    let listing = permissions::list_for(&path, &perms);
+    (StatusCode::OK, axum::Json(listing)).into_response()
+}
+
+async fn permissions_approve_handler(
+    State(state): State<AppState>,
+    AxPath(token): AxPath<String>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<permissions::ApproveReq>,
+) -> impl IntoResponse {
+    if let Err(resp) = require_daemon_origin(&headers) {
+        return resp;
+    }
+    let path = match path_for_token(&state, &token).await {
+        Some(p) => p,
+        None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
+    };
+    let perms = state
+        .sessions
+        .lock()
+        .await
+        .permissions_for(&token)
+        .unwrap_or_default();
+    match permissions::approve(&path, &perms, &req.ids) {
+        Ok(listing) => {
+            audit_log(&path, "permissions-approve", None, None);
+            (StatusCode::OK, axum::Json(listing)).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+/// Helper used by acp.rs: returns true if `id` is allowed for the
+/// given session token. Looks up the session's bound path + parsed
+/// permissions, calls into `permissions::is_allowed`.
+pub(crate) async fn check_permission(state: &AppState, token: &str, id: &str) -> bool {
+    let mut s = state.sessions.lock().await;
+    let Some(perms) = s.permissions_for(token) else { return true; };
+    let Some(path) = s.touch(token) else { return false; };
+    drop(s);
+    permissions::is_allowed(id, &path, &perms)
 }
 
 // ── secrets (OS keychain) ──────────────────────────────────────────
@@ -1382,7 +1506,7 @@ fn encode_base64(bytes: &[u8]) -> String {
     out
 }
 
-fn decode_base64(s: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn decode_base64(s: &str) -> Result<Vec<u8>, String> {
     fn val(c: u8) -> Result<u8, String> {
         match c {
             b'A'..=b'Z' => Ok(c - b'A'),

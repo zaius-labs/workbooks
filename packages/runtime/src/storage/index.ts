@@ -73,6 +73,15 @@ export type {
 // signal "WAL apply is done; seed-on-empty primitives may proceed."
 export { markDocHydrated, awaitHydration } from "./bootstrap";
 
+// Per-workbook permissions + daemon-served icon URLs.
+export {
+  listPermissions,
+  approvePermissions,
+  iconUrl,
+  WbPermissionsError,
+} from "./permissions";
+export type { PermissionDecl, PermissionsList } from "./permissions";
+
 // Secrets API — daemon-mediated, OS-keychain-backed.
 export { WbSecretError } from "./secret";
 export type {
