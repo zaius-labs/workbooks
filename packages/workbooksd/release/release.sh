@@ -144,7 +144,7 @@ else
     ( cd "$STAGE_DIR" && ditto -c -k --keepParent "Workbooks-$target" "$ZIP_OUT" )
 
     # Notarize the ZIP so Gatekeeper has a stapleable ticket.
-    echo "[release] notarizing $ZIP_OUT…"
+    echo "[release] notarizing ${ZIP_OUT}..."
     xcrun notarytool submit "$ZIP_OUT" \
       --key "$APPLE_NOTARY_KEY_PATH" \
       --key-id "$APPLE_NOTARY_KEY_ID" \
