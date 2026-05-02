@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 540" role="img" aria-labelledby="anatomy-title anatomy-desc">
+  <title id="anatomy-title">Anatomy of a workbook file</title>
+  <desc id="anatomy-desc">A single .workbook.html file contains the runtime, the workbook's code, and its persisted state. It opens in any browser; the runtime's save-in-place capability is what makes it different from a static page.</desc>
+  <defs>
+    <style>
+      .bg { fill: #0a0a0a; }
+      .panel { fill: #111111; stroke: #1f1f1f; stroke-width: 1; }
+      .label-mono { font: 500 13px "JetBrains Mono","SF Mono",ui-monospace,monospace; fill: #f5f5f5; letter-spacing: 0.02em; }
+      .label-mono-muted { font: 500 12px "JetBrains Mono","SF Mono",ui-monospace,monospace; fill: #6b7280; letter-spacing: 0.02em; }
+      .label-sans { font: 500 14px Inter,system-ui,sans-serif; fill: #f5f5f5; }
+      .label-meta { font: 500 11px Inter,system-ui,sans-serif; fill: #6b7280; letter-spacing: 0.06em; text-transform: uppercase; }
+      .layer { fill: #18181b; stroke: #27272a; stroke-width: 1; rx: 6; ry: 6; }
+      .layer-state { fill: #112018; stroke: #1d3a2c; stroke-width: 1; rx: 6; ry: 6; }
+      .accent { fill: #34d399; }
+      .hairline { stroke: #1f1f1f; stroke-width: 1; }
+      .arrow { stroke: #6b7280; stroke-width: 1.2; fill: none; }
+    </style>
+    <marker id="arrow-tip" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6b7280"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1200" height="540"/>
+
+  <!-- File mock -->
+  <rect class="panel" x="60" y="60" width="540" height="420" rx="10" ry="10"/>
+  <rect x="60" y="60" width="540" height="44" rx="10" ry="10" fill="#0d0d0d" stroke="#1f1f1f" stroke-width="1"/>
+  <circle cx="86" cy="82" r="5" fill="#27272a"/>
+  <circle cx="106" cy="82" r="5" fill="#27272a"/>
+  <circle cx="126" cy="82" r="5" fill="#27272a"/>
+  <text x="332" y="86" class="label-mono" text-anchor="middle">my-thing.workbook.html</text>
+
+  <!-- Layers inside -->
+  <text x="84" y="138" class="label-meta">Inlined runtime</text>
+  <rect class="layer" x="84" y="148" width="492" height="56"/>
+  <text x="100" y="174" class="label-mono">runtime  ·  yjs  ·  wasm slice</text>
+  <text x="100" y="192" class="label-mono-muted">~850 KB compressed · self-decompressing on open</text>
+
+  <text x="84" y="232" class="label-meta">Your code</text>
+  <rect class="layer" x="84" y="242" width="492" height="56"/>
+  <text x="100" y="268" class="label-mono">main.js  ·  components/  ·  styles</text>
+  <text x="100" y="286" class="label-mono-muted">bundled by `workbook build`</text>
+
+  <text x="84" y="326" class="label-meta">Persisted state</text>
+  <rect class="layer-state" x="84" y="336" width="492" height="92"/>
+  <text x="100" y="362" class="label-mono">&lt;script id="wb-meta"&gt;</text>
+  <text x="100" y="380" class="label-mono">&lt;script id="wb-snapshot:composition"&gt;</text>
+  <text x="100" y="398" class="label-mono">&lt;script id="wb-wal"&gt;…&lt;/script&gt;</text>
+  <text x="100" y="416" class="label-mono-muted">— state lives in the file. share it = ship it.</text>
+
+  <!-- Right column: properties -->
+  <text x="660" y="100" class="label-meta">A workbook is</text>
+
+  <g transform="translate(660,128)">
+    <line class="hairline" x1="0" y1="0" x2="480" y2="0"/>
+    <text x="0" y="32" class="label-sans">a single HTML file.</text>
+    <text x="0" y="56" class="label-mono-muted">Opens in any browser. Renders without anything installed.</text>
+  </g>
+
+  <g transform="translate(660,212)">
+    <line class="hairline" x1="0" y1="0" x2="480" y2="0"/>
+    <text x="0" y="32" class="label-sans">self-contained.</text>
+    <text x="0" y="56" class="label-mono-muted">Runtime, code, and persisted state — all in the file. No CDN.</text>
+  </g>
+
+  <g transform="translate(660,296)">
+    <line class="hairline" x1="0" y1="0" x2="480" y2="0"/>
+    <text x="0" y="32" class="label-sans">save-in-place capable.</text>
+    <text x="0" y="56" class="label-mono-muted">With the runtime: edit, hit save, the file on disk updates.</text>
+  </g>
+
+  <g transform="translate(660,380)">
+    <line class="hairline" x1="0" y1="0" x2="480" y2="0"/>
+    <text x="0" y="32" class="label-sans">portable.</text>
+    <text x="0" y="56" class="label-mono-muted">Email it. USB it. Drop it on a server. It just opens.</text>
+  </g>
+
+  <!-- Saved pulse on the file -->
+  <circle cx="585" cy="382" r="6" class="accent" opacity="0.7"/>
+  <text x="600" y="386" class="label-mono" fill="#34d399">saved</text>
+</svg>
