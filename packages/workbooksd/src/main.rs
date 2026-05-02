@@ -552,12 +552,37 @@ fn spawn_browser(url: &str) {
         eprintln!("[workbooksd open] WB_NO_BROWSER set; not launching browser");
         return;
     }
+
+    // WB_BROWSER pins a specific browser regardless of the system
+    // default. Useful when (a) the OS default is stale or wrong,
+    // (b) you want workbooks to open in a different browser than
+    // the system default for everything else.
+    //
+    // Value formats:
+    //   macOS:   app name or bundle id ("Comet", "Google Chrome",
+    //            "Firefox", "ai.perplexity.comet"). Forwarded as
+    //            `open -a <value> <url>`.
+    //   Linux:   absolute path to a browser binary, or a name on
+    //            $PATH ("firefox", "google-chrome"). Used directly.
+    //   Windows: absolute path to a browser executable. Replaces
+    //            the default `start` invocation.
+    let browser_override = std::env::var("WB_BROWSER").ok();
+
     #[cfg(target_os = "macos")]
-    let cmd = ("open", vec![url]);
+    let cmd: (&str, Vec<&str>) = match browser_override.as_deref() {
+        Some(app) if !app.is_empty() => ("open", vec!["-a", app, url]),
+        _ => ("open", vec![url]),
+    };
     #[cfg(target_os = "linux")]
-    let cmd = ("xdg-open", vec![url]);
+    let cmd: (&str, Vec<&str>) = match browser_override.as_deref() {
+        Some(bin) if !bin.is_empty() => (bin, vec![url]),
+        _ => ("xdg-open", vec![url]),
+    };
     #[cfg(target_os = "windows")]
-    let cmd = ("cmd", vec!["/C", "start", "", url]);
+    let cmd: (&str, Vec<&str>) = match browser_override.as_deref() {
+        Some(bin) if !bin.is_empty() => (bin, vec![url]),
+        _ => ("cmd", vec!["/C", "start", "", url]),
+    };
 
     let _ = Command::new(cmd.0)
         .args(&cmd.1)
