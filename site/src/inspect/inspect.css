@@ -90,6 +90,27 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .timeline-row:first-child { border-top: 0; }
+/* Fork points: rows whose ts matches another row's ts but with
+ * a divergent sha. Marked with a left-edge bar so the eye can
+ * skim for branches without reading every row's source list. */
+.timeline-row.timeline-fork {
+  position: relative;
+  padding-left: 0.85rem;
+}
+.timeline-row.timeline-fork::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0.55rem; bottom: 0.55rem;
+  width: 2px;
+  background: var(--fg);
+  opacity: 0.55;
+}
+.timeline-source {
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  margin-top: 0.1rem;
+}
 
 .agent-tag {
   font-size: 0.72rem;

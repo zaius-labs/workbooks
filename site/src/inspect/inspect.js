@@ -39,35 +39,69 @@ async function handleFiles(fileList) {
   const files = Array.from(fileList ?? []);
   if (files.length === 0) return;
 
-  const html = files.find((f) => /\.(html?|workbook\.html)$/i.test(f.name)) ??
-               files.find((f) => !f.name.endsWith(".c2pa"));
+  const htmlFiles = files.filter((f) => !f.name.endsWith(".c2pa"));
   const c2pa = files.find((f) => f.name.endsWith(".c2pa"));
 
   clearError();
 
-  if (!html) {
+  if (htmlFiles.length === 0) {
     showError("No .workbook.html in the drop. Add the HTML file too — the .c2pa sidecar alone doesn't carry the edit log.");
     return;
   }
 
-  let bytes;
-  try {
-    bytes = new Uint8Array(await html.arrayBuffer());
-  } catch (e) {
-    showError(`Couldn't read file: ${e?.message ?? e}`);
-    return;
+  // Parse every dropped HTML file. We then group by workbook_id —
+  // multiple drops with the same id are treated as DIVERGENT COPIES
+  // of the same workbook (e.g. user duplicated the file, edited
+  // both, wants to see what diverged). Identical sha256_after =
+  // identical save (dedupe); different sha after a common ancestor
+  // = a fork point we surface in the timeline.
+  const parsedAll = [];
+  for (const f of htmlFiles) {
+    let bytes;
+    try { bytes = new Uint8Array(await f.arrayBuffer()); }
+    catch (e) {
+      showError(`Couldn't read ${f.name}: ${e?.message ?? e}`);
+      return;
+    }
+    const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    const parsed = parseWorkbook(text);
+    parsed.fileName = f.name;
+    parsed.fileSize = f.size;
+    parsed.fileSha = await sha256Hex(bytes);
+    parsedAll.push(parsed);
   }
 
-  const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-  const parsed = parseWorkbook(text);
+  // Group by workbook_id. Files without one form their own
+  // singleton groups (each one rendered alone).
+  const groups = new Map();
+  for (const p of parsedAll) {
+    const key = p.workbook_id ?? `__no-id__${p.fileName}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  }
 
   report.hidden = false;
-  kv.file.textContent = html.name;
-  kv.size.textContent = formatBytes(html.size);
-  kv.sha.textContent = await sha256Hex(bytes);
-  kv.id.textContent = parsed.workbook_id ?? "(no wb-meta — file may predate the substrate)";
 
-  renderTimeline(parsed.entries);
+  // V1: render the FIRST group's identity in the kv card; the
+  // timeline below shows the merged view. Multi-group drops show
+  // a stacked list — each group as its own report-section.
+  // (We're showing one card per dropped pair today; this could
+  // grow into multi-card layout in a follow-up.)
+  const primaryGroup = [...groups.values()][0];
+  const primary = primaryGroup[0];
+
+  kv.file.textContent = primaryGroup.length > 1
+    ? `${primaryGroup.length} files (merged)`
+    : primary.fileName;
+  kv.size.textContent = primaryGroup.length > 1
+    ? `${formatBytes(primaryGroup.reduce((n, p) => n + p.fileSize, 0))} across ${primaryGroup.length}`
+    : formatBytes(primary.fileSize);
+  kv.sha.textContent = primaryGroup.length > 1
+    ? `${primaryGroup.length} distinct content hashes`
+    : primary.fileSha;
+  kv.id.textContent = primary.workbook_id ?? "(no wb-meta — file may predate the substrate)";
+
+  renderTimeline(mergeEntries(primaryGroup));
 
   if (c2pa) {
     await renderC2pa(c2pa);
@@ -78,6 +112,29 @@ async function handleFiles(fileList) {
   }
 
   report.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/** Merge edit-log entries across multiple files of the same
+ *  workbook_id. Dedupe by (ts, sha256_after) — identical content
+ *  saved at the same instant is a single logical save (e.g. seen
+ *  by both copies because we copied the file post-save). Sort by
+ *  ts (lexicographic on ISO 8601 = chronological). Tag each entry
+ *  with which file(s) it appeared in so the UI can highlight
+ *  fork points (same ts, different sha = a divergence). */
+function mergeEntries(group) {
+  if (group.length === 1) return group[0].entries;
+  const seen = new Map(); // key = ts + "|" + sha → entry-with-sources
+  for (const file of group) {
+    for (const e of file.entries ?? []) {
+      const key = `${e.ts}|${e.sha256_after}`;
+      if (!seen.has(key)) {
+        seen.set(key, { ...e, _sources: new Set([file.fileName]) });
+      } else {
+        seen.get(key)._sources.add(file.fileName);
+      }
+    }
+  }
+  return [...seen.values()].sort((a, b) => (a.ts ?? "").localeCompare(b.ts ?? ""));
 }
 
 function parseWorkbook(text) {
@@ -116,10 +173,37 @@ function renderTimeline(entries) {
     timelineEl.appendChild(empty);
     return;
   }
-  logMeta.textContent = `${entries.length} save${entries.length === 1 ? "" : "s"} — newest first.`;
+
+  // Detect fork points: two entries share a `ts` but have
+  // different sha256_after. That means at the same instant the
+  // workbook diverged (e.g. user edited two copies after a
+  // common ancestor, then dropped both on this page). Fork rows
+  // get a marker.
+  const forkTimestamps = new Set();
+  const byTs = new Map();
+  for (const e of entries) {
+    const arr = byTs.get(e.ts) ?? [];
+    arr.push(e);
+    byTs.set(e.ts, arr);
+  }
+  for (const [ts, arr] of byTs) {
+    const shas = new Set(arr.map((e) => e.sha256_after));
+    if (shas.size > 1) forkTimestamps.add(ts);
+  }
+
+  const totalSources = new Set();
+  for (const e of entries) for (const s of e._sources ?? []) totalSources.add(s);
+  const merged = totalSources.size > 1;
+  logMeta.textContent = merged
+    ? `${entries.length} save${entries.length === 1 ? "" : "s"} merged across ${totalSources.size} files — newest first` +
+      (forkTimestamps.size > 0 ? `, ${forkTimestamps.size} fork point${forkTimestamps.size === 1 ? "" : "s"}.` : ".")
+    : `${entries.length} save${entries.length === 1 ? "" : "s"} — newest first.`;
+
   for (const e of [...entries].reverse()) {
     const row = document.createElement("li");
     row.className = "timeline-row";
+    if (forkTimestamps.has(e.ts)) row.classList.add("timeline-fork");
+
     const ts  = document.createElement("span"); ts.textContent = (e.ts ?? "").replace("T", " ").replace("Z", "");
     const tag = document.createElement("span");
     const agent = (e.agent ?? "unknown").toLowerCase();
@@ -130,6 +214,20 @@ function renderTimeline(entries) {
     const size = document.createElement("span"); size.className = "timeline-size";
     size.textContent = typeof e.size_after === "number" ? formatBytes(e.size_after) : "";
     row.append(ts, tag, sha, size);
+
+    // Source attribution: only show when merging > 1 file. A row
+    // present in some-but-not-all sources is a divergent edit;
+    // show its origin filename(s) so the user can tell which copy
+    // it came from.
+    if (merged && e._sources && e._sources.size < totalSources.size) {
+      const src = document.createElement("div");
+      src.className = "timeline-source";
+      src.textContent = `from: ${[...e._sources].join(", ")}`;
+      // Span the full row width below the main grid line.
+      src.style.gridColumn = "1 / -1";
+      row.appendChild(src);
+    }
+
     timelineEl.appendChild(row);
   }
 }
