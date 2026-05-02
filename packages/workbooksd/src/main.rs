@@ -50,11 +50,12 @@
 use axum::{
     body::Bytes,
     extract::{DefaultBodyLimit, Path as AxPath, State},
-    http::StatusCode,
-    response::{Html, IntoResponse, Redirect},
+    http::{HeaderMap, StatusCode},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post, put},
     Router,
 };
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -143,6 +144,57 @@ struct SessionStore {
 struct Session {
     path: PathBuf,
     last_access: Instant,
+    /// Per-secret domain allowlist parsed from the workbook's
+    /// `<script id="workbook-spec">` JSON. Populated lazily on the
+    /// first /proxy / /secret request — defaults to "no policy
+    /// declared, allow any HTTPS host" so workbooks that haven't
+    /// adopted the schema keep working. Once populated, /proxy
+    /// enforces it: a secret listed here can only be sent to one
+    /// of the named hosts. Hosts support `*.example.com` wildcards.
+    secrets_policy: Option<SecretsPolicy>,
+}
+
+/// Map of secret-id → list of host patterns the daemon will splice
+/// that secret into. `None` (no entry for an id) = no domain
+/// restriction (legacy behavior). An entry with an empty domains
+/// list = blocked entirely; the secret can still be set/listed but
+/// /proxy refuses to use it. Encoded directly from
+/// `manifest.secrets` in the workbook's spec script.
+#[derive(Clone, Debug, Default)]
+struct SecretsPolicy {
+    by_id: HashMap<String, Vec<String>>,
+}
+
+impl SecretsPolicy {
+    /// Returns true if `host` matches any of the patterns declared
+    /// for `secret_id`. If the policy doesn't mention this id, the
+    /// caller decides whether to allow (legacy) or refuse (strict).
+    fn host_allowed_for(&self, secret_id: &str, host: &str) -> Option<bool> {
+        let patterns = self.by_id.get(secret_id)?;
+        if patterns.is_empty() {
+            return Some(false);
+        }
+        Some(patterns.iter().any(|pat| host_matches(pat, host)))
+    }
+}
+
+/// Glob-style host match. Rules: exact match for hostnames without
+/// `*`. `*.example.com` matches any subdomain (one or more labels)
+/// of example.com but NOT bare example.com. We use glob-match for
+/// the wildcard cases to avoid hand-rolling label-boundary checks.
+fn host_matches(pattern: &str, host: &str) -> bool {
+    let pat = pattern.to_ascii_lowercase();
+    let h = host.to_ascii_lowercase();
+    if !pat.contains('*') {
+        return pat == h;
+    }
+    // glob-match treats `*` as match-anything-including-dots, which
+    // would let `*.fal.run` accidentally match `evil.fal.run.attacker`.
+    // We anchor the match by requiring the bare suffix to match too.
+    if let Some(suffix) = pat.strip_prefix("*.") {
+        return h != suffix && h.ends_with(&format!(".{suffix}"));
+    }
+    glob_match::glob_match(&pat, &h)
 }
 
 impl SessionStore {
@@ -166,7 +218,11 @@ impl SessionStore {
         } else {
             None
         };
-        self.map.insert(token, Session { path, last_access: Instant::now() });
+        self.map.insert(token, Session {
+            path,
+            last_access: Instant::now(),
+            secrets_policy: None,
+        });
         evicted
     }
 
@@ -177,6 +233,25 @@ impl SessionStore {
             s.last_access = Instant::now();
             s.path.clone()
         })
+    }
+
+    /// Look up the per-secret domain policy for this token's
+    /// workbook. Returns None when no policy has been parsed yet
+    /// (caller falls back to legacy "any HTTPS host allowed"
+    /// behavior for that secret).
+    fn policy_for(&mut self, token: &str) -> Option<SecretsPolicy> {
+        self.map.get_mut(token).and_then(|s| {
+            s.last_access = Instant::now();
+            s.secrets_policy.clone()
+        })
+    }
+
+    /// Cache the parsed policy on the session so the next /proxy
+    /// hit doesn't re-read + re-parse the file.
+    fn set_policy(&mut self, token: &str, policy: SecretsPolicy) {
+        if let Some(s) = self.map.get_mut(token) {
+            s.secrets_policy = Some(policy);
+        }
     }
 }
 
@@ -345,7 +420,56 @@ async fn serve_workbook(
         return (StatusCode::NOT_FOUND, "unknown token").into_response();
     };
     match tokio::fs::read_to_string(&path).await {
-        Ok(html) => Html(html).into_response(),
+        Ok(html) => {
+            // Extract the per-secret domain policy from the workbook's
+            // spec script and cache it on the session. /proxy will
+            // enforce this for every outbound call. Best-effort: a
+            // workbook without a spec / policy stays in legacy mode
+            // (any HTTPS host) — Phase 3 may flip that to deny-by-default.
+            let policy = parse_secrets_policy(&html);
+            state.sessions.lock().await.set_policy(&token, policy);
+
+            audit_log(&path, "serve", None, None);
+
+            // Content-Security-Policy: scoped to what a workbook
+            // actually needs — same-origin connect (forces fetch
+            // through wb-fetch / daemon proxy), inline scripts
+            // allowed (workbooks are bundled into one file),
+            // permissive img/media (data: URIs for inlined assets,
+            // blob: for runtime), no third-party origins.
+            //
+            // `connect-src 'self'` is the load-bearing line: any
+            // page-side fetch() to an external host is refused by
+            // the browser. Combined with daemon-side domain
+            // allowlist, the agent has exactly one path out.
+            let csp = "\
+                default-src 'self' data: blob:; \
+                script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; \
+                style-src 'self' 'unsafe-inline'; \
+                font-src 'self' data:; \
+                img-src 'self' data: blob: https:; \
+                media-src 'self' data: blob:; \
+                worker-src 'self' blob:; \
+                frame-src 'self' data: blob:; \
+                connect-src 'self'; \
+                object-src 'none'; \
+                base-uri 'self'; \
+                form-action 'self'\
+            ";
+            let mut resp = Html(html).into_response();
+            resp.headers_mut()
+                .insert("content-security-policy", csp.parse().unwrap());
+            // X-Content-Type-Options stops content-type sniffing,
+            // which would let an HTML response masquerade as JS.
+            resp.headers_mut()
+                .insert("x-content-type-options", "nosniff".parse().unwrap());
+            // Referrer-Policy keeps the daemon URL (which contains
+            // the session token) from leaking to any external host
+            // a workbook image / link goes to.
+            resp.headers_mut()
+                .insert("referrer-policy", "no-referrer".parse().unwrap());
+            resp
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("read failed: {e}"))
             .into_response(),
     }
@@ -354,16 +478,289 @@ async fn serve_workbook(
 async fn save_workbook(
     State(state): State<AppState>,
     AxPath(token): AxPath<String>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
+    if let Err(resp) = require_daemon_origin(&headers) {
+        return resp;
+    }
     let Some(path) = state.sessions.lock().await.touch(&token) else {
         return (StatusCode::NOT_FOUND, "unknown token").into_response();
     };
+
+    // varlock-inspired leak scan: before persisting the file, check
+    // that none of THIS workbook's known secret values appear as a
+    // substring in the body. Catches the "agent embedded my
+    // FAL_API_KEY into composition.html" attack, which the
+    // file-as-database substrate makes plausible — composition is
+    // user-editable HTML, an LLM can output any string into it,
+    // and shared workbook files are public artifacts.
+    if let Some(matched_id) = scan_for_known_secrets(&path, &body) {
+        let msg = format!(
+            "save refused: workbook content contains the value of secret '{matched_id}'. \
+             Remove that string from the workbook before saving (or rotate the key in \
+             File → Integrations).\n"
+        );
+        audit_log(&path, "save-refused-leak", Some(&matched_id), None);
+        return (StatusCode::CONFLICT, msg).into_response();
+    }
+
     if let Err(e) = atomic_write(&path, &body).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
     }
     eprintln!("[workbooksd] saved {} ({} bytes)", path.display(), body.len());
+    audit_log(&path, "save", None, None);
     (StatusCode::OK, "saved").into_response()
+}
+
+/// Refuse any /wb/<token>/* request that isn't from the daemon's
+/// own origin. Defends against:
+///   - Token leak via Referer (a workbook navigates the user to
+///     evil.com; evil.com knows the token but Origin won't match).
+///   - CSRF: a malicious site that somehow learned a token can't
+///     forge save / secret / proxy requests.
+/// Browsers always send Origin on POST/PUT/DELETE; for GET we get
+/// it on cross-origin fetch but not on top-level navigation, which
+/// is fine because /wb/<token>/ (the document load) is the entry
+/// point, not the attack surface.
+fn require_daemon_origin(headers: &HeaderMap) -> Result<(), Response> {
+    let expected = format!("http://{BIND_HOST}:{BIND_PORT}");
+    match headers.get("origin").and_then(|v| v.to_str().ok()) {
+        Some(o) if o == expected => Ok(()),
+        // No Origin = same-origin GET / programmatic fetch with
+        // mode:"same-origin"; permissible.
+        None => Ok(()),
+        Some(other) => Err((
+            StatusCode::FORBIDDEN,
+            format!("origin {other:?} not allowed; expected {expected:?}"),
+        )
+            .into_response()),
+    }
+}
+
+/// Parse the workbook's secrets policy from the served HTML. Two
+/// sources, in priority order:
+///
+///   1. `<meta name="wb-secrets-policy" content="<base64-json>">` in
+///      the outer shell — emitted by the cli AND hoisted out of the
+///      compression sandwich by compress.mjs's extractHeadEssentials.
+///      This is the canonical source for production builds (which
+///      compress everything else).
+///
+///   2. `<script id="workbook-spec" type="application/json">{...}</script>`
+///      with `manifest.secrets` — the dev-mode / uncompressed shape.
+///      Falls back to this if no meta tag is found.
+///
+/// Returns an empty policy when neither source exists or both are
+/// malformed; caller treats that as "legacy workbook, no policy
+/// declared" and accepts any HTTPS host (transitional behavior;
+/// future versions may flip to deny-by-default).
+fn parse_secrets_policy(html: &str) -> SecretsPolicy {
+    if let Some(p) = parse_policy_from_meta(html) {
+        return p;
+    }
+    parse_policy_from_spec_script(html).unwrap_or_default()
+}
+
+fn parse_policy_from_meta(html: &str) -> Option<SecretsPolicy> {
+    // Match either content="..." or content='...'. The meta tag is
+    // small, attribute-safe, and (per compress.mjs) lives in the
+    // outer shell where we can grep it without decompressing.
+    let needle = r#"<meta name="wb-secrets-policy" content="#;
+    let start = html.find(needle)?;
+    let after = start + needle.len();
+    let quote = html.as_bytes().get(after).copied()?;
+    if quote != b'"' && quote != b'\'' {
+        return None;
+    }
+    let value_start = after + 1;
+    let close = html[value_start..].find(quote as char)?;
+    let b64 = &html[value_start..value_start + close];
+    let bytes = decode_base64(b64).ok()?;
+    let json = std::str::from_utf8(&bytes).ok()?;
+    let map: HashMap<String, serde_json::Value> = serde_json::from_str(json).ok()?;
+    let by_id = map
+        .into_iter()
+        .map(|(id, decl)| {
+            let domains = decl
+                .get("domains")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            (id, domains)
+        })
+        .collect();
+    Some(SecretsPolicy { by_id })
+}
+
+fn parse_policy_from_spec_script(html: &str) -> Option<SecretsPolicy> {
+    let start = html.find(r#"<script id="workbook-spec""#)?;
+    let after_open = html[start..].find('>').map(|i| start + i + 1)?;
+    let rel_close = html[after_open..].find("</script>")?;
+    let json = &html[after_open..after_open + rel_close];
+    let parsed: serde_json::Value = serde_json::from_str(json).ok()?;
+    let map = parsed
+        .pointer("/manifest/secrets")
+        .and_then(|v| v.as_object())?;
+    let mut by_id = HashMap::new();
+    for (id, decl) in map {
+        let domains: Vec<String> = decl
+            .get("domains")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        by_id.insert(id.clone(), domains);
+    }
+    Some(SecretsPolicy { by_id })
+}
+
+/// Scan `body` for any of THIS workbook's secret values. Returns
+/// the offending secret id on hit, or None on miss. Cheap O(n*k)
+/// substring search is fine for typical workbook sizes (≤ 50 MB)
+/// and small key counts (≤ ~10 per workbook); upgrade to
+/// Aho-Corasick if the cost ever shows up in profiles. We zeroize
+/// the secret value buffers immediately after the scan via Drop on
+/// SecretString.
+fn scan_for_known_secrets(path: &Path, body: &[u8]) -> Option<String> {
+    let ids = read_secret_index(path).ok()?;
+    for id in ids {
+        if id == SECRET_INDEX_ID {
+            continue;
+        }
+        let entry = match keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(path, &id)) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let value = match entry.get_password() {
+            Ok(v) => SecretString::new(v.into()),
+            Err(_) => continue,
+        };
+        // Skip absurdly short "secrets" that would false-positive
+        // (e.g. a 4-char token would match too many strings).
+        if value.expose_secret().len() < 8 {
+            continue;
+        }
+        if memmem(body, value.expose_secret().as_bytes()) {
+            return Some(id);
+        }
+        // Secret drops here, zeroizing.
+    }
+    None
+}
+
+/// Tiny memchr-based needle search. Avoids pulling memchr crate
+/// just for this.
+fn memmem(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return false;
+    }
+    let last = haystack.len() - needle.len();
+    for i in 0..=last {
+        if &haystack[i..i + needle.len()] == needle {
+            return true;
+        }
+    }
+    false
+}
+
+/// Append a single line to ~/Library/Logs/workbooksd-audit.log
+/// (or platform equivalent). One line per security-relevant action:
+/// session bind, secret write, secret delete, proxy call, save
+/// refused. Format: ISO8601 + path + action + optional secret-id +
+/// optional host. Never includes secret values.
+///
+/// Best-effort: if the log dir is missing or unwritable, we eat the
+/// error rather than fail the request. Fire-and-forget — no
+/// awaiting from the request handler hot path.
+fn audit_log(path: &Path, action: &str, secret_id: Option<&str>, host: Option<&str>) {
+    let line = format!(
+        "{} path={} action={} secret={} host={}\n",
+        chrono_ish_iso8601(),
+        shell_escape(&path.display().to_string()),
+        action,
+        secret_id.unwrap_or("-"),
+        host.unwrap_or("-"),
+    );
+    let log_path = audit_log_path();
+    std::thread::spawn(move || {
+        if let Some(parent) = log_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            use std::io::Write;
+            let _ = f.write_all(line.as_bytes());
+        }
+    });
+}
+
+fn audit_log_path() -> PathBuf {
+    if let Some(home) = std::env::var_os("HOME") {
+        let mut p = PathBuf::from(home);
+        #[cfg(target_os = "macos")]
+        {
+            p.push("Library/Logs");
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            p.push(".local/share/workbooksd");
+        }
+        p.push("workbooksd-audit.log");
+        return p;
+    }
+    PathBuf::from("/tmp/workbooksd-audit.log")
+}
+
+/// chrono-free ISO8601 without subseconds — enough for an audit log.
+fn chrono_ish_iso8601() -> String {
+    use std::time::SystemTime;
+    let secs = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // Convert UNIX seconds to UTC components without external deps.
+    let days = (secs / 86400) as i64;
+    let s = (secs % 86400) as u32;
+    let (h, m, sec) = (s / 3600, (s % 3600) / 60, s % 60);
+    let (y, mo, d) = ymd_from_days(days);
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{sec:02}Z")
+}
+
+/// Days since 1970-01-01 → (year, month, day) in proleptic Gregorian.
+/// Algorithm: Howard Hinnant's date library, public domain.
+fn ymd_from_days(days: i64) -> (i32, u32, u32) {
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = (yoe as i32) + (era * 400) as i32;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
+}
+
+/// Quote a path for the audit log so a path with spaces / quotes
+/// doesn't break field separation.
+fn shell_escape(s: &str) -> String {
+    if s.bytes().all(|b| b.is_ascii_alphanumeric() || b"/-_.".contains(&b)) {
+        s.to_string()
+    } else {
+        format!("{:?}", s)
+    }
 }
 
 // ── singleton lock file ─────────────────────────────────────────────
@@ -470,8 +867,12 @@ struct SecretSetReq {
 async fn secret_set_handler(
     State(state): State<AppState>,
     AxPath(token): AxPath<String>,
+    headers: HeaderMap,
     axum::Json(req): axum::Json<SecretSetReq>,
 ) -> impl IntoResponse {
+    if let Err(resp) = require_daemon_origin(&headers) {
+        return resp;
+    }
     let path = match path_for_token(&state, &token).await {
         Some(p) => p,
         None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
@@ -483,6 +884,14 @@ async fn secret_set_handler(
         )
             .into_response();
     }
+    if req.id == SECRET_INDEX_ID {
+        // The reserved index slot — refuse so a /secret/set can't
+        // corrupt the per-path id list.
+        return (StatusCode::BAD_REQUEST, "reserved secret id").into_response();
+    }
+    // Wrap incoming value in SecretString so it can't accidentally
+    // appear in panic backtraces or eprintln debug paths.
+    let value = SecretString::new(req.value.into());
     let entry = match keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(&path, &req.id)) {
         Ok(e) => e,
         Err(e) => {
@@ -493,7 +902,7 @@ async fn secret_set_handler(
                 .into_response();
         }
     };
-    if let Err(e) = entry.set_password(&req.value) {
+    if let Err(e) = entry.set_password(value.expose_secret()) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("keychain write: {e}"),
@@ -509,6 +918,7 @@ async fn secret_set_handler(
             ids.push(req.id.clone());
         }
     });
+    audit_log(&path, "secret-set", Some(&req.id), None);
     (StatusCode::OK, "ok").into_response()
 }
 
@@ -520,17 +930,25 @@ struct SecretDeleteReq {
 async fn secret_delete_handler(
     State(state): State<AppState>,
     AxPath(token): AxPath<String>,
+    headers: HeaderMap,
     axum::Json(req): axum::Json<SecretDeleteReq>,
 ) -> impl IntoResponse {
+    if let Err(resp) = require_daemon_origin(&headers) {
+        return resp;
+    }
     let path = match path_for_token(&state, &token).await {
         Some(p) => p,
         None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
     };
+    if req.id == SECRET_INDEX_ID {
+        return (StatusCode::BAD_REQUEST, "reserved secret id").into_response();
+    }
     if let Ok(entry) = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(&path, &req.id)) {
         // delete_credential returns NoEntry if it didn't exist; that's fine.
         let _ = entry.delete_credential();
     }
     let _ = upsert_secret_index(&path, |ids| ids.retain(|x| x != &req.id));
+    audit_log(&path, "secret-delete", Some(&req.id), None);
     (StatusCode::OK, "ok").into_response()
 }
 
@@ -542,12 +960,22 @@ struct SecretListResp {
 async fn secret_list_handler(
     State(state): State<AppState>,
     AxPath(token): AxPath<String>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
+    if let Err(resp) = require_daemon_origin(&headers) {
+        return resp;
+    }
     let path = match path_for_token(&state, &token).await {
         Some(p) => p,
         None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
     };
-    let ids = read_secret_index(&path).unwrap_or_default();
+    // Filter out the reserved index id from the response — it's
+    // an implementation detail, not a user-set secret.
+    let ids: Vec<String> = read_secret_index(&path)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|x| x != SECRET_INDEX_ID)
+        .collect();
     (StatusCode::OK, axum::Json(SecretListResp { ids })).into_response()
 }
 
@@ -635,8 +1063,12 @@ struct ProxyResp {
 async fn proxy_handler(
     State(state): State<AppState>,
     AxPath(token): AxPath<String>,
+    headers: HeaderMap,
     axum::Json(req): axum::Json<ProxyReq>,
 ) -> impl IntoResponse {
+    if let Err(resp) = require_daemon_origin(&headers) {
+        return resp;
+    }
     let path = match path_for_token(&state, &token).await {
         Some(p) => p,
         None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
@@ -650,9 +1082,40 @@ async fn proxy_handler(
     if parsed.scheme() != "https" {
         return (StatusCode::BAD_REQUEST, "only https:// urls allowed").into_response();
     }
-    // Phase 2 will validate the host against the workbook config's
-    // declared allowlist. For now, accept any HTTPS host so we can
-    // ship the secrets refactor without blocking on schema work.
+    let upstream_host = match parsed.host_str() {
+        Some(h) => h.to_string(),
+        None => return (StatusCode::BAD_REQUEST, "url has no host").into_response(),
+    };
+
+    // Domain allowlist enforcement. The session's policy was parsed
+    // from the workbook's spec script when it was served. If the
+    // policy declares this secret_id, the upstream host MUST match
+    // one of the patterns. If the policy doesn't mention the id,
+    // legacy fallback: any HTTPS host (will tighten in a future
+    // release once every workbook has migrated to declared policies).
+    if let Some(auth) = &req.auth {
+        let policy = state.sessions.lock().await.policy_for(&token);
+        if let Some(p) = policy.as_ref() {
+            if let Some(allowed) = p.host_allowed_for(&auth.secret_id, &upstream_host) {
+                if !allowed {
+                    audit_log(
+                        &path,
+                        "proxy-refused-domain",
+                        Some(&auth.secret_id),
+                        Some(&upstream_host),
+                    );
+                    return (
+                        StatusCode::FORBIDDEN,
+                        format!(
+                            "secret '{}' is not allowed to be sent to {} (per workbook config)",
+                            auth.secret_id, upstream_host,
+                        ),
+                    )
+                        .into_response();
+                }
+            }
+        }
+    }
 
     let method = match reqwest::Method::from_bytes(req.method.as_bytes()) {
         Ok(m) => m,
@@ -699,8 +1162,11 @@ async fn proxy_handler(
                     .into_response();
             }
         };
-        let value = match entry.get_password() {
-            Ok(v) => v,
+        // Wrap the keychain read in SecretString so the value can't
+        // accidentally surface in a panic backtrace, eprintln, or
+        // unintended Debug derive. Drop zeroizes the buffer.
+        let value: SecretString = match entry.get_password() {
+            Ok(v) => SecretString::new(v.into()),
             Err(keyring::Error::NoEntry) => {
                 return (
                     StatusCode::BAD_REQUEST,
@@ -716,12 +1182,19 @@ async fn proxy_handler(
                     .into_response();
             }
         };
-        let formatted = auth
+        let formatted: SecretString = auth
             .format
             .as_deref()
             .unwrap_or("{value}")
-            .replace("{value}", &value);
-        builder = builder.header(auth.header_name.as_str(), formatted);
+            .replace("{value}", value.expose_secret())
+            .into();
+        // Move into the request builder; the SecretString in
+        // `formatted` drops at the end of this scope and zeroizes.
+        builder = builder.header(auth.header_name.as_str(), formatted.expose_secret());
+        audit_log(&path, "proxy", Some(&auth.secret_id), Some(&upstream_host));
+    } else {
+        // Unauth'd proxy call — still log so audit trail is complete.
+        audit_log(&path, "proxy-noauth", None, Some(&upstream_host));
     }
 
     if let Some(body) = req.body {

@@ -46,11 +46,16 @@ function extractHeadEssentials(html) {
   const darkreaderRe = /<meta[^>]*\bname\s*=\s*["']?darkreader-lock["']?[^>]*>/i;
   const titleRe = /<title>[\s\S]*?<\/title>/i;
   const iconRe = /<link[^>]*\brel\s*=\s*["']?icon["']?[^>]*>/gi;
+  // wb-secrets-policy is read by workbooksd at serve time to enforce
+  // the per-secret host allowlist. MUST stay in the outer shell so
+  // the daemon can grep it without decompressing the payload.
+  const policyRe = /<meta[^>]*\bname\s*=\s*["']?wb-secrets-policy["']?[^>]*>/i;
 
   const m1 = head.match(charsetRe); if (m1) out.push(m1[0]);
   const m2 = head.match(viewportRe); if (m2) out.push(m2[0]);
   const m3 = head.match(darkreaderRe); if (m3) out.push(m3[0]);
   const m4 = head.match(titleRe); if (m4) out.push(m4[0]);
+  const m5 = head.match(policyRe); if (m5) out.push(m5[0]);
   const icons = head.match(iconRe); if (icons) out.push(...icons);
 
   return { langAttr, headTags: out.join("\n  ") };

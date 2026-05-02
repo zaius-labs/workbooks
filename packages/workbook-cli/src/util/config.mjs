@@ -174,6 +174,35 @@ export async function loadConfig(projectDir) {
   // can opt out with `wasmVariantCheck: false` to silence.
   const wasmVariantCheck = cfg.wasmVariantCheck !== false;
 
+  // Secrets policy — declares which integration keys the workbook
+  // uses and which HTTPS hosts each one is allowed to be sent to.
+  // Baked into the workbook-spec script at build time and enforced
+  // at runtime by workbooksd's /proxy endpoint. Secrets without a
+  // declaration here are still set/usable but accept any HTTPS
+  // host (legacy mode); declaring a domain list locks the secret
+  // to those hosts and refuses everything else.
+  //
+  //   secrets: {
+  //     FAL_API_KEY:       { domains: ["fal.run", "*.fal.run"] },
+  //     ELEVENLABS_API_KEY:{ domains: ["api.elevenlabs.io"] },
+  //   }
+  const secrets = {};
+  if (cfg.secrets !== undefined && cfg.secrets !== null) {
+    if (typeof cfg.secrets !== "object" || Array.isArray(cfg.secrets)) {
+      throw new Error("workbook.config: 'secrets' must be an object keyed by secret id");
+    }
+    for (const [id, decl] of Object.entries(cfg.secrets)) {
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) {
+        throw new Error(`workbook.config: secret id ${JSON.stringify(id)} must match [A-Za-z0-9_-]{1,64}`);
+      }
+      const domains = Array.isArray(decl?.domains) ? decl.domains : [];
+      if (!domains.every((d) => typeof d === "string" && d.length > 0)) {
+        throw new Error(`workbook.config: secrets[${id}].domains must be an array of non-empty strings`);
+      }
+      secrets[id] = { domains };
+    }
+  }
+
   return {
     root,
     configPath,
@@ -188,6 +217,7 @@ export async function loadConfig(projectDir) {
     runtimeFeatures: cfg.runtimeFeatures ?? [],
     wasmVariant,
     wasmVariantCheck,
+    secrets,
     vite: cfg.vite ?? {},
     // Inline assets unless explicitly disabled; --no-wasm flag flips this.
     inlineRuntime: cfg.inlineRuntime ?? true,

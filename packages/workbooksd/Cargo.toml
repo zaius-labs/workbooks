@@ -26,6 +26,14 @@ keyring = { version = "3", default-features = false, features = ["apple-native",
 # response without ever revealing the secret to the page. rustls
 # keeps us off OpenSSL system libs.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# Type-safe secret handling — SecretString doesn't impl Debug/Display
+# (so format! prints "[REDACTED]") and Drop zeroizes the buffer.
+# Defense against secrets leaking via panic backtraces or eprintln!.
+secrecy = "0.10"
+zeroize = "1"
+# Wildcard host matching for the per-secret domain allowlist.
+# (e.g. "*.fal.run" matches "queue.fal.run".)
+glob-match = "0.2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -437,9 +437,24 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
         makeAssetTag("bindgen-src", "text/plain", escapeForScript(assets.bindgenJs)),
         makeAssetTag("runtime-bundle-src", "text/plain", escapeForScript(assets.bundleSrc)),
       ].join("\n");
+
+      // Secrets-policy meta tag — workbooksd reads this to enforce
+      // the per-secret HTTPS host allowlist at /proxy time. We
+      // base64-encode the JSON payload so the meta-content stays
+      // attribute-safe (no quotes, no `<` to confuse the parser),
+      // and the daemon does the inverse. compress.mjs's
+      // extractHeadEssentials hoists this tag out of the
+      // compression sandwich so the daemon can find it in the
+      // served HTML's outer shell.
+      const policyJson = JSON.stringify(config.secrets ?? {});
+      const policyB64 = Buffer.from(policyJson, "utf8").toString("base64");
+      const policyMeta = policyJson === "{}"
+        ? ""
+        : `<meta name="wb-secrets-policy" content="${policyB64}">`;
+
       // Compose ordered blocks: save handler → install toast → portable
       // assets. Save first so Cmd+S works even if the others fail.
-      const headBlocks = [saveBlock, installToastBlock, `${BEGIN}\n${portableBlock}\n${END}`]
+      const headBlocks = [policyMeta, saveBlock, installToastBlock, `${BEGIN}\n${portableBlock}\n${END}`]
         .filter(Boolean)
         .join("\n");
       const wrapped = headBlocks;
@@ -535,6 +550,12 @@ function buildSpec(config) {
       version: config.version,
       env: config.env ?? {},
       runtimeFeatures: config.runtimeFeatures ?? [],
+      // Per-secret HTTPS host allowlist. workbooksd reads this at
+      // serve time and enforces in /proxy: a secret declared here
+      // can only be sent to one of the named hosts (wildcards
+      // supported, e.g. "*.fal.run"). Secrets without an entry
+      // accept any HTTPS host (legacy mode).
+      secrets: config.secrets ?? {},
     },
     cells: [],
     inputs: {},
