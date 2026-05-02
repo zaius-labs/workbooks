@@ -75,6 +75,16 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # libdbus-1-dev: required by libdbus-sys, pulled in transitively by
+      # the keyring crate's `linux-native-sync-persistent` feature. Not
+      # preinstalled on ubuntu-latest. macOS / Windows use their own
+      # native keychain backends and don't need it.
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:

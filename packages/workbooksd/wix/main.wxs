@@ -3,19 +3,17 @@
   Workbooks.msi — Microsoft Installer for the workbooksd daemon.
 
   Per-user scope by design:
-    - Installs to %LocalAppData%\Programs\Workbooks (no admin / UAC prompt)
-    - Registers .workbook.html file association in HKCU
-    - Registers Run-at-login in HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+    1. Installs to %LocalAppData%\Programs\Workbooks (no admin / UAC prompt)
+    2. Registers .workbook.html file association in HKCU
+    3. Registers Run-at-login in HKCU\Software\Microsoft\Windows\CurrentVersion\Run
 
   This matches the macOS .pkg's user-scoped LaunchAgent pattern. A
   per-machine MSI (HKLM, Program Files, system service) would be cleaner
   for shared machines but requires admin every install — friction we
   don't want for a single-user dev tool.
 
-  Built via cargo-wix in CI:
-    cargo wix --no-build --nocapture
-
-  Signed via Microsoft Trusted Signing in CI after MSI is produced.
+  Built via cargo-wix in CI (see workbooksd-release.yml). Signed via
+  Microsoft Trusted Signing after the MSI is produced.
 
   Stable upgrade chain via UpgradeCode (DO NOT change). The Product Id
   uses '*' so each version gets a fresh ProductCode and old versions are
