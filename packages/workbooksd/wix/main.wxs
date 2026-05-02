@@ -61,7 +61,7 @@
             <Component Id='WorkbooksdExe' Guid='3E8C9D27-1A84-49B0-B6F0-3D8F0F3E8E1A'>
               <File
                 Id='WorkbooksdExeFile'
-                Source='target\$(var.Profile)\workbooksd.exe'
+                Source='$(var.CargoTargetBinDir)\workbooksd.exe'
                 Name='workbooksd.exe'
                 KeyPath='yes'
                 Vital='yes'>
