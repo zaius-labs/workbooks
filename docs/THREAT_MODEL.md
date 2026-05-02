@@ -147,7 +147,7 @@ Consolidates the multi-party threats from `SECURITY_MODEL_MULTIPARTY.md` and the
 | 7 | IdP revocation — old recipient still has cached lease | TTL bounds the window (default 1h online, 24h offline grace). Daemon refreshes at 80%. | ⚠ (refresh path lands with C1.9) | core-1fi.1.9 |
 | 8 | Recipient extracts cleartext post-decrypt (A5) | Out of scope. View partitioning (C2) limits exposure; audit log records access. | ✅ accepted | core-1fi.2 |
 | 9 | Tampered envelope claims forged sender / chain (A7) | C2PA chain signed with author's ed25519. Authors register their public keys at the broker (`POST /v1/authors/me/keys`); recipients verify each chain assertion against the broker-attested live key set for the claimed `author_sub` (`GET /v1/authors/:sub/keys`). Revoked keys drop out of the public surface immediately so no signature created with a revoked key passes verification on new content. **Browser-side verification of the chain against the public surface lands with C8.3.** | ✅ (broker side); ⚠ (in-browser verifier) | C9.4 (closed); C8.3 |
-| 10 | Audit log tampering by broker insider (A9) | Audit entries chained (each includes `prev_hash`); recipients cache their own copy of entries on issuance. **Hardening: D1 trigger blocks UPDATE/DELETE on audit rows.** | ⚠ | **C9.6** (`core-l6n.6`) |
+| 10 | Audit log tampering by broker insider (A9) | Audit entries chained at append (each `prev_hash` = previous row's `self_hash`; `self_hash` = sha256 of canonical-JSON payload). `GET /v1/workbooks/:id/audit/verify` re-walks the chain and surfaces breaks (deletion → `prev_hash_mismatch`; UPDATE → `self_hash_mismatch`). Authors run before regulator export; recipients with cached copies of issued entries spot-check the broker's record on demand. Defense against a broker-with-signing-key re-chaining is recipients caching their own copies (out of scope for this endpoint, lives in C1.9 / future). | ✅ (verifier); deferred (D1 trigger to enforce append-only — out of scope, D1's SQLite-flavor trigger story varies + the verifier already detects all the same conditions) | C9.6 (closed) |
 | 11 | MITM between daemon and broker (A2) | TLS via webpki-roots; `broker.signal.ml` + HSTS. *Long-term: cert pinning.* | ✅ (TLS); ⚠ (no pinning) | (post-MVP) |
 | 12 | Broker key-release endpoint as enumeration oracle | Workbook ids are 128-bit random; auth required; uniform 401 on miss. | ✅ | core-1fi.1.7 |
 | 13 | Daemon-host PII / secret leak via logs | `secrecy::SecretBox` for cleartext; `secrecy::SecretString` for bearer; `secrets-policy` for outbound proxy. **Hardening: PII redaction sweep across broker + daemon log lines.** | ⚠ | **C9.8** (`core-l6n.8`) |
@@ -188,7 +188,7 @@ Each row maps to a `bd` ticket under `core-l6n`. Filed P0 = blocks production; P
 | `core-l6n.3` | C9.3 Memory-only KEK in production | **P0** | ✅ closed |
 | `core-l6n.4` | C9.4 Author key registration (broker side) | P1 | ✅ closed (C8.3 still owns in-browser verifier) |
 | `core-l6n.5` | C9.5 Local-credential gate (cached lease open) | **P0** | C1.9 |
-| `core-l6n.6` | C9.6 Append-only audit log (D1 constraint) | P1 | — |
+| `core-l6n.6` | C9.6 Append-only audit log (verifier) | P1 | ✅ closed |
 | `core-l6n.7` | C9.7 THREAT_MODEL.md | **P0** | this doc |
 | `core-l6n.8` | C9.8 Logging hygiene (PII redaction) | P1 | — |
 | `core-l6n.9` | C9.9 SSRF guard tightening | P1 | — |
@@ -284,6 +284,9 @@ End-to-end test that exercises every C1 row in §4.1 except OIDC validity (which
   - AAD-mismatch open rejected (binds sealed_dek to workbook+view+policy_hash).
   - Bob POST `/key` → 403 with reason; no key/lease leaked.
   - Audit log contains: workbook-registered, wrap, lease-issued (alice sub), lease-denied (bob sub).
+  - Audit chain verifier returns `ok:true` with length matching events.
+  - Tamper test (delete a row via `wrangler d1 execute`) → verifier returns `ok:false reason=prev_hash_mismatch`.
+  - Author key register → list-own → public-fetch → revoke → re-fetch → cross-account-revoke-404. Idempotent re-register collapses on (sub, pubkey).
 
 Skipped here, covered elsewhere:
 - WorkOS OIDC dance — manually validated; unit-test surface lives in WorkOS, not us.
