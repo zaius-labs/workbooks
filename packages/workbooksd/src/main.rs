@@ -55,6 +55,8 @@ use axum::{
     routing::{get, post, put},
     Router,
 };
+
+mod acp;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -78,8 +80,8 @@ const OPEN_REFILL_PER_MIN: f64 = 10.0;
 // ── shared state ────────────────────────────────────────────────────
 
 #[derive(Clone)]
-struct AppState {
-    sessions: Arc<Mutex<SessionStore>>,
+pub(crate) struct AppState {
+    pub(crate) sessions: Arc<Mutex<SessionStore>>,
     open_bucket: Arc<Mutex<TokenBucket>>,
 }
 
@@ -136,7 +138,7 @@ impl TokenBucket {
     }
 }
 
-struct SessionStore {
+pub(crate) struct SessionStore {
     cap: usize,
     map: HashMap<String, Session>,
 }
@@ -228,7 +230,7 @@ impl SessionStore {
 
     /// Look up a token's bound path and refresh its last_access stamp.
     /// Returns None if the token isn't known.
-    fn touch(&mut self, token: &str) -> Option<PathBuf> {
+    pub(crate) fn touch(&mut self, token: &str) -> Option<PathBuf> {
         self.map.get_mut(token).map(|s| {
             s.last_access = Instant::now();
             s.path.clone()
@@ -352,6 +354,8 @@ async fn daemon_main() {
             "/wb/:token/proxy",
             post(proxy_handler).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
         )
+        .route("/wb/:token/agent/adapters", get(acp::list_handler))
+        .route("/wb/:token/agent/:adapter", get(acp::ws_handler))
         .with_state(state);
 
     let addr: SocketAddr = format!("{BIND_HOST}:{BIND_PORT}").parse().unwrap();
