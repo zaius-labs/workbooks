@@ -1,6 +1,6 @@
 [package]
 name = "workbooksd"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Background daemon that serves and saves .workbook.html files for the local browser"
 license = "MIT"
@@ -38,6 +38,26 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # Defense against secrets leaking via panic backtraces or eprintln!.
 secrecy = "0.10"
 zeroize = "1"
+# SHA-256 for the ledger's content fingerprints. Pure Rust, no
+# system OpenSSL.
+sha2 = "0.10"
+hex = "0.4"
+# C2PA / Content Authenticity Initiative — produces a sidecar
+# `.workbook.html.c2pa` manifest signed by a per-machine ed25519
+# keypair. rust_native_crypto avoids OpenSSL; file_io lets the
+# Builder write sidecars directly. Crate is large (~250 transitive
+# crates) but feature-gated below the line via the daemon's c2pa
+# permission so it never runs unless the workbook opts in.
+c2pa = { version = "0.72", default-features = false, features = ["file_io", "rust_native_crypto"] }
+# Pure-Rust X.509 self-signed cert generation. The c2pa crate
+# requires a cert chain — we mint one on first use and persist it
+# in ~/Library/Application Support/sh.workbooks.workbooksd/signing/
+# so subsequent saves reuse the same identity.
+rcgen = { version = "0.13", default-features = false, features = ["pem", "crypto", "ring"] }
+# Dep already pulled in transitively by rcgen — listed explicitly
+# so the c2pa_sign module can name `time::OffsetDateTime` without
+# the indirect-import warning.
+time = "0.3"
 # Wildcard host matching for the per-secret domain allowlist.
 # (e.g. "*.fal.run" matches "queue.fal.run".)
 glob-match = "0.2"

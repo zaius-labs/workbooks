@@ -41,6 +41,13 @@ use tokio::{
 
 use crate::AppState;
 
+/// Bash script installed into <scratch>/.bin/wb-fetch on adapter
+/// spawn. The agent's Bash tool calls it directly; it builds a
+/// JSON request and POSTs to /wb/<token>/proxy. Baked at compile
+/// time so the daemon binary has no runtime dependency on the
+/// install layout.
+const WB_FETCH_SCRIPT: &str = include_str!("../static/wb-fetch.sh");
+
 /// Per-adapter installation status reported to the browser. The
 /// browser uses this to render the "Manage → Agents" UI: which
 /// providers are present, whether the user has logged in, and the
@@ -323,6 +330,10 @@ pub async fn seed_handler(
                     .into_response();
             }
         }
+        // Mark BEFORE the write so the watcher (which can fire on
+        // the same notify thread before this future returns) sees
+        // the marker and suppresses the echo event.
+        state.sessions.lock().await.mark_seeded(&token, clean.clone());
         if let Err(e) = tokio::fs::write(&dest, content).await {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -378,7 +389,7 @@ pub async fn ws_handler(
             .into_response();
     }
 
-    ws.on_upgrade(move |socket| run_relay(socket, path, token, adapter))
+    ws.on_upgrade(move |socket| run_relay(socket, path, token, adapter, state))
 }
 
 /// Per-session scratch directory.
@@ -436,6 +447,7 @@ async fn run_relay(
     workbook_path: PathBuf,
     token: String,
     adapter: AdapterStatus,
+    state: AppState,
 ) {
     // Per-session scratch dir. Replaces the workbook's parent dir
     // as the agent's cwd so the agent stays in a daemon-controlled
@@ -460,6 +472,29 @@ async fn run_relay(
     )
     .await;
 
+    // Install the wb-fetch shim into <scratch>/.bin so the adapter's
+    // Bash tool can shell out to it for daemon-mediated HTTPS. The
+    // script itself is baked into the binary with include_str!; we
+    // just write it to disk + chmod +x once per session. Contains
+    // no secret material — it just speaks our /proxy wire protocol.
+    let bin_dir = scratch_dir.join(".bin");
+    if let Err(e) = tokio::fs::create_dir_all(&bin_dir).await {
+        eprintln!("[acp/{}] mkdir {} failed: {e}", adapter.id, bin_dir.display());
+    }
+    let wb_fetch_path = bin_dir.join("wb-fetch");
+    if let Err(e) = tokio::fs::write(&wb_fetch_path, WB_FETCH_SCRIPT).await {
+        eprintln!("[acp/{}] write wb-fetch: {e}", adapter.id);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = tokio::fs::metadata(&wb_fetch_path).await {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = tokio::fs::set_permissions(&wb_fetch_path, perms).await;
+        }
+    }
+
     eprintln!(
         "[acp/{}] spawning {:?} (cwd={})",
         adapter.id,
@@ -482,8 +517,24 @@ async fn run_relay(
     // the adapter shim itself needs (node from /opt/homebrew/bin or
     // ~/.local/bin, claude from wherever the installer dropped it,
     // git, etc.). Enrich PATH so the child process — and any
-    // subprocesses IT spawns — can find what they need.
-    cmd.env("PATH", enriched_path());
+    // subprocesses IT spawns — can find what they need. Prepend
+    // <scratch>/.bin so wb-fetch is callable by bare name.
+    {
+        let mut path = std::ffi::OsString::new();
+        path.push(&bin_dir);
+        path.push(":");
+        path.push(enriched_path());
+        cmd.env("PATH", path);
+    }
+
+    // Hand the child the bits it needs to talk back to the daemon
+    // — the URL of the local listener and the session-bound token.
+    // wb-fetch reads these to authenticate /proxy calls.
+    cmd.env(
+        "WORKBOOKS_DAEMON_URL",
+        format!("http://127.0.0.1:{}", crate::BIND_PORT),
+    );
+    cmd.env("WORKBOOKS_TOKEN", &token);
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -515,6 +566,8 @@ async fn run_relay(
     let watch_dir = scratch_dir.clone();
     let watch_ws_tx = ws_tx.clone();
     let watch_id = adapter_id.clone();
+    let watch_state = state.clone();
+    let watch_token = token.clone();
     let (watch_kill_tx, mut watch_kill_rx) = mpsc::channel::<()>(1);
     let watcher_task = tokio::spawn(async move {
         let (event_tx, mut event_rx) = mpsc::unbounded_channel::<Event>();
@@ -578,17 +631,54 @@ async fn run_relay(
                         if rel.starts_with(".") || rel.contains("/.") {
                             continue; // skip dotfiles + .git internals
                         }
-                        // Only push text-y files; binary diffs need a
-                        // different transport (Phase 4).
-                        let content = match tokio::fs::read_to_string(&p).await {
-                            Ok(c) => c,
+                        // Echo suppression: if the daemon itself just
+                        // wrote this path (via /agent/seed), don't
+                        // round-trip the change back to the browser
+                        // — it'd flicker the iframe player as state
+                        // re-applies a value it just sent.
+                        if watch_state
+                            .sessions
+                            .lock()
+                            .await
+                            .was_recently_seeded(&watch_token, &rel)
+                        {
+                            continue;
+                        }
+                        // Try UTF-8 first (the common case for agent
+                        // edits to composition.html / skills md), fall
+                        // back to a base64 binary frame otherwise. The
+                        // browser side decides what to do with binary
+                        // — colorwave routes them into the assets
+                        // store; other workbooks may ignore.
+                        let frame = match tokio::fs::read(&p).await {
+                            Ok(bytes) => match std::str::from_utf8(&bytes) {
+                                Ok(text) => serde_json::json!({
+                                    "jsonrpc": "2.0",
+                                    "method": "_relay/file-changed",
+                                    "params": {
+                                        "path": rel,
+                                        "content": text,
+                                        "binary": false,
+                                    },
+                                }),
+                                Err(_) => {
+                                    let b64 = crate::encode_base64(&bytes);
+                                    let mime = mime_guess_from_ext(&rel);
+                                    serde_json::json!({
+                                        "jsonrpc": "2.0",
+                                        "method": "_relay/file-changed",
+                                        "params": {
+                                            "path": rel,
+                                            "content_b64": b64,
+                                            "mime": mime,
+                                            "size": bytes.len(),
+                                            "binary": true,
+                                        },
+                                    })
+                                }
+                            },
                             Err(_) => continue,
                         };
-                        let frame = serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "method": "_relay/file-changed",
-                            "params": { "path": rel, "content": content },
-                        });
                         let txt = match serde_json::to_string(&frame) {
                             Ok(s) => s,
                             Err(_) => continue,
@@ -721,4 +811,33 @@ fn is_payload_event(kind: &EventKind) -> bool {
         kind,
         EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_),
     )
+}
+
+/// Map a file extension to a MIME hint for binary assets that the
+/// agent dropped into the scratch dir. The browser uses this to
+/// classify the asset (image / audio / video) and to set the right
+/// Content-Type when embedding as a data URL. Unknown extensions
+/// fall back to application/octet-stream — the asset will still
+/// round-trip but the workbook may refuse to display it.
+fn mime_guess_from_ext(rel_path: &str) -> &'static str {
+    let lc = rel_path.to_ascii_lowercase();
+    let ext = lc.rsplit('.').next().unwrap_or("");
+    match ext {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "avif" => "image/avif",
+        "svg" => "image/svg+xml",
+        "mp4" | "m4v" => "video/mp4",
+        "mov" => "video/quicktime",
+        "webm" => "video/webm",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "m4a" => "audio/mp4",
+        "flac" => "audio/flac",
+        "aac" => "audio/aac",
+        _ => "application/octet-stream",
+    }
 }

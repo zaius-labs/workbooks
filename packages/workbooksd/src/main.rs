@@ -57,6 +57,9 @@ use axum::{
 };
 
 mod acp;
+mod c2pa_sign;
+mod edit_log;
+mod ledger;
 mod permissions;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
@@ -72,7 +75,7 @@ use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 
 const BIND_HOST: &str = "127.0.0.1";
-const BIND_PORT: u16 = 47119;
+pub(crate) const BIND_PORT: u16 = 47119;
 const WORKBOOK_SUFFIX: &str = ".workbook.html";
 const MAX_SESSIONS: usize = 1000;
 const OPEN_BURST: f64 = 10.0;
@@ -159,6 +162,21 @@ struct Session {
     /// `<meta name="wb-permissions">` tag. Populated by
     /// serve_workbook; gates /agent/* and (future phases) /secret/*.
     permissions: Option<permissions::Permissions>,
+    /// Substrate workbook_id, parsed once from the served file's
+    /// `<script id="wb-meta">` block. Used as the ledger's primary
+    /// key. None for fresh-build workbooks that haven't had a
+    /// first save yet — they'll get an id assigned at first save
+    /// and the daemon picks it up from the save body.
+    workbook_id: Option<String>,
+    /// Paths the daemon itself wrote to scratch (via /agent/seed),
+    /// timestamped. The notify-rs watcher consults this to suppress
+    /// echo events: when the browser pre-seeds composition.html
+    /// before a prompt, the watcher would otherwise fire a
+    /// `_relay/file-changed` for that write and the browser would
+    /// re-set composition state to the value it just sent — a no-op
+    /// in data terms but a visible flicker in the iframe player.
+    /// Entries within `SEED_ECHO_WINDOW_MS` are skipped.
+    recently_seeded: HashMap<String, Instant>,
 }
 
 /// Map of secret-id → list of host patterns the daemon will splice
@@ -230,6 +248,8 @@ impl SessionStore {
             last_access: Instant::now(),
             secrets_policy: None,
             permissions: None,
+            workbook_id: None,
+            recently_seeded: HashMap::new(),
         });
         evicted
     }
@@ -276,7 +296,52 @@ impl SessionStore {
             s.permissions.clone()
         })
     }
+
+    pub(crate) fn workbook_id_for(&mut self, token: &str) -> Option<String> {
+        self.map.get_mut(token).and_then(|s| {
+            s.last_access = Instant::now();
+            s.workbook_id.clone()
+        })
+    }
+
+    pub(crate) fn set_workbook_id(&mut self, token: &str, id: String) {
+        if let Some(s) = self.map.get_mut(token) {
+            s.workbook_id = Some(id);
+        }
+    }
+
+    /// Mark a relative scratch path as freshly written by the
+    /// daemon (i.e. via /agent/seed). The watcher consults this
+    /// inside its event-coalesce loop to skip echo notifications.
+    pub(crate) fn mark_seeded(&mut self, token: &str, rel_path: String) {
+        if let Some(s) = self.map.get_mut(token) {
+            s.recently_seeded.insert(rel_path, Instant::now());
+        }
+    }
+
+    /// Returns true if the relative path was seeded by the daemon
+    /// in the last SEED_ECHO_WINDOW_MS milliseconds. The watcher
+    /// uses this to drop echo events without firing the WS frame.
+    /// Idempotently expires stale entries during the lookup.
+    pub(crate) fn was_recently_seeded(&mut self, token: &str, rel_path: &str) -> bool {
+        let Some(s) = self.map.get_mut(token) else { return false; };
+        let now = Instant::now();
+        // Lazy GC: drop entries older than the echo window so the
+        // map doesn't grow unboundedly across long-lived sessions.
+        s.recently_seeded.retain(|_, t| {
+            now.duration_since(*t).as_millis() < SEED_ECHO_WINDOW_MS as u128
+        });
+        s.recently_seeded.contains_key(rel_path)
+    }
 }
+
+/// How long the watcher suppresses echo events for paths the
+/// daemon just wrote. Notify-rs on macOS coalesces with FSEvents
+/// which can run 100-500ms behind the syscall, so we leave a
+/// generous window. The agent's own writes still surface (it's a
+/// child process, those go through a different cwd-relative path)
+/// — only the daemon's own seed/wb-fetch installs are suppressed.
+const SEED_ECHO_WINDOW_MS: u64 = 1000;
 
 // ── entry point ─────────────────────────────────────────────────────
 
@@ -384,6 +449,9 @@ async fn daemon_main() {
         )
         .route("/wb/:token/permissions", get(permissions_list_handler))
         .route("/wb/:token/permissions/approve", post(permissions_approve_handler))
+        .route("/wb/:token/permissions/revoke", post(permissions_revoke_handler))
+        .route("/wb/:token/ledger", get(ledger_for_token_handler))
+        .route("/ledger/:workbook_id", get(ledger_by_id_handler))
         .with_state(state);
 
     let addr: SocketAddr = format!("{BIND_HOST}:{BIND_PORT}").parse().unwrap();
@@ -575,11 +643,99 @@ async fn save_workbook(
         return (StatusCode::CONFLICT, msg).into_response();
     }
 
-    if let Err(e) = atomic_write(&path, &body).await {
+    // Append an entry to the in-file edit log (`<script id=
+    // "wb-edit-log">`) BEFORE we hash + record. The log is part of
+    // the file's authenticity story and should be reflected in the
+    // sha256 we persist, otherwise the ledger and the file would
+    // disagree about "this is the bytes I last saved." Daemon-side
+    // rewrite means the page can't lie about which agent saved.
+    let agent = edit_log::normalize_agent(
+        headers.get("x-wb-agent").and_then(|v| v.to_str().ok()),
+    );
+    let final_body: Vec<u8> = if ledger::workbook_id_from_save_body(&body).is_some() {
+        use sha2::{Digest, Sha256};
+        // Hash the INCOMING body (sans new entry) and use that as the
+        // entry's sha256_after — i.e. "this is the snapshot the
+        // agent intended to commit." Stable across the rewrite.
+        let pre_hash = hex::encode(Sha256::digest(&body));
+        let entry = edit_log::Entry {
+            ts: chrono_ish_iso8601(),
+            agent: agent.clone(),
+            sha256_after: pre_hash,
+            size_after: body.len() as u64,
+        };
+        // Source the prior log from the on-disk file rather than
+        // trusting whatever the page sent. Tamper-evident: a page
+        // (or a pretend-page) can't drop entries it didn't author
+        // by omitting the script block. Disk-read fail (first save
+        // / missing file) → empty prior, normal first-save behavior.
+        let prior = match tokio::fs::read(&path).await {
+            Ok(disk) => edit_log::parse_existing(&disk),
+            Err(_) => Vec::new(),
+        };
+        edit_log::rewrite_with_log(&body, prior, entry)
+    } else {
+        body.to_vec()
+    };
+
+    // Record in the per-machine ledger BEFORE the atomic_write so a
+    // failed write is reflected in the audit trail (we can sweep
+    // dangling entries if the failure rate ever shows up). Pull
+    // workbook_id from the rewritten body's wb-meta; cache on the
+    // session for subsequent /ledger queries.
+    if let Some(id) = ledger::workbook_id_from_save_body(&final_body) {
+        use sha2::{Digest, Sha256};
+        let sha = hex::encode(Sha256::digest(&final_body));
+        if let Err(e) = ledger::record_save(&id, &path, &sha, final_body.len() as u64) {
+            eprintln!("[workbooksd] ledger record failed: {e}");
+        }
+        state.sessions.lock().await.set_workbook_id(&token, id);
+    }
+
+    if let Err(e) = atomic_write(&path, &final_body).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
     }
-    eprintln!("[workbooksd] saved {} ({} bytes)", path.display(), body.len());
-    audit_log(&path, "save", None, None);
+    eprintln!(
+        "[workbooksd] saved {} ({} bytes, agent={})",
+        path.display(),
+        final_body.len(),
+        agent,
+    );
+    audit_log(&path, "save", Some(&agent), None);
+
+    // C2PA sidecar — opt-in via the `c2pa` permission. Runs AFTER
+    // the atomic write so the sidecar's content_sha256 assertion
+    // matches the bytes actually on disk. Failures here don't
+    // refuse the save (the file is already written and the agent
+    // shouldn't be punished for a signing problem); we audit-log
+    // and move on. The user sees the sidecar appear next to the
+    // file when it succeeds.
+    if check_permission(&state, &token, "c2pa").await {
+        if let Some(workbook_id) = ledger::workbook_id_from_save_body(&final_body) {
+            let entries = edit_log::parse_existing(&final_body);
+            let path_clone = path.clone();
+            let body_clone = final_body.clone();
+            // sign_sidecar does file IO + ed25519 work; offload to
+            // blocking so we don't park the tokio runtime on it.
+            let res = tokio::task::spawn_blocking(move || {
+                c2pa_sign::sign_sidecar(&path_clone, &body_clone, &workbook_id, &entries)
+            }).await;
+            match res {
+                Ok(Ok(sidecar)) => {
+                    eprintln!("[workbooksd] c2pa sidecar → {}", sidecar.display());
+                    audit_log(&path, "c2pa-sign", None, None);
+                }
+                Ok(Err(e)) => {
+                    eprintln!("[workbooksd] c2pa sign failed: {e}");
+                    audit_log(&path, "c2pa-sign-failed", Some(&e), None);
+                }
+                Err(e) => {
+                    eprintln!("[workbooksd] c2pa sign panicked: {e}");
+                }
+            }
+        }
+    }
+
     (StatusCode::OK, "saved").into_response()
 }
 
@@ -940,6 +1096,86 @@ async fn permissions_approve_handler(
     }
 }
 
+async fn permissions_revoke_handler(
+    State(state): State<AppState>,
+    AxPath(token): AxPath<String>,
+    headers: HeaderMap,
+    axum::Json(req): axum::Json<permissions::ApproveReq>,
+) -> impl IntoResponse {
+    if let Err(resp) = require_daemon_origin(&headers) {
+        return resp;
+    }
+    let path = match path_for_token(&state, &token).await {
+        Some(p) => p,
+        None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
+    };
+    let perms = state
+        .sessions
+        .lock()
+        .await
+        .permissions_for(&token)
+        .unwrap_or_default();
+    match permissions::revoke(&path, &perms, &req.ids) {
+        Ok(listing) => {
+            audit_log(&path, "permissions-revoke", None, None);
+            (StatusCode::OK, axum::Json(listing)).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+// ── ledger ────────────────────────────────────────────────────────
+//
+// Two reads, both localhost-only (require_daemon_origin). The
+// `/wb/:token/ledger` form is the typical one: the page that's
+// open already has the token, ask the daemon "what's the history
+// of THIS workbook." `/ledger/:workbook_id` is the portal/dev tool
+// path — given an explicit id, dump its history. There's no cross-
+// machine sync, no auth secret beyond the localhost binding; if
+// you can hit 127.0.0.1:port you're already on the user's machine.
+
+async fn ledger_for_token_handler(
+    State(state): State<AppState>,
+    AxPath(token): AxPath<String>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(resp) = require_daemon_origin(&headers) {
+        return resp;
+    }
+    let path = match path_for_token(&state, &token).await {
+        Some(p) => p,
+        None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
+    };
+    // Prefer the cached id (set on the session at first save). Fall
+    // back to parsing the file currently on disk so a freshly-opened
+    // workbook can answer `/ledger` without waiting for a save.
+    let mut id = state.sessions.lock().await.workbook_id_for(&token);
+    if id.is_none() {
+        if let Ok(bytes) = tokio::fs::read(&path).await {
+            id = ledger::workbook_id_from_save_body(&bytes);
+            if let Some(ref hit) = id {
+                state.sessions.lock().await.set_workbook_id(&token, hit.clone());
+            }
+        }
+    }
+    let Some(id) = id else {
+        return (StatusCode::OK, axum::Json(serde_json::json!({"history": null}))).into_response();
+    };
+    let history = ledger::for_workbook(&id);
+    (StatusCode::OK, axum::Json(serde_json::json!({"history": history}))).into_response()
+}
+
+async fn ledger_by_id_handler(
+    AxPath(workbook_id): AxPath<String>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(resp) = require_daemon_origin(&headers) {
+        return resp;
+    }
+    let history = ledger::for_workbook(&workbook_id);
+    (StatusCode::OK, axum::Json(serde_json::json!({"history": history}))).into_response()
+}
+
 /// Helper used by acp.rs: returns true if `id` is allowed for the
 /// given session token. Looks up the session's bound path + parsed
 /// permissions, calls into `permissions::is_allowed`.
@@ -949,6 +1185,28 @@ pub(crate) async fn check_permission(state: &AppState, token: &str, id: &str) ->
     let Some(path) = s.touch(token) else { return false; };
     drop(s);
     permissions::is_allowed(id, &path, &perms)
+}
+
+/// HTTP handler shorthand: resolve `token` to a path AND verify
+/// the workbook has been granted permission `id`. On success returns
+/// the resolved path; on failure returns the 404/403 response the
+/// handler should bubble up unchanged. Centralizes the deny audit
+/// log so every gated endpoint reports refusals consistently.
+async fn require_perm(state: &AppState, token: &str, id: &str) -> Result<PathBuf, Response> {
+    let path = path_for_token(state, token).await
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "unknown token").into_response())?;
+    if !check_permission(state, token, id).await {
+        audit_log(&path, "permission-denied", Some(id), None);
+        return Err((
+            StatusCode::FORBIDDEN,
+            format!(
+                "this workbook hasn't been granted '{id}' permission. \
+                 Approve it in the permissions dialog before retrying.\n"
+            ),
+        )
+            .into_response());
+    }
+    Ok(path)
 }
 
 // ── secrets (OS keychain) ──────────────────────────────────────────
@@ -1006,9 +1264,9 @@ async fn secret_set_handler(
     if let Err(resp) = require_daemon_origin(&headers) {
         return resp;
     }
-    let path = match path_for_token(&state, &token).await {
-        Some(p) => p,
-        None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
+    let path = match require_perm(&state, &token, "secrets").await {
+        Ok(p) => p,
+        Err(resp) => return resp,
     };
     if req.id.is_empty() || req.id.len() > 64 || !req.id.chars().all(is_secret_id_char) {
         return (
@@ -1069,9 +1327,9 @@ async fn secret_delete_handler(
     if let Err(resp) = require_daemon_origin(&headers) {
         return resp;
     }
-    let path = match path_for_token(&state, &token).await {
-        Some(p) => p,
-        None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
+    let path = match require_perm(&state, &token, "secrets").await {
+        Ok(p) => p,
+        Err(resp) => return resp,
     };
     if req.id == SECRET_INDEX_ID {
         return (StatusCode::BAD_REQUEST, "reserved secret id").into_response();
@@ -1128,9 +1386,9 @@ async fn secret_preview_handler(
     if let Err(resp) = require_daemon_origin(&headers) {
         return resp;
     }
-    let path = match path_for_token(&state, &token).await {
-        Some(p) => p,
-        None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
+    let path = match require_perm(&state, &token, "secrets").await {
+        Ok(p) => p,
+        Err(resp) => return resp,
     };
     if id == SECRET_INDEX_ID {
         return (StatusCode::BAD_REQUEST, "reserved secret id").into_response();
@@ -1172,9 +1430,9 @@ async fn secret_list_handler(
     if let Err(resp) = require_daemon_origin(&headers) {
         return resp;
     }
-    let path = match path_for_token(&state, &token).await {
-        Some(p) => p,
-        None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
+    let path = match require_perm(&state, &token, "secrets").await {
+        Ok(p) => p,
+        Err(resp) => return resp,
     };
     // Filter out the reserved index id from the response — it's
     // an implementation detail, not a user-set secret.
@@ -1276,9 +1534,9 @@ async fn proxy_handler(
     if let Err(resp) = require_daemon_origin(&headers) {
         return resp;
     }
-    let path = match path_for_token(&state, &token).await {
-        Some(p) => p,
-        None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
+    let path = match require_perm(&state, &token, "network").await {
+        Ok(p) => p,
+        Err(resp) => return resp,
     };
 
     // Only HTTPS — refuse plaintext + custom schemes outright.
@@ -1476,7 +1734,7 @@ fn matches_auth_header_name(h: &str, auth: Option<&ProxyAuth>) -> bool {
 
 // Tiny base64 encode/decode — reqwest doesn't expose one and pulling
 // `base64` for these two call sites is overkill.
-fn encode_base64(bytes: &[u8]) -> String {
+pub(crate) fn encode_base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] =
         b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);

@@ -206,13 +206,41 @@ pub fn approve(
         perms.by_id.keys().map(|s| s.as_str()).collect();
     // Only persist ids that the workbook actually declared. The
     // browser can't grant itself permissions the workbook didn't
-    // ask for.
-    let granted: Vec<String> = requested_ids
-        .iter()
-        .filter(|id| declared.contains(id.as_str()))
+    // ask for. UNION with whatever was already granted so a per-row
+    // approve doesn't accidentally drop earlier grants — the UI
+    // pattern is "approve this one button" not "submit the whole
+    // checklist."
+    let mut existing: std::collections::BTreeSet<String> = approvals
+        .granted
+        .get(&key)
         .cloned()
+        .unwrap_or_default()
+        .into_iter()
         .collect();
-    approvals.granted.insert(key, granted);
+    for id in requested_ids {
+        if declared.contains(id.as_str()) {
+            existing.insert(id.clone());
+        }
+    }
+    approvals.granted.insert(key, existing.into_iter().collect());
+    store_approvals(&approvals)?;
+    Ok(list_for(workbook_path, perms))
+}
+
+/// Remove the given ids from this workbook's granted list.
+/// Idempotent — revoking an id that wasn't granted is a no-op,
+/// not an error. Returns the freshly-listed permissions so the
+/// UI can re-render without a follow-up GET.
+pub fn revoke(
+    workbook_path: &Path,
+    perms: &Permissions,
+    ids_to_revoke: &[String],
+) -> Result<PermissionsList, String> {
+    let key = path_fingerprint(workbook_path);
+    let mut approvals = load_approvals();
+    if let Some(granted) = approvals.granted.get_mut(&key) {
+        granted.retain(|g| !ids_to_revoke.iter().any(|x| x == g));
+    }
     store_approvals(&approvals)?;
     Ok(list_for(workbook_path, perms))
 }
