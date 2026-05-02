@@ -1,6 +1,6 @@
 [package]
 name = "workbooksd"
-version = "0.0.4"
+version = "0.1.0"
 edition = "2021"
 description = "Background daemon that serves and saves .workbook.html files for the local browser"
 license = "MIT"
@@ -16,6 +16,16 @@ tower-http = { version = "0.5", features = ["cors"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 getrandom = "0.2"
+# Secrets storage — OS keychain across macOS / Linux / Windows. Backs
+# the /wb/<token>/secret/* endpoints so API keys never enter the
+# browser's localStorage (where any other workbook on the same daemon
+# origin could read them).
+keyring = { version = "3", default-features = false, features = ["apple-native", "linux-native-sync-persistent", "windows-native"] }
+# Outbound HTTPS for /wb/<token>/proxy — the daemon makes the call,
+# splices in the keychain-stored Authorization header, returns the
+# response without ever revealing the secret to the page. rustls
+# keeps us off OpenSSL system libs.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

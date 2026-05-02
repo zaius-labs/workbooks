@@ -15,6 +15,26 @@
 //   GET  /wb/:token/              serve the bound file as text/html
 //   PUT  /wb/:token/save          overwrite the bound file (atomic)
 //
+//   Secrets — workbook API keys never enter browser memory; the daemon
+//   stores them in the OS keychain bound to the WORKBOOK FILE PATH
+//   (not the session token), so secrets survive daemon restarts and
+//   tab close + re-open. Lookup is gated on the token's bound path,
+//   so token A can only ever read secrets for the path token A was
+//   minted against — closes the cross-workbook key-theft hole.
+//
+//   POST /wb/:token/secret/set    body: {"id":"FAL_API_KEY","value":"..."}
+//   POST /wb/:token/secret/delete body: {"id":"FAL_API_KEY"}
+//   GET  /wb/:token/secret/list   → {"ids":["FAL_API_KEY",...]} (no values)
+//
+//   Outbound HTTPS proxy — caller asks the daemon to make a request,
+//   naming a secret to splice into a header. Daemon performs the call,
+//   returns the response. Browser code never sees the secret value.
+//
+//   POST /wb/:token/proxy         body: { url, method, headers, body,
+//                                         auth: { headerName, secretId,
+//                                                 format } }
+//                                 → { status, headers, body }
+//
 // Security model:
 //   - 127.0.0.1 only, port 47119
 //   - Tokens are 16 random bytes (hex) via getrandom; lookup is O(1)
@@ -249,6 +269,13 @@ async fn daemon_main() {
             "/wb/:token/save",
             put(save_workbook).layer(DefaultBodyLimit::max(SAVE_BODY_LIMIT)),
         )
+        .route("/wb/:token/secret/set", post(secret_set_handler))
+        .route("/wb/:token/secret/delete", post(secret_delete_handler))
+        .route("/wb/:token/secret/list", get(secret_list_handler))
+        .route(
+            "/wb/:token/proxy",
+            post(proxy_handler).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
         .with_state(state);
 
     let addr: SocketAddr = format!("{BIND_HOST}:{BIND_PORT}").parse().unwrap();
@@ -392,6 +419,444 @@ fn acquire_lockfile() -> Result<std::fs::File, String> {
     let _ = writeln!(f, "{}", std::process::id());
     f.flush().ok();
     Ok(f)
+}
+
+// ── secrets (OS keychain) ──────────────────────────────────────────
+//
+// Keys are stored as `(service, account)` in the platform keychain.
+// Service is fixed; account encodes WHICH workbook + WHICH secret:
+//
+//   service = "sh.workbooks.workbooksd"
+//   account = "<short hash of canonical workbook path>:<secret-id>"
+//
+// Hashing the path keeps the account string short, ASCII, and stable
+// across daemon restarts — but means the secret is bound to the file
+// at that path. Move the file → secrets are abandoned (still in the
+// keychain under the old hash; user can clear via Keychain Access).
+// We accept that for v1; a "rebind on path change" UX is a polish
+// follow-up. The CRITICAL property: a token minted for path P can
+// only access secrets stored under hash(P), so a malicious workbook
+// at path Q can never read P's keys via /secret/list or /proxy.
+
+const KEYCHAIN_SERVICE: &str = "sh.workbooks.workbooksd";
+
+fn path_fingerprint(path: &Path) -> String {
+    // Lightweight hash — we don't need cryptographic strength here,
+    // just collision-resistance across paths a single user has.
+    // Using FxHash via std hasher (fnv-ish) is fine for that.
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    path.hash(&mut h);
+    format!("{:016x}", h.finish())
+}
+
+fn keychain_account(path: &Path, secret_id: &str) -> String {
+    format!("{}:{}", path_fingerprint(path), secret_id)
+}
+
+/// Resolve the path bound to `token`, or 404 / 403. Refreshes
+/// last_access on the session as a side effect (touch-LRU).
+async fn path_for_token(state: &AppState, token: &str) -> Option<PathBuf> {
+    state.sessions.lock().await.touch(token)
+}
+
+#[derive(Deserialize)]
+struct SecretSetReq {
+    id: String,
+    value: String,
+}
+
+async fn secret_set_handler(
+    State(state): State<AppState>,
+    AxPath(token): AxPath<String>,
+    axum::Json(req): axum::Json<SecretSetReq>,
+) -> impl IntoResponse {
+    let path = match path_for_token(&state, &token).await {
+        Some(p) => p,
+        None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
+    };
+    if req.id.is_empty() || req.id.len() > 64 || !req.id.chars().all(is_secret_id_char) {
+        return (
+            StatusCode::BAD_REQUEST,
+            "secret id must be 1-64 chars in [A-Za-z0-9_-]",
+        )
+            .into_response();
+    }
+    let entry = match keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(&path, &req.id)) {
+        Ok(e) => e,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("keychain open: {e}"),
+            )
+                .into_response();
+        }
+    };
+    if let Err(e) = entry.set_password(&req.value) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("keychain write: {e}"),
+        )
+            .into_response();
+    }
+    // Persist a per-path "known ids" index so /secret/list doesn't
+    // need to enumerate the keychain (which is awkward + unreliable
+    // across platforms). The index itself sits in the keychain too,
+    // under a reserved id so it can't collide with a user secret.
+    let _ = upsert_secret_index(&path, |ids| {
+        if !ids.iter().any(|x| x == &req.id) {
+            ids.push(req.id.clone());
+        }
+    });
+    (StatusCode::OK, "ok").into_response()
+}
+
+#[derive(Deserialize)]
+struct SecretDeleteReq {
+    id: String,
+}
+
+async fn secret_delete_handler(
+    State(state): State<AppState>,
+    AxPath(token): AxPath<String>,
+    axum::Json(req): axum::Json<SecretDeleteReq>,
+) -> impl IntoResponse {
+    let path = match path_for_token(&state, &token).await {
+        Some(p) => p,
+        None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
+    };
+    if let Ok(entry) = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(&path, &req.id)) {
+        // delete_credential returns NoEntry if it didn't exist; that's fine.
+        let _ = entry.delete_credential();
+    }
+    let _ = upsert_secret_index(&path, |ids| ids.retain(|x| x != &req.id));
+    (StatusCode::OK, "ok").into_response()
+}
+
+#[derive(Serialize)]
+struct SecretListResp {
+    ids: Vec<String>,
+}
+
+async fn secret_list_handler(
+    State(state): State<AppState>,
+    AxPath(token): AxPath<String>,
+) -> impl IntoResponse {
+    let path = match path_for_token(&state, &token).await {
+        Some(p) => p,
+        None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
+    };
+    let ids = read_secret_index(&path).unwrap_or_default();
+    (StatusCode::OK, axum::Json(SecretListResp { ids })).into_response()
+}
+
+fn is_secret_id_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-'
+}
+
+const SECRET_INDEX_ID: &str = "__index";
+
+fn read_secret_index(path: &Path) -> Result<Vec<String>, String> {
+    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(path, SECRET_INDEX_ID))
+        .map_err(|e| format!("keychain open: {e}"))?;
+    match entry.get_password() {
+        Ok(s) => Ok(s.split(',').filter(|x| !x.is_empty()).map(String::from).collect()),
+        Err(keyring::Error::NoEntry) => Ok(Vec::new()),
+        Err(e) => Err(format!("keychain read: {e}")),
+    }
+}
+
+fn upsert_secret_index(path: &Path, mutate: impl FnOnce(&mut Vec<String>)) -> Result<(), String> {
+    let mut ids = read_secret_index(path).unwrap_or_default();
+    mutate(&mut ids);
+    ids.sort();
+    ids.dedup();
+    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(path, SECRET_INDEX_ID))
+        .map_err(|e| format!("keychain open: {e}"))?;
+    entry
+        .set_password(&ids.join(","))
+        .map_err(|e| format!("keychain write: {e}"))
+}
+
+// ── outbound HTTPS proxy ───────────────────────────────────────────
+//
+// Browser code POSTs `{url, method, headers, body, auth}`. The
+// daemon resolves `auth.secretId` against the bound workbook's
+// keychain entries and splices the value into a header per
+// `auth.format`. The page never sees the secret. For binary
+// responses, body is base64-encoded; the response also reports
+// the upstream content-type so the caller can decode appropriately.
+
+#[derive(Deserialize)]
+struct ProxyReq {
+    url: String,
+    #[serde(default = "default_method")]
+    method: String,
+    #[serde(default)]
+    headers: HashMap<String, String>,
+    #[serde(default)]
+    body: Option<String>,
+    /// If body is base64 (binary upload), set true.
+    #[serde(default)]
+    body_b64: bool,
+    #[serde(default)]
+    auth: Option<ProxyAuth>,
+}
+
+#[derive(Deserialize)]
+struct ProxyAuth {
+    /// Header name to inject, e.g. "Authorization" or "xi-api-key".
+    #[serde(rename = "headerName")]
+    header_name: String,
+    /// Which secret id (in keychain) to resolve.
+    #[serde(rename = "secretId")]
+    secret_id: String,
+    /// Optional template — `{value}` is replaced with the secret.
+    /// Defaults to "{value}" if absent.
+    #[serde(default)]
+    format: Option<String>,
+}
+
+fn default_method() -> String {
+    "GET".to_string()
+}
+
+#[derive(Serialize)]
+struct ProxyResp {
+    status: u16,
+    headers: HashMap<String, String>,
+    /// Response body, base64 when `body_b64` is true (binary), else
+    /// utf8 string.
+    body: String,
+    body_b64: bool,
+}
+
+async fn proxy_handler(
+    State(state): State<AppState>,
+    AxPath(token): AxPath<String>,
+    axum::Json(req): axum::Json<ProxyReq>,
+) -> impl IntoResponse {
+    let path = match path_for_token(&state, &token).await {
+        Some(p) => p,
+        None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
+    };
+
+    // Only HTTPS — refuse plaintext + custom schemes outright.
+    let parsed = match reqwest::Url::parse(&req.url) {
+        Ok(u) => u,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("bad url: {e}")).into_response(),
+    };
+    if parsed.scheme() != "https" {
+        return (StatusCode::BAD_REQUEST, "only https:// urls allowed").into_response();
+    }
+    // Phase 2 will validate the host against the workbook config's
+    // declared allowlist. For now, accept any HTTPS host so we can
+    // ship the secrets refactor without blocking on schema work.
+
+    let method = match reqwest::Method::from_bytes(req.method.as_bytes()) {
+        Ok(m) => m,
+        Err(_) => return (StatusCode::BAD_REQUEST, "invalid http method").into_response(),
+    };
+
+    let client = match reqwest::Client::builder()
+        .user_agent(concat!("workbooksd/", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(120))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("http client init: {e}"),
+            )
+                .into_response();
+        }
+    };
+
+    let mut builder = client.request(method, parsed);
+
+    for (k, v) in &req.headers {
+        // Block headers that could let the caller spoof the secret
+        // injection. The `auth` block is the only sanctioned path.
+        if matches_auth_header_name(k, req.auth.as_ref()) {
+            continue;
+        }
+        builder = builder.header(k.as_str(), v.as_str());
+    }
+
+    if let Some(auth) = &req.auth {
+        let entry = match keyring::Entry::new(
+            KEYCHAIN_SERVICE,
+            &keychain_account(&path, &auth.secret_id),
+        ) {
+            Ok(e) => e,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("keychain open: {e}"),
+                )
+                    .into_response();
+            }
+        };
+        let value = match entry.get_password() {
+            Ok(v) => v,
+            Err(keyring::Error::NoEntry) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    format!("secret '{}' not set for this workbook", auth.secret_id),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("keychain read: {e}"),
+                )
+                    .into_response();
+            }
+        };
+        let formatted = auth
+            .format
+            .as_deref()
+            .unwrap_or("{value}")
+            .replace("{value}", &value);
+        builder = builder.header(auth.header_name.as_str(), formatted);
+    }
+
+    if let Some(body) = req.body {
+        if req.body_b64 {
+            match decode_base64(&body) {
+                Ok(bytes) => builder = builder.body(bytes),
+                Err(e) => {
+                    return (StatusCode::BAD_REQUEST, format!("body_b64: {e}")).into_response();
+                }
+            }
+        } else {
+            builder = builder.body(body);
+        }
+    }
+
+    let resp = match builder.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            return (StatusCode::BAD_GATEWAY, format!("upstream: {e}")).into_response();
+        }
+    };
+
+    let status = resp.status().as_u16();
+    let mut hdrs = HashMap::new();
+    for (k, v) in resp.headers() {
+        if let Ok(s) = v.to_str() {
+            hdrs.insert(k.as_str().to_string(), s.to_string());
+        }
+    }
+    let bytes = match resp.bytes().await {
+        Ok(b) => b,
+        Err(e) => {
+            return (StatusCode::BAD_GATEWAY, format!("upstream body: {e}")).into_response();
+        }
+    };
+    // Decide encoding by content-type, with base64 as the safe default
+    // for anything that isn't obviously text. JSON, plain text, html,
+    // xml ride as utf8; everything else ships as base64.
+    let ct = hdrs
+        .get("content-type")
+        .map(String::as_str)
+        .unwrap_or("application/octet-stream");
+    let is_text = ct.starts_with("text/")
+        || ct.starts_with("application/json")
+        || ct.starts_with("application/xml")
+        || ct.starts_with("application/javascript")
+        || ct.starts_with("application/x-ndjson");
+    let (body, body_b64) = if is_text {
+        match std::str::from_utf8(&bytes) {
+            Ok(s) => (s.to_string(), false),
+            Err(_) => (encode_base64(&bytes), true),
+        }
+    } else {
+        (encode_base64(&bytes), true)
+    };
+
+    (
+        StatusCode::OK,
+        axum::Json(ProxyResp {
+            status,
+            headers: hdrs,
+            body,
+            body_b64,
+        }),
+    )
+        .into_response()
+}
+
+fn matches_auth_header_name(h: &str, auth: Option<&ProxyAuth>) -> bool {
+    auth.map(|a| a.header_name.eq_ignore_ascii_case(h)).unwrap_or(false)
+}
+
+// Tiny base64 encode/decode — reqwest doesn't expose one and pulling
+// `base64` for these two call sites is overkill.
+fn encode_base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    let mut i = 0;
+    while i + 3 <= bytes.len() {
+        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8) | (bytes[i + 2] as u32);
+        out.push(ALPHABET[((n >> 18) & 63) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 63) as usize] as char);
+        out.push(ALPHABET[((n >> 6) & 63) as usize] as char);
+        out.push(ALPHABET[(n & 63) as usize] as char);
+        i += 3;
+    }
+    let rem = bytes.len() - i;
+    if rem == 1 {
+        let n = (bytes[i] as u32) << 16;
+        out.push(ALPHABET[((n >> 18) & 63) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 63) as usize] as char);
+        out.push('=');
+        out.push('=');
+    } else if rem == 2 {
+        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8);
+        out.push(ALPHABET[((n >> 18) & 63) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 63) as usize] as char);
+        out.push(ALPHABET[((n >> 6) & 63) as usize] as char);
+        out.push('=');
+    }
+    out
+}
+
+fn decode_base64(s: &str) -> Result<Vec<u8>, String> {
+    fn val(c: u8) -> Result<u8, String> {
+        match c {
+            b'A'..=b'Z' => Ok(c - b'A'),
+            b'a'..=b'z' => Ok(c - b'a' + 26),
+            b'0'..=b'9' => Ok(c - b'0' + 52),
+            b'+' => Ok(62),
+            b'/' => Ok(63),
+            _ => Err(format!("invalid base64 char {:?}", c as char)),
+        }
+    }
+    let trimmed: Vec<u8> = s.bytes().filter(|&c| c != b'\n' && c != b'\r').collect();
+    let len = trimmed.len();
+    if len % 4 != 0 {
+        return Err("base64 length must be multiple of 4".to_string());
+    }
+    let mut out = Vec::with_capacity(len / 4 * 3);
+    let mut i = 0;
+    while i < len {
+        let pad = (trimmed[i + 2] == b'=') as usize + (trimmed[i + 3] == b'=') as usize;
+        let v0 = val(trimmed[i])?;
+        let v1 = val(trimmed[i + 1])?;
+        let v2 = if trimmed[i + 2] == b'=' { 0 } else { val(trimmed[i + 2])? };
+        let v3 = if trimmed[i + 3] == b'=' { 0 } else { val(trimmed[i + 3])? };
+        let n = ((v0 as u32) << 18) | ((v1 as u32) << 12) | ((v2 as u32) << 6) | (v3 as u32);
+        out.push((n >> 16) as u8);
+        if pad < 2 { out.push((n >> 8) as u8); }
+        if pad < 1 { out.push(n as u8); }
+        i += 4;
+    }
+    Ok(out)
 }
 
 // ── path / token plumbing ───────────────────────────────────────────

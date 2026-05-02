@@ -34,6 +34,7 @@
 import { createText, type WbText, type WbTextOptions } from "./text";
 import { createCollection, type WbCollection, type WbCollectionOptions, type WbRecord } from "./collection";
 import { createValue, type WbValue, type WbValueOptions } from "./value";
+import { secret, wbFetch } from "./secret";
 
 export const wb = {
   text(id: string, opts?: WbTextOptions): WbText {
@@ -48,6 +49,12 @@ export const wb = {
   value<T = unknown>(id: string, opts?: WbValueOptions<T>): WbValue<T> {
     return createValue<T>(id, opts);
   },
+  /** Workbook-scoped secrets — see ./secret.ts. Browser holds handles
+   *  (ids), daemon holds values. */
+  secret,
+  /** Authenticated HTTPS via the daemon's proxy — `auth.secretId`
+   *  resolves daemon-side; the page never sees the value. */
+  fetch: wbFetch,
   // TODO(Phase 1+): wb.tree(id) for nested document trees.
 };
 
@@ -65,3 +72,13 @@ export type {
 // storage subpath (no Svelte components, no yjs sidecar) can still
 // signal "WAL apply is done; seed-on-empty primitives may proceed."
 export { markDocHydrated, awaitHydration } from "./bootstrap";
+
+// Secrets API — daemon-mediated, OS-keychain-backed.
+export { WbSecretError } from "./secret";
+export type {
+  WbSecretApi,
+  WbFetchApi,
+  WbFetchAuth,
+  WbFetchRequest,
+  WbFetchResponse,
+} from "./secret";
