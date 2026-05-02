@@ -43,11 +43,14 @@
   // Iframes don't need the toast — they're being hosted somewhere else.
   if (window !== window.top) return;
 
-  // Already loaded via the daemon? Suppress.
+  // Already loaded via the daemon? Suppress. Daemon now binds a
+  // random ephemeral port (workbooksd .17), so port pinning would
+  // false-negative every served page since 0.1.4 — the loopback
+  // host + /wb/ path are sufficient and unique to daemon-served
+  // documents.
   if (
     location.protocol === "http:" &&
     location.hostname === "127.0.0.1" &&
-    location.port === "47119" &&
     location.pathname.startsWith("/wb/")
   ) {
     return;
