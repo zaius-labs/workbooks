@@ -59,6 +59,26 @@ export function mountInstallPrompt(
   injectStyles();
   const el = build(variant, target, opts);
   parent.appendChild(el);
+  // Wire copy-to-clipboard for any element carrying data-cmd.
+  // Feedback text is written into [data-feedback-text] if present
+  // (so the icon next to the label survives), else into the element
+  // itself (the small "copy" pill).
+  el.querySelectorAll<HTMLElement>("[data-cmd]").forEach((node) => {
+    node.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const cmd = node.getAttribute("data-cmd");
+      if (!cmd || !navigator.clipboard) return;
+      const target = node.querySelector<HTMLElement>("[data-feedback-text]") ?? node;
+      navigator.clipboard.writeText(cmd).then(
+        () => {
+          const prev = target.textContent;
+          target.textContent = target.dataset.feedbackText || "Copied to clipboard";
+          setTimeout(() => (target.textContent = prev), 1400);
+        },
+        () => { /* clipboard blocked — silent */ },
+      );
+    });
+  });
   if (variant === "toast") {
     requestAnimationFrame(() =>
       requestAnimationFrame(() => el.classList.add("wb-ip-show")),
@@ -93,34 +113,41 @@ export function detectInstallTarget(baseUrl = "https://workbooks.sh"): InstallTa
   const os = detectOS();
   const installUrl = baseUrl;
   if (os === "macos") {
-    // Default to Apple Silicon — most Macs sold since 2020 are arm64.
-    // Intel users get the same install.sh experience via the curl
-    // command, which detects arch via uname.
+    // Workbooks.pkg is universal (aarch64 + x86_64), signed and
+    // notarized, double-clickable in Finder, and registers launchd +
+    // the .workbook.html file association during install. The stable
+    // URL is maintained by the release pipeline (see
+    // packages/workbooksd/release/release.sh).
     return {
       os,
       label: "macOS",
       iconSvg: APPLE_ICON,
-      dlUrl: `${baseUrl}/dl/workbooksd-aarch64-apple-darwin`,
+      dlUrl: `${baseUrl}/dl/Workbooks.pkg`,
       installCmd: `curl -fsSL ${baseUrl}/install | sh`,
       installUrl,
     };
   }
   if (os === "linux") {
+    // No packaged Linux artifact yet (.deb/.rpm/AppImage TODO). The
+    // install script handles arch detection + ~/.local/bin install +
+    // future systemd unit.
     return {
       os,
       label: "Linux",
       iconSvg: LINUX_ICON,
-      dlUrl: `${baseUrl}/dl/workbooksd-x86_64-unknown-linux-gnu`,
+      dlUrl: null,
       installCmd: `curl -fsSL ${baseUrl}/install | sh`,
       installUrl,
     };
   }
   if (os === "windows") {
+    // .msi/.exe TODO — release pipeline doesn't build a Windows
+    // artifact yet. Falls back to the install page.
     return {
       os,
       label: "Windows",
       iconSvg: WINDOWS_ICON,
-      dlUrl: null, // not yet supported by workbooksd install.sh
+      dlUrl: null,
       installCmd: null,
       installUrl,
     };
@@ -255,37 +282,28 @@ function buildHero(target: InstallTarget, opts: InstallPromptOpts): HTMLElement 
 }
 
 function primaryActionHtml(target: InstallTarget, cls: string): string {
-  if (!target.dlUrl) {
-    // Windows or unknown — fall back to the install page.
-    return `<a class="${cls}" href="${target.installUrl}" target="_blank" rel="noopener noreferrer">${target.iconSvg}<span>Install for ${escapeHtml(target.label)}</span></a>`;
+  if (target.dlUrl) {
+    // Real installer asset — download attribute hints "save the file"
+    // rather than "navigate". Currently macOS only (Workbooks.pkg).
+    const filename = target.dlUrl.split("/").pop() || "Workbooks.pkg";
+    return `<a class="${cls}" href="${target.dlUrl}" download>${target.iconSvg}<span>Download ${escapeHtml(filename)}</span></a>`;
   }
-  // download attribute hints "save the file" rather than "navigate".
-  return `<a class="${cls}" href="${target.dlUrl}" download>${target.iconSvg}<span>Download for ${escapeHtml(target.label)}</span></a>`;
+  if (target.installCmd) {
+    // No packaged installer for this OS yet (Linux today). Lead with
+    // the curl one-liner — a click copies it; the user pastes into
+    // their terminal. Concrete and accurate, no broken downloads.
+    return `<button type="button" class="${cls}" data-cmd="${escapeAttr(target.installCmd)}" aria-label="Copy install command for ${escapeHtml(target.label)}">${target.iconSvg}<span data-feedback-text="Copied to clipboard">Copy ${escapeHtml(target.label)} install command</span></button>`;
+  }
+  // Windows / unknown — link to the install page so the user can read
+  // platform-specific instructions when there's no asset to ship.
+  return `<a class="${cls}" href="${target.installUrl}" target="_blank" rel="noopener noreferrer">${target.iconSvg}<span>Install for ${escapeHtml(target.label)}</span></a>`;
 }
 
 function secondaryHtml(target: InstallTarget): string {
-  if (!target.installCmd) return "";
+  // Skip the secondary command row when the primary CTA is already
+  // the command-copy button — duplicate would just be noise.
+  if (!target.installCmd || !target.dlUrl) return "";
   return `<div class="wb-ip-cmd"><span class="wb-ip-cmd-label">or run</span><code class="wb-ip-cmd-code">${escapeHtml(target.installCmd)}</code><button type="button" class="wb-ip-copy" data-cmd="${escapeAttr(target.installCmd)}" aria-label="Copy install command">copy</button></div>`;
-}
-
-// Delegated copy handler — survives multiple mounts without per-instance wiring.
-if (typeof document !== "undefined") {
-  document.addEventListener("click", (ev) => {
-    const t = ev.target as HTMLElement | null;
-    if (!t || !t.matches?.(".wb-ip-copy")) return;
-    const cmd = t.getAttribute("data-cmd");
-    if (!cmd) return;
-    navigator.clipboard?.writeText(cmd).then(
-      () => {
-        const prev = t.textContent;
-        t.textContent = "copied";
-        setTimeout(() => (t.textContent = prev), 1200);
-      },
-      () => {
-        /* clipboard blocked — silent */
-      },
-    );
-  });
 }
 
 // ── styles ───────────────────────────────────────────────────────
@@ -344,19 +362,21 @@ const STYLES = `
 
 .wb-ip-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-.wb-ip a.wb-ip-cta, .wb-ip a.wb-ip-cta-sm {
+.wb-ip .wb-ip-cta, .wb-ip .wb-ip-cta-sm {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 8px 14px; border-radius: 6px;
   background: var(--wb-ip-accent-bg); color: var(--wb-ip-accent-fg);
   text-decoration: none; font-weight: 600; font-size: 13px;
   border: 1px solid var(--wb-ip-accent-bg);
+  cursor: pointer;
+  font-family: inherit;
   transition: opacity .12s ease;
 }
-.wb-ip a.wb-ip-cta:hover, .wb-ip a.wb-ip-cta-sm:hover { opacity: 0.92; }
-.wb-ip a.wb-ip-cta-sm { padding: 4px 10px; font-size: 12px; margin-top: 4px; }
-.wb-ip a.wb-ip-cta svg, .wb-ip a.wb-ip-cta-sm svg { width: 14px; height: 14px; }
-.wb-ip a.wb-ip-cta-lg { padding: 10px 18px; font-size: 14px; }
-.wb-ip a.wb-ip-cta-lg svg { width: 16px; height: 16px; }
+.wb-ip .wb-ip-cta:hover, .wb-ip .wb-ip-cta-sm:hover { opacity: 0.92; }
+.wb-ip .wb-ip-cta-sm { padding: 4px 10px; font-size: 12px; margin-top: 4px; }
+.wb-ip .wb-ip-cta svg, .wb-ip .wb-ip-cta-sm svg { width: 14px; height: 14px; }
+.wb-ip .wb-ip-cta-lg { padding: 10px 18px; font-size: 14px; }
+.wb-ip .wb-ip-cta-lg svg { width: 16px; height: 16px; }
 
 .wb-ip-cmd {
   display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
