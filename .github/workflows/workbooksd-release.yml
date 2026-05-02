@@ -203,9 +203,22 @@ jobs:
           # --no-build: reuse the cargo build output we already produced.
           # --nocapture: surface candle/light output so failures are
           #              actually debuggable in the run log.
+          # -L "-sice:*" : suppress ICE checks that don't apply to a
+          #                per-user MSI:
+          #   ICE61 — same-version-upgrade allowed (we WANT
+          #           AllowSameVersionUpgrades, but ICE61 still nags).
+          #   ICE64 — RemoveFile entry for ProgramsFolder. We
+          #           intentionally leave %LocalAppData%\Programs in
+          #           place since other tools share it; INSTALLDIR
+          #           IS removed via <RemoveFolder>.
+          #   ICE91 — "this dir doesn't vary by ALLUSERS". Per-user
+          #           installs don't vary by definition.
           cargo wix --no-build --nocapture `
             --target x86_64-pc-windows-msvc `
-            --output target\wix\Workbooks.msi
+            --output target\wix\Workbooks.msi `
+            -L "-sice:ICE61" `
+            -L "-sice:ICE64" `
+            -L "-sice:ICE91"
           if (-not (Test-Path target\wix\Workbooks.msi)) {
             throw "MSI not produced at target\wix\Workbooks.msi"
           }
