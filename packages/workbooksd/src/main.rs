@@ -62,6 +62,7 @@ mod c2pa_sign;
 mod edit_log;
 mod envelope;
 mod ledger;
+mod local_auth;
 mod permissions;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
