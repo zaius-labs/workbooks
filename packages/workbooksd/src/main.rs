@@ -59,6 +59,7 @@ use axum::{
 mod acp;
 mod c2pa_sign;
 mod edit_log;
+mod envelope;
 mod ledger;
 mod permissions;
 use secrecy::{ExposeSecret, SecretString};
@@ -532,6 +533,7 @@ async fn daemon_main() {
         .route("/wb/:token/permissions/approve", post(permissions_approve_handler))
         .route("/wb/:token/permissions/revoke", post(permissions_revoke_handler))
         .route("/wb/:token/ledger", get(ledger_for_token_handler))
+        .route("/wb/:token/related", get(related_for_token_handler))
         .route("/ledger/:workbook_id", get(ledger_by_id_handler))
         .with_state(state);
 
@@ -636,6 +638,90 @@ pub(crate) fn read_runtime_port() -> Option<u16> {
 /// on refresh after a launchd-restart / sleep-wake / log-out cycle.
 fn sessions_state_path() -> PathBuf {
     runtime_state_dir().join("sessions.tsv")
+}
+
+/// Splice the related-banner script into the served HTML right
+/// before `</body>`. Calls /wb/<token>/related at load time; if
+/// the daemon reports we're not the latest copy of this workbook,
+/// renders a fixed-position card in the top-right with "Stay"
+/// and "Jump to latest" actions. CSP already permits inline
+/// scripts (`script-src 'self' 'unsafe-inline'`), so no relax.
+fn inject_related_banner(html: &str, token: &str) -> String {
+    let snippet = format!(
+        r#"<style>
+.wb-related-banner {{
+  position: fixed; top: 16px; right: 16px; z-index: 2147483647;
+  max-width: 380px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #fff; color: #0a0a0a;
+  font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  box-shadow: 0 6px 24px rgba(0,0,0,.18), 0 1px 3px rgba(0,0,0,.08);
+  border: 1px solid rgba(0,0,0,.08);
+  display: flex; flex-direction: column; gap: 8px;
+}}
+@media (prefers-color-scheme: dark) {{
+  .wb-related-banner {{ background: #141414; color: #f5f5f5; border-color: rgba(255,255,255,.08); }}
+}}
+.wb-related-banner .wb-related-title {{ font-weight: 600; font-size: 12px; letter-spacing: 0.02em; }}
+.wb-related-banner .wb-related-meta  {{ font-size: 11px; opacity: 0.7; word-break: break-all; }}
+.wb-related-banner .wb-related-actions {{ display: flex; gap: 8px; }}
+.wb-related-banner button {{
+  font: inherit; padding: 5px 10px; border-radius: 6px; cursor: pointer;
+  border: 1px solid currentColor; background: transparent; color: inherit;
+}}
+.wb-related-banner button.primary {{ background: currentColor; color: #fff; }}
+@media (prefers-color-scheme: dark) {{
+  .wb-related-banner button.primary {{ color: #0a0a0a; }}
+}}
+</style>
+<script>
+(async () => {{
+  try {{
+    const r = await fetch("/wb/{token}/related", {{ cache: "no-store" }});
+    if (!r.ok) return;
+    const info = await r.json();
+    if (!info || !info.behind || info.behind < 1) return;
+    if (!info.latest_url) return;
+    const dismissedKey = "wb-related-dismissed:" + (info.latest_sha || "");
+    if (sessionStorage.getItem(dismissedKey)) return;
+    const card = document.createElement("div");
+    card.className = "wb-related-banner";
+    const title = document.createElement("div");
+    title.className = "wb-related-title";
+    title.textContent =
+      info.behind === 1
+        ? "This copy is 1 save behind."
+        : "This copy is " + info.behind + " saves behind.";
+    const meta = document.createElement("div");
+    meta.className = "wb-related-meta";
+    const home = (s) => s.replace(/\/Users\/[^\/]+/, "~");
+    meta.textContent = "Latest is at " + home(info.latest_path || "");
+    const row = document.createElement("div");
+    row.className = "wb-related-actions";
+    const stay = document.createElement("button");
+    stay.textContent = "Stay";
+    stay.onclick = () => {{ sessionStorage.setItem(dismissedKey, "1"); card.remove(); }};
+    const jump = document.createElement("button");
+    jump.className = "primary";
+    jump.textContent = "Jump to latest";
+    jump.onclick = () => {{ window.location.href = info.latest_url; }};
+    row.appendChild(stay); row.appendChild(jump);
+    card.appendChild(title); card.appendChild(meta); card.appendChild(row);
+    document.body.appendChild(card);
+  }} catch {{ /* silent */ }}
+}})();
+</script>"#
+    );
+    if let Some(idx) = html.to_ascii_lowercase().rfind("</body>") {
+        let mut out = String::with_capacity(html.len() + snippet.len());
+        out.push_str(&html[..idx]);
+        out.push_str(&snippet);
+        out.push_str(&html[idx..]);
+        out
+    } else {
+        format!("{html}{snippet}")
+    }
 }
 
 /// Page shown when serve_workbook receives a token it doesn't
@@ -784,10 +870,18 @@ async fn serve_workbook(
             // (any HTTPS host) — Phase 3 may flip that to deny-by-default.
             let policy = parse_secrets_policy(&html);
             let perms = permissions::parse_from_html(&html);
+            // Pull workbook_id from wb-meta if present. Drives the
+            // workbook_id-keyed permissions/secrets fallback so a
+            // copy of the file (macOS rename to "(1)" or a manual
+            // duplicate) inherits prior approvals + keychain entries.
+            let workbook_id = ledger::workbook_id_from_save_body(html.as_bytes());
             {
                 let mut s = state.sessions.lock().await;
                 s.set_policy(&token, policy);
                 s.set_permissions(&token, perms);
+                if let Some(id) = workbook_id {
+                    s.set_workbook_id(&token, id);
+                }
             }
 
             audit_log(&path, "serve", None, None);
@@ -817,7 +911,16 @@ async fn serve_workbook(
                 base-uri 'self'; \
                 form-action 'self'\
             ";
-            let mut resp = Html(html).into_response();
+            // Inject the cross-copy banner script right before
+            // </body>. It calls /wb/<token>/related at load time;
+            // if the daemon reports we're not the latest copy of
+            // this workbook (a duplicate still has prior content),
+            // a small fixed-position card surfaces "Stay" and
+            // "Jump to latest" actions. Position-fixed + pointer-
+            // events scoped, no global CSS — should not collide
+            // with workbook layout.
+            let injected = inject_related_banner(&html, &token);
+            let mut resp = Html(injected).into_response();
             resp.headers_mut()
                 .insert("content-security-policy", csp.parse().unwrap());
             // X-Content-Type-Options stops content-type sniffing,
@@ -856,7 +959,8 @@ async fn save_workbook(
     // file-as-database substrate makes plausible — composition is
     // user-editable HTML, an LLM can output any string into it,
     // and shared workbook files are public artifacts.
-    if let Some(matched_id) = scan_for_known_secrets(&path, &body) {
+    let session_workbook_id = state.sessions.lock().await.workbook_id_for(&token);
+    if let Some(matched_id) = scan_for_known_secrets(&path, session_workbook_id.as_deref(), &body) {
         let msg = format!(
             "save refused: workbook content contains the value of secret '{matched_id}'. \
              Remove that string from the workbook before saving (or rotate the key in \
@@ -1078,19 +1182,15 @@ fn parse_policy_from_spec_script(html: &str) -> Option<SecretsPolicy> {
 /// Aho-Corasick if the cost ever shows up in profiles. We zeroize
 /// the secret value buffers immediately after the scan via Drop on
 /// SecretString.
-fn scan_for_known_secrets(path: &Path, body: &[u8]) -> Option<String> {
-    let ids = read_secret_index(path).ok()?;
+fn scan_for_known_secrets(path: &Path, workbook_id: Option<&str>, body: &[u8]) -> Option<String> {
+    let ids = read_secret_index(path, workbook_id).ok()?;
     for id in ids {
         if id == SECRET_INDEX_ID {
             continue;
         }
-        let entry = match keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(path, &id)) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        let value = match entry.get_password() {
-            Ok(v) => SecretString::new(v.into()),
-            Err(_) => continue,
+        let value = match keychain_get(path, workbook_id, &id) {
+            Ok(Some(v)) => SecretString::new(v.into()),
+            _ => continue,
         };
         // Skip absurdly short "secrets" that would false-positive
         // (e.g. a 4-char token would match too many strings).
@@ -1281,13 +1381,11 @@ async fn permissions_list_handler(
         Some(p) => p,
         None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
     };
-    let perms = state
-        .sessions
-        .lock()
-        .await
-        .permissions_for(&token)
-        .unwrap_or_default();
-    let listing = permissions::list_for(&path, &perms);
+    let (perms, wid) = {
+        let mut s = state.sessions.lock().await;
+        (s.permissions_for(&token).unwrap_or_default(), s.workbook_id_for(&token))
+    };
+    let listing = permissions::list_for(&path, wid.as_deref(), &perms);
     (StatusCode::OK, axum::Json(listing)).into_response()
 }
 
@@ -1304,13 +1402,11 @@ async fn permissions_approve_handler(
         Some(p) => p,
         None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
     };
-    let perms = state
-        .sessions
-        .lock()
-        .await
-        .permissions_for(&token)
-        .unwrap_or_default();
-    match permissions::approve(&path, &perms, &req.ids) {
+    let (perms, wid) = {
+        let mut s = state.sessions.lock().await;
+        (s.permissions_for(&token).unwrap_or_default(), s.workbook_id_for(&token))
+    };
+    match permissions::approve(&path, wid.as_deref(), &perms, &req.ids) {
         Ok(listing) => {
             audit_log(&path, "permissions-approve", None, None);
             (StatusCode::OK, axum::Json(listing)).into_response()
@@ -1332,13 +1428,11 @@ async fn permissions_revoke_handler(
         Some(p) => p,
         None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
     };
-    let perms = state
-        .sessions
-        .lock()
-        .await
-        .permissions_for(&token)
-        .unwrap_or_default();
-    match permissions::revoke(&path, &perms, &req.ids) {
+    let (perms, wid) = {
+        let mut s = state.sessions.lock().await;
+        (s.permissions_for(&token).unwrap_or_default(), s.workbook_id_for(&token))
+    };
+    match permissions::revoke(&path, wid.as_deref(), &perms, &req.ids) {
         Ok(listing) => {
             audit_log(&path, "permissions-revoke", None, None);
             (StatusCode::OK, axum::Json(listing)).into_response()
@@ -1399,6 +1493,121 @@ async fn ledger_by_id_handler(
     (StatusCode::OK, axum::Json(serde_json::json!({"history": history}))).into_response()
 }
 
+/// "Where is this workbook in its history?" — the data the in-page
+/// banner uses to render "you're N saves behind, latest is at <path>"
+/// when the user opens an out-of-date copy of a workbook (typically
+/// via macOS' "(1) (2)" duplicate-naming).
+///
+/// Response shape (all fields optional, missing on the no-info case):
+///   {
+///     "current_path":    "/Users/.../foo (1).workbook.html",
+///     "current_sha":     "<sha256 of file as it sits on disk>",
+///     "behind":          2,                     // saves newer than current_sha
+///     "latest_path":     "/Users/.../foo.workbook.html",
+///     "latest_sha":      "<sha256>",
+///     "latest_url":      "http://127.0.0.1:<port>/wb/<token>/",
+///     "paths_seen":      [...]                  // every path this id has used
+///   }
+///
+/// Conservative defaults — workbooks without wb-meta or with no
+/// ledger history return `{"behind": 0}` and the banner stays
+/// hidden.
+async fn related_for_token_handler(
+    State(state): State<AppState>,
+    AxPath(token): AxPath<String>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(resp) = require_daemon_origin(&headers) {
+        return resp;
+    }
+    let path = match path_for_token(&state, &token).await {
+        Some(p) => p,
+        None => return (StatusCode::NOT_FOUND, "unknown token").into_response(),
+    };
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(b) => b,
+        Err(_) => {
+            return (StatusCode::OK, axum::Json(serde_json::json!({"behind": 0})))
+                .into_response();
+        }
+    };
+
+    // Resolve workbook_id — session cache first, fall back to a
+    // wb-meta parse so a workbook that hasn't been saved yet still
+    // gets nothing wrong instead of a stale ledger lookup.
+    let mut wid = state.sessions.lock().await.workbook_id_for(&token);
+    if wid.is_none() {
+        wid = ledger::workbook_id_from_save_body(&bytes);
+        if let Some(ref hit) = wid {
+            state.sessions.lock().await.set_workbook_id(&token, hit.clone());
+        }
+    }
+    let Some(wid) = wid else {
+        return (StatusCode::OK, axum::Json(serde_json::json!({"behind": 0})))
+            .into_response();
+    };
+
+    let Some(history) = ledger::for_workbook(&wid) else {
+        return (StatusCode::OK, axum::Json(serde_json::json!({"behind": 0})))
+            .into_response();
+    };
+
+    use sha2::{Digest, Sha256};
+    let current_sha = hex::encode(Sha256::digest(&bytes));
+    let saves = &history.saves;
+    if saves.is_empty() {
+        return (StatusCode::OK, axum::Json(serde_json::json!({"behind": 0})))
+            .into_response();
+    }
+    // Find LAST occurrence of the current sha so we get the most
+    // recent matching save when content has been written + reverted.
+    let pos = saves
+        .iter()
+        .rposition(|e| e.file_sha256 == current_sha);
+    let total = saves.len();
+    let behind = match pos {
+        Some(i) => total - i - 1,                 // saves after this one
+        None => total,                            // never seen this content
+    };
+    let latest = saves.last().unwrap();           // saves non-empty per check above
+
+    // Pre-mint a session URL for the latest path so the banner's
+    // "Jump to latest" button is just window.location.href = ...
+    // No-op if latest_path == current_path (same file).
+    let mut latest_url: Option<String> = None;
+    if latest.file_path != path.display().to_string()
+        && std::path::Path::new(&latest.file_path).exists()
+    {
+        let new_token = mint_token();
+        let evicted = state
+            .sessions
+            .lock()
+            .await
+            .insert(new_token.clone(), PathBuf::from(&latest.file_path));
+        if let Some(old) = evicted {
+            eprintln!("[workbooksd] sessions at cap; evicted {old} during /related premint");
+        }
+        latest_url = Some(format!(
+            "http://{BIND_HOST}:{}/wb/{new_token}/",
+            bound_port(),
+        ));
+    }
+
+    (
+        StatusCode::OK,
+        axum::Json(serde_json::json!({
+            "current_path": path.display().to_string(),
+            "current_sha":  current_sha,
+            "behind":       behind,
+            "latest_path":  latest.file_path,
+            "latest_sha":   latest.file_sha256,
+            "latest_url":   latest_url,
+            "paths_seen":   history.paths_seen,
+        })),
+    )
+        .into_response()
+}
+
 /// Helper used by acp.rs: returns true if `id` is allowed for the
 /// given session token. Looks up the session's bound path + parsed
 /// permissions, calls into `permissions::is_allowed`.
@@ -1406,8 +1615,9 @@ pub(crate) async fn check_permission(state: &AppState, token: &str, id: &str) ->
     let mut s = state.sessions.lock().await;
     let Some(perms) = s.permissions_for(token) else { return true; };
     let Some(path) = s.touch(token) else { return false; };
+    let workbook_id = s.workbook_id_for(token);
     drop(s);
-    permissions::is_allowed(id, &path, &perms)
+    permissions::is_allowed(id, &path, workbook_id.as_deref(), &perms)
 }
 
 /// HTTP handler shorthand: resolve `token` to a path AND verify
@@ -1462,8 +1672,93 @@ fn path_fingerprint(path: &Path) -> String {
     format!("{:016x}", h.finish())
 }
 
+/// Path-keyed keychain account name. Used for back-compat reads
+/// of pre-0.1.4 entries and as the fallback when no workbook_id
+/// is known yet (brand-new workbook before its first save).
 fn keychain_account(path: &Path, secret_id: &str) -> String {
     format!("{}:{}", path_fingerprint(path), secret_id)
+}
+
+/// workbook_id-keyed keychain account name. The PRIMARY identity
+/// for substrate workbooks — survives renames, duplicates, and
+/// any other path change. A user setting an API key on
+/// `myworkbook.workbook.html` makes it instantly available on
+/// `myworkbook (1).workbook.html` (the macOS-rename copy) since
+/// both files have the same wb-meta workbook_id.
+fn keychain_account_by_id(workbook_id: &str, secret_id: &str) -> String {
+    // "wb:" prefix distinguishes id-keyed from path-keyed accounts
+    // in `security dump-keychain` output and makes the format
+    // self-documenting.
+    format!("wb:{workbook_id}:{secret_id}")
+}
+
+/// Resolve a keychain account preferring id-keying when a
+/// workbook_id is known, falling back to path-keying. Returns the
+/// account name to use for READING — for WRITING, we write to BOTH
+/// (id-keyed for future copies + path-keyed for back-compat readers).
+fn keychain_read_account(path: &Path, workbook_id: Option<&str>, secret_id: &str) -> String {
+    workbook_id
+        .map(|id| keychain_account_by_id(id, secret_id))
+        .unwrap_or_else(|| keychain_account(path, secret_id))
+}
+
+/// Read a secret value preferring id-keyed; fall back to path-keyed
+/// (legacy entries from pre-0.1.4 sessions). Either succeeds first
+/// wins. NoEntry → None.
+fn keychain_get(
+    path: &Path,
+    workbook_id: Option<&str>,
+    secret_id: &str,
+) -> Result<Option<String>, keyring::Error> {
+    if let Some(id) = workbook_id {
+        let e = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account_by_id(id, secret_id))?;
+        match e.get_password() {
+            Ok(v) => return Ok(Some(v)),
+            Err(keyring::Error::NoEntry) => {}
+            Err(other) => return Err(other),
+        }
+    }
+    let e = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(path, secret_id))?;
+    match e.get_password() {
+        Ok(v) => Ok(Some(v)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(other) => Err(other),
+    }
+}
+
+/// Write a secret value to BOTH indexes when workbook_id is known
+/// (so future copies inherit) — to path-keyed only otherwise (the
+/// brand-new-workbook case where wb-meta hasn't been minted yet).
+fn keychain_set(
+    path: &Path,
+    workbook_id: Option<&str>,
+    secret_id: &str,
+    value: &str,
+) -> Result<(), keyring::Error> {
+    let path_entry = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(path, secret_id))?;
+    path_entry.set_password(value)?;
+    if let Some(id) = workbook_id {
+        let id_entry = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account_by_id(id, secret_id))?;
+        id_entry.set_password(value)?;
+    }
+    Ok(())
+}
+
+/// Delete from both indexes. NoEntry on either side is fine.
+fn keychain_delete(
+    path: &Path,
+    workbook_id: Option<&str>,
+    secret_id: &str,
+) -> Result<(), keyring::Error> {
+    if let Ok(e) = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(path, secret_id)) {
+        let _ = e.delete_credential();
+    }
+    if let Some(id) = workbook_id {
+        if let Ok(e) = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account_by_id(id, secret_id)) {
+            let _ = e.delete_credential();
+        }
+    }
+    Ok(())
 }
 
 /// Resolve the path bound to `token`, or 404 / 403. Refreshes
@@ -1506,28 +1801,18 @@ async fn secret_set_handler(
     // Wrap incoming value in SecretString so it can't accidentally
     // appear in panic backtraces or eprintln debug paths.
     let value = SecretString::new(req.value.into());
-    let entry = match keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(&path, &req.id)) {
-        Ok(e) => e,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("keychain open: {e}"),
-            )
-                .into_response();
-        }
-    };
-    if let Err(e) = entry.set_password(value.expose_secret()) {
+    let workbook_id = state.sessions.lock().await.workbook_id_for(&token);
+    if let Err(e) = keychain_set(&path, workbook_id.as_deref(), &req.id, value.expose_secret()) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("keychain write: {e}"),
         )
             .into_response();
     }
-    // Persist a per-path "known ids" index so /secret/list doesn't
-    // need to enumerate the keychain (which is awkward + unreliable
-    // across platforms). The index itself sits in the keychain too,
-    // under a reserved id so it can't collide with a user secret.
-    let _ = upsert_secret_index(&path, |ids| {
+    // Persist the "known ids" index. Writes to BOTH path-keyed and
+    // (when workbook_id is known) id-keyed entries so /secret/list
+    // surfaces the same set of ids on every copy of this workbook.
+    let _ = upsert_secret_index(&path, workbook_id.as_deref(), |ids| {
         if !ids.iter().any(|x| x == &req.id) {
             ids.push(req.id.clone());
         }
@@ -1557,11 +1842,9 @@ async fn secret_delete_handler(
     if req.id == SECRET_INDEX_ID {
         return (StatusCode::BAD_REQUEST, "reserved secret id").into_response();
     }
-    if let Ok(entry) = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(&path, &req.id)) {
-        // delete_credential returns NoEntry if it didn't exist; that's fine.
-        let _ = entry.delete_credential();
-    }
-    let _ = upsert_secret_index(&path, |ids| ids.retain(|x| x != &req.id));
+    let workbook_id = state.sessions.lock().await.workbook_id_for(&token);
+    let _ = keychain_delete(&path, workbook_id.as_deref(), &req.id);
+    let _ = upsert_secret_index(&path, workbook_id.as_deref(), |ids| ids.retain(|x| x != &req.id));
     audit_log(&path, "secret-delete", Some(&req.id), None);
     (StatusCode::OK, "ok").into_response()
 }
@@ -1616,29 +1899,13 @@ async fn secret_preview_handler(
     if id == SECRET_INDEX_ID {
         return (StatusCode::BAD_REQUEST, "reserved secret id").into_response();
     }
-    let entry = match keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(&path, &id)) {
-        Ok(e) => e,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("keychain open: {e}"),
-            )
-                .into_response();
-        }
+    let workbook_id = state.sessions.lock().await.workbook_id_for(&token);
+    let raw = match keychain_get(&path, workbook_id.as_deref(), &id) {
+        Ok(Some(v)) => v,
+        Ok(None) => return (StatusCode::NOT_FOUND, "secret not set").into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("keychain read: {e}")).into_response(),
     };
-    let value = match entry.get_password() {
-        Ok(v) => SecretString::new(v.into()),
-        Err(keyring::Error::NoEntry) => {
-            return (StatusCode::NOT_FOUND, "secret not set").into_response();
-        }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("keychain read: {e}"),
-            )
-                .into_response();
-        }
-    };
+    let value = SecretString::new(raw.into());
     let masked = mask_preview(&value);
     // value drops here, zeroizing.
     audit_log(&path, "secret-preview", Some(&id), None);
@@ -1659,7 +1926,8 @@ async fn secret_list_handler(
     };
     // Filter out the reserved index id from the response — it's
     // an implementation detail, not a user-set secret.
-    let ids: Vec<String> = read_secret_index(&path)
+    let workbook_id = state.sessions.lock().await.workbook_id_for(&token);
+    let ids: Vec<String> = read_secret_index(&path, workbook_id.as_deref())
         .unwrap_or_default()
         .into_iter()
         .filter(|x| x != SECRET_INDEX_ID)
@@ -1673,26 +1941,67 @@ fn is_secret_id_char(c: char) -> bool {
 
 const SECRET_INDEX_ID: &str = "__index";
 
-fn read_secret_index(path: &Path) -> Result<Vec<String>, String> {
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(path, SECRET_INDEX_ID))
-        .map_err(|e| format!("keychain open: {e}"))?;
-    match entry.get_password() {
-        Ok(s) => Ok(s.split(',').filter(|x| !x.is_empty()).map(String::from).collect()),
-        Err(keyring::Error::NoEntry) => Ok(Vec::new()),
-        Err(e) => Err(format!("keychain read: {e}")),
+/// Read the union of secret IDs known for this workbook —
+/// id-keyed entries first (the modern primary), path-keyed
+/// added in for back-compat with pre-0.1.4 sessions. Either
+/// source contributes; UI-side dedupe collapses overlap.
+fn read_secret_index(path: &Path, workbook_id: Option<&str>) -> Result<Vec<String>, String> {
+    use std::collections::BTreeSet;
+    let mut out: BTreeSet<String> = BTreeSet::new();
+
+    // Path-keyed.
+    let path_entry = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(path, SECRET_INDEX_ID))
+        .map_err(|e| format!("keychain open (path): {e}"))?;
+    match path_entry.get_password() {
+        Ok(s) => for x in s.split(',') { if !x.is_empty() { out.insert(x.to_string()); } },
+        Err(keyring::Error::NoEntry) => {},
+        Err(e) => return Err(format!("keychain read (path): {e}")),
     }
+
+    // Id-keyed (modern primary).
+    if let Some(id) = workbook_id {
+        let id_entry = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account_by_id(id, SECRET_INDEX_ID))
+            .map_err(|e| format!("keychain open (id): {e}"))?;
+        match id_entry.get_password() {
+            Ok(s) => for x in s.split(',') { if !x.is_empty() { out.insert(x.to_string()); } },
+            Err(keyring::Error::NoEntry) => {},
+            Err(e) => return Err(format!("keychain read (id): {e}")),
+        }
+    }
+
+    Ok(out.into_iter().collect())
 }
 
-fn upsert_secret_index(path: &Path, mutate: impl FnOnce(&mut Vec<String>)) -> Result<(), String> {
-    let mut ids = read_secret_index(path).unwrap_or_default();
+/// Update the secret-id index. Writes to BOTH path-keyed and
+/// (when workbook_id is known) id-keyed entries — the latter
+/// makes the index inheritable across renames/duplicates.
+fn upsert_secret_index(
+    path: &Path,
+    workbook_id: Option<&str>,
+    mutate: impl FnOnce(&mut Vec<String>),
+) -> Result<(), String> {
+    let mut ids = read_secret_index(path, workbook_id).unwrap_or_default();
     mutate(&mut ids);
     ids.sort();
     ids.dedup();
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(path, SECRET_INDEX_ID))
-        .map_err(|e| format!("keychain open: {e}"))?;
-    entry
-        .set_password(&ids.join(","))
-        .map_err(|e| format!("keychain write: {e}"))
+    let joined = ids.join(",");
+
+    // Path-keyed write (back-compat readers + the no-workbook_id case).
+    let path_entry = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account(path, SECRET_INDEX_ID))
+        .map_err(|e| format!("keychain open (path): {e}"))?;
+    path_entry
+        .set_password(&joined)
+        .map_err(|e| format!("keychain write (path): {e}"))?;
+
+    // Id-keyed write (modern primary; inherited across copies).
+    if let Some(id) = workbook_id {
+        let id_entry = keyring::Entry::new(KEYCHAIN_SERVICE, &keychain_account_by_id(id, SECRET_INDEX_ID))
+            .map_err(|e| format!("keychain open (id): {e}"))?;
+        id_entry
+            .set_password(&joined)
+            .map_err(|e| format!("keychain write (id): {e}"))?;
+    }
+    Ok(())
 }
 
 // ── outbound HTTPS proxy ───────────────────────────────────────────
@@ -1868,25 +2177,13 @@ async fn proxy_handler(
     }
 
     if let Some(auth) = &req.auth {
-        let entry = match keyring::Entry::new(
-            KEYCHAIN_SERVICE,
-            &keychain_account(&path, &auth.secret_id),
-        ) {
-            Ok(e) => e,
-            Err(e) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("keychain open: {e}"),
-                )
-                    .into_response();
-            }
-        };
-        // Wrap the keychain read in SecretString so the value can't
-        // accidentally surface in a panic backtrace, eprintln, or
-        // unintended Debug derive. Drop zeroizes the buffer.
-        let value: SecretString = match entry.get_password() {
-            Ok(v) => SecretString::new(v.into()),
-            Err(keyring::Error::NoEntry) => {
+        // Resolve the secret value via id-keyed → path-keyed
+        // fallback so duplicates of this workbook (macOS-rename
+        // copies) inherit keys without re-entry.
+        let proxy_workbook_id = state.sessions.lock().await.workbook_id_for(&token);
+        let value: SecretString = match keychain_get(&path, proxy_workbook_id.as_deref(), &auth.secret_id) {
+            Ok(Some(v)) => SecretString::new(v.into()),
+            Ok(None) => {
                 return (
                     StatusCode::BAD_REQUEST,
                     format!("secret '{}' not set for this workbook", auth.secret_id),

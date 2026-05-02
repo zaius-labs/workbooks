@@ -1,6 +1,6 @@
 [package]
 name = "workbooksd"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "Background daemon that serves and saves .workbook.html files for the local browser"
 license = "MIT"
@@ -48,6 +48,12 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # Defense against secrets leaking via panic backtraces or eprintln!.
 secrecy = "0.10"
 zeroize = "1"
+# AES-256-GCM for studio-v1 envelope decryption (C1.8). Pure Rust;
+# matches the WebCrypto AES-GCM used on the author side in
+# packages/workbook-cli/src/encrypt/wrapStudio.mjs.
+aes-gcm = "0.10"
+# base64 + base64url codecs for envelope payload + DEK transport.
+base64 = "0.22"
 # SHA-256 for the ledger's content fingerprints. Pure Rust, no
 # system OpenSSL.
 sha2 = "0.10"

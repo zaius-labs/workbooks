@@ -142,8 +142,16 @@ fn approvals_file() -> PathBuf {
 
 #[derive(Default, Serialize, Deserialize)]
 struct ApprovalsFile {
-    /// path-fingerprint → list of granted permission ids
+    /// path-fingerprint → list of granted permission ids. Kept for
+    /// back-compat with workbooks-without-wb-meta and for files
+    /// that haven't yet had a first save (no workbook_id assigned).
     granted: HashMap<String, Vec<String>>,
+    /// workbook_id → list of granted permission ids. The PRIMARY
+    /// index for substrate workbooks. Survives macOS' "(1) (2)"
+    /// rename pattern and any other path change — the user grants
+    /// once, every copy on this machine inherits the approval.
+    #[serde(default)]
+    granted_by_id: HashMap<String, Vec<String>>,
 }
 
 fn load_approvals() -> ApprovalsFile {
@@ -166,12 +174,53 @@ fn store_approvals(a: &ApprovalsFile) -> Result<(), String> {
     Ok(())
 }
 
-pub fn list_for(workbook_path: &Path, perms: &Permissions) -> PermissionsList {
-    let key = path_fingerprint(workbook_path);
-    let approvals = load_approvals();
-    let granted_all: Vec<String> = approvals.granted.get(&key).cloned().unwrap_or_default();
+/// Resolve grants for this workbook. When workbook_id is known
+/// AND a workbook_id-keyed entry exists for it, that entry is
+/// AUTHORITATIVE — path-keyed entries are ignored. This keeps
+/// revocation semantics clean: revoking once on any copy clears
+/// the grant for every copy, no orphan path-keyed leaks.
+///
+/// If id-keyed is not yet established (first-grant case, or
+/// a workbook without wb-meta), fall back to path-keyed for
+/// back-compat with 0.1.x sessions.
+fn merged_granted(
+    approvals: &ApprovalsFile,
+    workbook_path: &Path,
+    workbook_id: Option<&str>,
+    declared: &std::collections::HashSet<&str>,
+) -> Vec<String> {
+    let mut out: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    if let Some(id) = workbook_id {
+        if let Some(v) = approvals.granted_by_id.get(id) {
+            for g in v {
+                if declared.contains(g.as_str()) { out.insert(g.clone()); }
+            }
+            return out.into_iter().collect();   // id index wins, no fallback
+        }
+    }
+    // Legacy path: pre-substrate workbook OR a workbook whose
+    // first approval predates this fix. Reads the path-keyed
+    // store; the next approve/revoke migrates it into id-keyed.
+    let path_key = path_fingerprint(workbook_path);
+    if let Some(v) = approvals.granted.get(&path_key) {
+        for g in v {
+            if declared.contains(g.as_str()) { out.insert(g.clone()); }
+        }
+    }
+    out.into_iter().collect()
+}
 
-    let requested: Vec<PermissionDecl> = perms
+pub fn list_for(
+    workbook_path: &Path,
+    workbook_id: Option<&str>,
+    perms: &Permissions,
+) -> PermissionsList {
+    let approvals = load_approvals();
+    let declared: std::collections::HashSet<&str> =
+        perms.by_id.keys().map(|s| s.as_str()).collect();
+    let granted = merged_granted(&approvals, workbook_path, workbook_id, &declared);
+
+    let mut requested: Vec<PermissionDecl> = perms
         .by_id
         .iter()
         .map(|(id, reason)| PermissionDecl {
@@ -179,17 +228,7 @@ pub fn list_for(workbook_path: &Path, perms: &Permissions) -> PermissionsList {
             reason: reason.clone(),
         })
         .collect();
-    let mut requested = requested;
     requested.sort_by(|a, b| a.id.cmp(&b.id));
-
-    // Filter granted to only what's still requested — if a workbook
-    // shrank its declared set, we don't surface stale grants.
-    let declared: std::collections::HashSet<&str> =
-        perms.by_id.keys().map(|s| s.as_str()).collect();
-    let granted: Vec<String> = granted_all
-        .into_iter()
-        .filter(|g| declared.contains(g.as_str()))
-        .collect();
 
     let needs_approval = !requested.is_empty() && granted.len() < requested.len();
     PermissionsList { requested, granted, needs_approval }
@@ -197,67 +236,99 @@ pub fn list_for(workbook_path: &Path, perms: &Permissions) -> PermissionsList {
 
 pub fn approve(
     workbook_path: &Path,
+    workbook_id: Option<&str>,
     perms: &Permissions,
     requested_ids: &[String],
 ) -> Result<PermissionsList, String> {
-    let key = path_fingerprint(workbook_path);
     let mut approvals = load_approvals();
     let declared: std::collections::HashSet<&str> =
         perms.by_id.keys().map(|s| s.as_str()).collect();
-    // Only persist ids that the workbook actually declared. The
-    // browser can't grant itself permissions the workbook didn't
-    // ask for. UNION with whatever was already granted so a per-row
-    // approve doesn't accidentally drop earlier grants — the UI
-    // pattern is "approve this one button" not "submit the whole
-    // checklist."
-    let mut existing: std::collections::BTreeSet<String> = approvals
-        .granted
-        .get(&key)
+    // Filter to declared-only — clients can't grant themselves
+    // permissions the workbook didn't ask for.
+    let to_add: Vec<String> = requested_ids
+        .iter()
+        .filter(|id| declared.contains(id.as_str()))
         .cloned()
-        .unwrap_or_default()
-        .into_iter()
         .collect();
-    for id in requested_ids {
-        if declared.contains(id.as_str()) {
-            existing.insert(id.clone());
-        }
+
+    // Write to the id-keyed index when workbook_id is known.
+    // Otherwise (no wb-meta yet) fall back to path-keyed — the
+    // first save will mint a workbook_id, and the next approve
+    // after that will migrate to id-keyed semantics. UNION
+    // semantic per index so per-row Allow buttons compose.
+    if let Some(id) = workbook_id {
+        let mut id_set: std::collections::BTreeSet<String> = approvals
+            .granted_by_id
+            .get(id)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        for g in &to_add { id_set.insert(g.clone()); }
+        approvals.granted_by_id.insert(id.to_string(), id_set.into_iter().collect());
+    } else {
+        let path_key = path_fingerprint(workbook_path);
+        let mut path_set: std::collections::BTreeSet<String> = approvals
+            .granted
+            .get(&path_key)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        for g in &to_add { path_set.insert(g.clone()); }
+        approvals.granted.insert(path_key, path_set.into_iter().collect());
     }
-    approvals.granted.insert(key, existing.into_iter().collect());
+
     store_approvals(&approvals)?;
-    Ok(list_for(workbook_path, perms))
+    Ok(list_for(workbook_path, workbook_id, perms))
 }
 
-/// Remove the given ids from this workbook's granted list.
-/// Idempotent — revoking an id that wasn't granted is a no-op,
-/// not an error. Returns the freshly-listed permissions so the
-/// UI can re-render without a follow-up GET.
+/// Remove the given ids from this workbook's granted lists. Hits
+/// BOTH indexes — otherwise revoke at one path would leak inheritance
+/// to other copies via the id index. Idempotent.
 pub fn revoke(
     workbook_path: &Path,
+    workbook_id: Option<&str>,
     perms: &Permissions,
     ids_to_revoke: &[String],
 ) -> Result<PermissionsList, String> {
-    let key = path_fingerprint(workbook_path);
     let mut approvals = load_approvals();
-    if let Some(granted) = approvals.granted.get_mut(&key) {
+    let path_key = path_fingerprint(workbook_path);
+    if let Some(granted) = approvals.granted.get_mut(&path_key) {
         granted.retain(|g| !ids_to_revoke.iter().any(|x| x == g));
     }
+    if let Some(id) = workbook_id {
+        if let Some(granted) = approvals.granted_by_id.get_mut(id) {
+            granted.retain(|g| !ids_to_revoke.iter().any(|x| x == g));
+        }
+    }
     store_approvals(&approvals)?;
-    Ok(list_for(workbook_path, perms))
+    Ok(list_for(workbook_path, workbook_id, perms))
 }
 
 /// Returns true if `id` is granted for this workbook (or if the
 /// workbook didn't declare the permission, in which case the
-/// daemon doesn't gate). Used by enforcement points — e.g. /agent/*
-/// calls `is_allowed("agents", path, &perms)?`.
-pub fn is_allowed(id: &str, workbook_path: &Path, perms: &Permissions) -> bool {
+/// daemon doesn't gate). Same authority order as `merged_granted`:
+/// id-keyed wins when present, path-keyed is fallback for legacy.
+pub fn is_allowed(
+    id: &str,
+    workbook_path: &Path,
+    workbook_id: Option<&str>,
+    perms: &Permissions,
+) -> bool {
     if !perms.is_declared(id) {
         return true; // no declaration → no gate
     }
-    let key = path_fingerprint(workbook_path);
     let approvals = load_approvals();
+    if let Some(wid) = workbook_id {
+        if let Some(v) = approvals.granted_by_id.get(wid) {
+            return v.iter().any(|s| s == id);
+        }
+    }
+    let path_key = path_fingerprint(workbook_path);
     approvals
         .granted
-        .get(&key)
+        .get(&path_key)
         .map(|v| v.iter().any(|s| s == id))
         .unwrap_or(false)
 }
