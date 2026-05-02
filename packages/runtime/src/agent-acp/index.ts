@@ -123,6 +123,43 @@ export async function listAdapters(): Promise<AcpAdapterStatus[]> {
   }));
 }
 
+/** A virtual filesystem entry — the workbook's logical files
+ *  (composition, skills, etc.) projected as paths the agent can
+ *  read or write. ACP routes `fs/read_text_file` and
+ *  `fs/write_text_file` requests through the client (us); we
+ *  resolve them against this map instead of the daemon's scratch
+ *  dir. The substrate stays the source of truth.
+ *
+ *   {
+ *     "/workbook/composition.html": {
+ *       read:  () => composition.html,
+ *       write: (next) => composition.set(next),
+ *     },
+ *     "/workbook/skills/fal-ai/SKILL.md": {
+ *       read: () => loadSkill("fal-ai"),  // read-only; no write
+ *     },
+ *   }
+ *
+ *  Path resolution is exact-match for static entries; supply a
+ *  glob/prefix matcher via the optional `match` function for
+ *  dynamic paths (e.g. "/workbook/assets/*"). */
+export interface VirtualFsEntry {
+  /** Read the current value for this path. Resolves with the file
+   *  content, or rejects if the file no longer exists. */
+  read?: () => Promise<string> | string;
+  /** Apply a new value. Rejects if the entry is read-only. */
+  write?: (content: string) => Promise<void> | void;
+}
+
+export interface VirtualFs {
+  /** Static path → entry map. Checked before `match`. */
+  entries?: Record<string, VirtualFsEntry>;
+  /** Optional dynamic resolver. Called when a path isn't in
+   *  `entries`. Return `null` to fall through to the real
+   *  scratch dir. */
+  match?(path: string): VirtualFsEntry | null;
+}
+
 /** Hooks the consumer can install for inbound (agent → us) requests
  *  and notifications. All optional with sensible defaults. */
 export interface AcpClientHooks {
@@ -132,14 +169,18 @@ export interface AcpClientHooks {
   /** Streaming session updates — text deltas, tool calls, plan
    *  updates, etc. Every visible thing the agent does. */
   onSessionUpdate?(n: SessionNotification): void;
-  /** Agent asks the client to read a text file from the
-   *  daemon-jailed scratch dir. Phase 2 will route through the
-   *  daemon; Phase 1 returns "not supported" so the agent falls
-   *  back to its own bash tools. */
+  /** Custom read handler. Overrides `virtualFs`. Use this when you
+   *  want full control (e.g. routing reads through the daemon for
+   *  files in the scratch dir). */
   onReadTextFile?(req: ReadTextFileRequest): Promise<ReadTextFileResponse>;
-  /** Symmetric: agent asks the client to write a text file. Same
-   *  Phase 1 vs Phase 2 caveat. */
+  /** Custom write handler. Overrides `virtualFs`. */
   onWriteTextFile?(req: WriteTextFileRequest): Promise<void>;
+  /** Workbook's logical filesystem projected into the agent's view.
+   *  When the agent calls `fs/read_text_file` or
+   *  `fs/write_text_file`, the path is resolved against this map.
+   *  Misses fall through to "not supported" — the agent will then
+   *  use its own bash to read from the daemon's scratch dir. */
+  virtualFs?: VirtualFs;
 }
 
 export interface AcpSession {
@@ -285,10 +326,23 @@ export async function connect(opts: {
 
   return {
     initialize(params) {
+      // Capability advertisement: read/write are TRUE if either an
+      // explicit hook is provided OR a virtualFs entry can satisfy.
+      // The agent uses these flags to decide when to call fs/* vs.
+      // shell out to its own bash tools.
+      const h = hooks;
+      const hasReadable =
+        !!h.onReadTextFile ||
+        !!h.virtualFs?.match ||
+        Object.values(h.virtualFs?.entries ?? {}).some((e) => !!e.read);
+      const hasWritable =
+        !!h.onWriteTextFile ||
+        !!h.virtualFs?.match ||
+        Object.values(h.virtualFs?.entries ?? {}).some((e) => !!e.write);
       const merged: InitializeRequest = {
         protocolVersion: 1,
         clientCapabilities: {
-          fs: { readTextFile: !!opts.hooks?.onReadTextFile, writeTextFile: !!opts.hooks?.onWriteTextFile },
+          fs: { readTextFile: hasReadable, writeTextFile: hasWritable },
           terminal: false,
         },
         ...(params as Partial<InitializeRequest>),
@@ -328,19 +382,39 @@ async function handleInbound(
       return { outcome: { outcome: "selected", optionId: optId } } satisfies RequestPermissionResponse;
     }
     case "fs/read_text_file": {
-      if (hooks.onReadTextFile) return hooks.onReadTextFile(params as ReadTextFileRequest);
-      throw new AcpError("fs/read_text_file not enabled in client capabilities");
+      const req = params as ReadTextFileRequest;
+      if (hooks.onReadTextFile) return hooks.onReadTextFile(req);
+      const entry = resolveVirtualFs(req.path, hooks.virtualFs);
+      if (entry?.read) {
+        const content = await entry.read();
+        return { content } satisfies ReadTextFileResponse;
+      }
+      throw new AcpError(`fs/read_text_file: no virtual entry for ${req.path}`);
     }
     case "fs/write_text_file": {
+      const req = params as WriteTextFileRequest;
       if (hooks.onWriteTextFile) {
-        await hooks.onWriteTextFile(params as WriteTextFileRequest);
+        await hooks.onWriteTextFile(req);
         return null;
       }
-      throw new AcpError("fs/write_text_file not enabled in client capabilities");
+      const entry = resolveVirtualFs(req.path, hooks.virtualFs);
+      if (entry?.write) {
+        await entry.write(req.content);
+        return null;
+      }
+      throw new AcpError(`fs/write_text_file: no writable virtual entry for ${req.path}`);
     }
     default:
       throw new AcpError(`unknown inbound method: ${method}`);
   }
+}
+
+function resolveVirtualFs(path: string, vfs: VirtualFs | undefined): VirtualFsEntry | null {
+  if (!vfs) return null;
+  const exact = vfs.entries?.[path];
+  if (exact) return exact;
+  if (vfs.match) return vfs.match(path);
+  return null;
 }
 
 async function blobToText(b: Blob): Promise<string> {
