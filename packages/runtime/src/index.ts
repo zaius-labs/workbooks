@@ -412,9 +412,13 @@ export {
   mountInstallPrompt,
   detectInstallTarget,
   isDaemonBound,
+  resolveDaemonBinding,
+  requireBinding,
+  DaemonRequiredError,
   gate as gateFeature,
   registerFeature,
   registerFeatures,
+  autoLoadInstallPrompts,
 } from "./install-prompt";
 export type {
   InstallOS,
@@ -423,4 +427,5 @@ export type {
   InstallPromptOpts,
   GateOpts,
   FeatureCopy,
+  DaemonBinding,
 } from "./install-prompt";

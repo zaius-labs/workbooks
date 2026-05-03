@@ -106,17 +106,13 @@ export class WbSecretError extends Error {
   }
 }
 
-/** Resolve the daemon base URL + token from `window.location`. The
- *  workbook is bound to a daemon session iff loaded under
- *  http://127.0.0.1:47119/wb/<32hex>/. Anything else (file://, an
- *  iframe with a different origin, etc.) → null. */
-function resolveDaemonBinding(): { origin: string; token: string } | null {
-  if (typeof window === "undefined" || typeof location === "undefined") return null;
-  if (location.protocol !== "http:" && location.protocol !== "https:") return null;
-  const m = location.pathname.match(/^\/wb\/([0-9a-f]{32})\/?/);
-  if (!m) return null;
-  return { origin: location.origin, token: m[1] };
-}
+// Daemon binding helpers come from install-prompt — single source
+// of truth shared with permissions.ts, agent-acp, and the substrate
+// transports. `requireBinding(feature)` does the resolve-or-throw
+// dance AND auto-mounts the install toast on failure, so authors who
+// haven't explicitly gated still get a soft landing instead of a
+// raw exception in the console.
+import { requireBinding, DaemonRequiredError } from "../install-prompt";
 
 async function postJson(url: string, body: unknown): Promise<Response> {
   let res: Response;
@@ -143,8 +139,7 @@ import { registerSecretValue, unregisterSecretValue } from "./leak-defense";
 
 export const secret: WbSecretApi = {
   async set(id, value) {
-    const b = resolveDaemonBinding();
-    if (!b) throw new WbSecretError("not bound to a daemon session");
+    const b = requireBinding("secrets");
     // Track the value with the page-side leak defense for the
     // duration of the round-trip. Any console.log / cross-origin
     // fetch that accidentally captures it during this window gets
@@ -160,15 +155,13 @@ export const secret: WbSecretApi = {
   },
 
   async delete(id) {
-    const b = resolveDaemonBinding();
-    if (!b) throw new WbSecretError("not bound to a daemon session");
+    const b = requireBinding("secrets");
     const res = await postJson(`${b.origin}/wb/${b.token}/secret/delete`, { id });
     await expectOk(res, "secret/delete");
   },
 
   async list() {
-    const b = resolveDaemonBinding();
-    if (!b) throw new WbSecretError("not bound to a daemon session");
+    const b = requireBinding("secrets");
     let res: Response;
     try {
       res = await fetch(`${b.origin}/wb/${b.token}/secret/list`);
@@ -186,8 +179,7 @@ export const secret: WbSecretApi = {
   },
 
   async preview(id) {
-    const b = resolveDaemonBinding();
-    if (!b) throw new WbSecretError("not bound to a daemon session");
+    const b = requireBinding("secrets");
     let res: Response;
     try {
       res = await fetch(
@@ -204,8 +196,7 @@ export const secret: WbSecretApi = {
 };
 
 export const wbFetch: WbFetchApi = async (req) => {
-  const b = resolveDaemonBinding();
-  if (!b) throw new WbSecretError("not bound to a daemon session");
+  const b = requireBinding("network");
   const res = await postJson(`${b.origin}/wb/${b.token}/proxy`, {
     url: req.url,
     method: req.method ?? "GET",

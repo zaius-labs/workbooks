@@ -75,22 +75,17 @@ export class AcpError extends Error {
   }
 }
 
-/** Resolve daemon binding (token + origin) from `window.location`.
- *  Workbooks served via the daemon arrive at /wb/<32hex>/...; if
- *  we're not on that path we fail fast. */
+// Replaced ad-hoc binding resolver with the SDK's central
+// `requireBinding("acp")` — that auto-mounts the install toast on
+// unbound calls (so the user sees a friendly install prompt instead
+// of a raw console error) and throws DaemonRequiredError, which
+// authors can catch the same way they'd have caught AcpError.
+import { requireBinding } from "../install-prompt";
 function resolveBinding(): { origin: string; token: string } {
   if (typeof window === "undefined" || typeof location === "undefined") {
     throw new AcpError("wb.acp requires a browser context");
   }
-  const m = location.pathname.match(/^\/wb\/([0-9a-f]{32})\/?/);
-  if (!m) {
-    throw new AcpError(
-      "wb.acp: not bound to a daemon session. Open this workbook " +
-      "via http://127.0.0.1:47119/wb/<token>/ (the install-toast self- " +
-      "redirect should do this automatically).",
-    );
-  }
-  return { origin: location.origin, token: m[1] };
+  return requireBinding("acp");
 }
 
 /** Seed the daemon's per-session scratch dir with the workbook's

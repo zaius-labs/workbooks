@@ -118,6 +118,35 @@ export function registerFeatures(map: Record<string, Partial<FeatureCopy>>): voi
   for (const [k, v] of Object.entries(map)) registerFeature(k, v);
 }
 
+/** Auto-load the baked `<script id="wb-install-prompts">` block, if
+ *  the workbook author declared installPrompts in workbook.config.mjs.
+ *  Idempotent — safe to call from any module init. Silently no-ops
+ *  in non-DOM contexts (test runners, SSR, etc.). */
+let _autoLoaded = false;
+export function autoLoadInstallPrompts(): void {
+  if (_autoLoaded) return;
+  _autoLoaded = true;
+  if (typeof document === "undefined") return;
+  const tag = document.getElementById("wb-install-prompts");
+  if (!tag) return;
+  try {
+    const map = JSON.parse(tag.textContent || "{}");
+    if (map && typeof map === "object" && !Array.isArray(map)) {
+      registerFeatures(map);
+    }
+  } catch {
+    // Malformed JSON → ignore. Catalog defaults still work.
+  }
+}
+
+// Run on module init when imported in the browser. Authors who want
+// deterministic ordering (e.g. register their own copy AFTER the
+// baked one) can re-call registerFeature later — registry is
+// last-write-wins.
+if (typeof document !== "undefined") {
+  autoLoadInstallPrompts();
+}
+
 // ── daemon binding detection ─────────────────────────────────────
 
 /** True iff this page was loaded via the workbooksd loopback session
@@ -128,6 +157,60 @@ export function isDaemonBound(): boolean {
   if (location.protocol !== "http:" && location.protocol !== "https:") return false;
   if (location.hostname !== "127.0.0.1") return false;
   return /^\/wb\/[0-9a-f]{32}\/?/.test(location.pathname);
+}
+
+/** Daemon binding payload — origin + token parsed out of the URL.
+ *  Public surface so the secret / permissions / agent-acp call sites
+ *  can share a single source of truth (was duplicated 3+ times). */
+export interface DaemonBinding {
+  origin: string;
+  token: string;
+}
+
+export function resolveDaemonBinding(): DaemonBinding | null {
+  if (typeof window === "undefined" || typeof location === "undefined") return null;
+  if (location.protocol !== "http:" && location.protocol !== "https:") return null;
+  if (location.hostname !== "127.0.0.1") return null;
+  const m = location.pathname.match(/^\/wb\/([0-9a-f]{32})\/?/);
+  if (!m) return null;
+  return { origin: location.origin, token: m[1] };
+}
+
+/** Typed error class daemon-API call sites throw when the page
+ *  isn't bound to a session. Carries a feature key so global error
+ *  handlers (or authors' own try/catch) can route to the right
+ *  install-prompt copy. The string `message` is preserved for
+ *  back-compat with the older WbSecretError / WbPermissionsError
+ *  pattern — anyone currently grepping for "not bound to a daemon
+ *  session" still finds this. */
+export class DaemonRequiredError extends Error {
+  constructor(public feature: string, message?: string) {
+    super(message ?? "not bound to a daemon session");
+    this.name = "DaemonRequiredError";
+  }
+}
+
+/** Resolve the daemon binding OR auto-mount the install toast and
+ *  throw `DaemonRequiredError`. The single chokepoint every
+ *  daemon-only API uses — replaces ~12 ad-hoc
+ *  `if (!b) throw new WbXyzError("not bound to a daemon session")`
+ *  call sites. The toast lands in the corner of the page (variant
+ *  "toast" → fixed-position bottom-left, dismissable via X), so
+ *  callers don't have to know about UI regions.
+ *
+ *  Idempotent at the UI layer — `mountInstallPrompt` honours the
+ *  per-tab `dismissKey` so repeated calls don't pile up toasts.
+ *  Telemetry still fires every call though, so hosts get a true
+ *  count of feature-attempt-without-daemon. */
+export function requireBinding(feature: string): DaemonBinding {
+  const b = resolveDaemonBinding();
+  if (b) return b;
+  if (typeof document !== "undefined") {
+    mountInstallPrompt(document.body, { feature, variant: "toast" });
+  } else {
+    emitTelemetry(feature, "toast");
+  }
+  throw new DaemonRequiredError(feature);
 }
 
 // ── feature gate ─────────────────────────────────────────────────

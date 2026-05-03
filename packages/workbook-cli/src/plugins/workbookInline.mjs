@@ -462,9 +462,30 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
         ? ""
         : `<meta name="wb-permissions" content="${permsB64}">`;
 
+      // Install-prompt copy overrides (Phase 3). Plain JSON in a
+      // <script id="wb-install-prompts"> tag — the runtime's
+      // install-prompt module reads this at startup and calls
+      // registerFeatures(map). Empty config → omit the tag, keep
+      // the SDK's default catalog. Plain JSON (not base64) because
+      // it's not on the daemon's hot path; the runtime parses it
+      // once on init.
+      const installPromptsObj = config.installPrompts ?? {};
+      const installPromptsBlock = Object.keys(installPromptsObj).length === 0
+        ? ""
+        : `<script id="wb-install-prompts" type="application/json">${
+            escapeForScript(JSON.stringify(installPromptsObj))
+          }</script>`;
+
       // Compose ordered blocks: save handler → install toast → portable
       // assets. Save first so Cmd+S works even if the others fail.
-      const headBlocks = [policyMeta, permsMeta, saveBlock, installToastBlock, `${BEGIN}\n${portableBlock}\n${END}`]
+      const headBlocks = [
+        policyMeta,
+        permsMeta,
+        installPromptsBlock,
+        saveBlock,
+        installToastBlock,
+        `${BEGIN}\n${portableBlock}\n${END}`,
+      ]
         .filter(Boolean)
         .join("\n");
       const wrapped = headBlocks;

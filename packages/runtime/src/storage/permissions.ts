@@ -39,13 +39,14 @@ export class WbPermissionsError extends Error {
   }
 }
 
-function resolveBinding(): { origin: string; token: string } | null {
-  if (typeof window === "undefined" || typeof location === "undefined") return null;
-  if (location.protocol !== "http:" && location.protocol !== "https:") return null;
-  const m = location.pathname.match(/^\/wb\/([0-9a-f]{32})\/?/);
-  if (!m) return null;
-  return { origin: location.origin, token: m[1] };
-}
+// Daemon binding helpers come from install-prompt — single source
+// of truth. listPermissions still uses the soft `resolveDaemonBinding`
+// (returns null without side-effects, so we can render an empty
+// dialog when there's no daemon). approve/revoke are user-initiated
+// state changes — those use `requireBinding`, which auto-mounts the
+// install toast and throws if the daemon's missing.
+import { resolveDaemonBinding, requireBinding } from "../install-prompt";
+const resolveBinding = resolveDaemonBinding;
 
 export async function listPermissions(): Promise<PermissionsList> {
   const b = resolveBinding();
@@ -78,8 +79,7 @@ export async function listPermissions(): Promise<PermissionsList> {
 }
 
 export async function approvePermissions(ids: string[]): Promise<PermissionsList> {
-  const b = resolveBinding();
-  if (!b) throw new WbPermissionsError("not bound to a daemon session");
+  const b = requireBinding("daemon");
   let res: Response;
   try {
     res = await fetch(`${b.origin}/wb/${b.token}/permissions/approve`, {
@@ -113,8 +113,7 @@ export async function approvePermissions(ids: string[]): Promise<PermissionsList
  *  previously approved — the next /secret/* or /proxy call from
  *  this session will start refusing again. */
 export async function revokePermissions(ids: string[]): Promise<PermissionsList> {
-  const b = resolveBinding();
-  if (!b) throw new WbPermissionsError("not bound to a daemon session");
+  const b = requireBinding("daemon");
   let res: Response;
   try {
     res = await fetch(`${b.origin}/wb/${b.token}/permissions/revoke`, {

@@ -201,6 +201,62 @@ export async function loadConfig(projectDir) {
     }
   }
 
+  // Install-prompt copy — coarse author override of the SDK's
+  // FEATURE_CATALOG. Whatever the author puts here gets baked into
+  // a `<script id="wb-install-prompts" type="application/json">`
+  // block; the runtime calls `registerFeatures(...)` at startup so
+  // the install wall (any variant) shows their copy instead of the
+  // generic catalog default.
+  //
+  //   installPrompts: {
+  //     agents: {
+  //       title: "Bring your own LLM",
+  //       reason: "colorwave's chat is great, but Claude Code or " +
+  //               "Codex CLI gives you a real co-edit loop.",
+  //     },
+  //   }
+  //
+  // Keys map to feature ids the SDK's `gateFeature` / `requireBinding`
+  // uses (agents / autosave / secrets / network / acp / daemon).
+  // Authors only need to override the features they actually use —
+  // unspecified keys keep the catalog default.
+  const installPrompts = {};
+  if (cfg.installPrompts !== undefined && cfg.installPrompts !== null) {
+    if (typeof cfg.installPrompts !== "object" || Array.isArray(cfg.installPrompts)) {
+      throw new Error("workbook.config: 'installPrompts' must be an object");
+    }
+    for (const [feature, copy] of Object.entries(cfg.installPrompts)) {
+      if (!copy || typeof copy !== "object") {
+        throw new Error(
+          `workbook.config: installPrompts.${feature} must be an object`,
+        );
+      }
+      const out = {};
+      if (copy.title !== undefined) {
+        if (typeof copy.title !== "string" || !copy.title.trim()) {
+          throw new Error(
+            `workbook.config: installPrompts.${feature}.title must be a non-empty string`,
+          );
+        }
+        out.title = copy.title.trim();
+      }
+      if (copy.reason !== undefined) {
+        if (typeof copy.reason !== "string" || !copy.reason.trim()) {
+          throw new Error(
+            `workbook.config: installPrompts.${feature}.reason must be a non-empty string`,
+          );
+        }
+        out.reason = copy.reason.trim();
+      }
+      if (Object.keys(out).length === 0) {
+        throw new Error(
+          `workbook.config: installPrompts.${feature} must specify title and/or reason`,
+        );
+      }
+      installPrompts[feature] = out;
+    }
+  }
+
   // Wasm variant — picks which pre-built slice of runtime-wasm to
   // inline. SPA-shape workbooks save megabytes by opting into a
   // smaller variant; data-app workbooks (sql/ML) need the default.
@@ -264,6 +320,7 @@ export async function loadConfig(projectDir) {
     wasmVariantCheck,
     secrets,
     permissions,
+    installPrompts,
     vite: cfg.vite ?? {},
     // Inline assets unless explicitly disabled; --no-wasm flag flips this.
     inlineRuntime: cfg.inlineRuntime ?? true,
