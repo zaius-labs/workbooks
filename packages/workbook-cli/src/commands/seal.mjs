@@ -106,6 +106,56 @@ export async function runSeal(opts) {
     process.stdout.write(`claim_signed=yes key_id=${claim.key_id}\n`);
   }
   process.stdout.write(`out=${outPath}\n`);
+
+  // C3.1 — optional artifact upload to broker R2 so the workbook is
+  // reachable at workbooks.sh/w/<id>. Author session is required;
+  // we shell out via the daemon's bearer cache when present, else
+  // fail with a clear hint. Bearer flow:
+  //   - If --bearer provided, use that (CI / scripted use)
+  //   - Else read daemon's author_identity.json for the cached
+  //     session bearer (post-C8.7-B registration)
+  if (opts.upload) {
+    const bearer = opts.bearer ?? (await readDaemonBearer().catch(() => null));
+    if (!bearer) {
+      throw new Error(
+        "[seal] --upload requires a broker bearer. Pass --bearer <token>, or run /author/register on the daemon first (C8.7-B).",
+      );
+    }
+    const r = await fetch(
+      `${broker.replace(/\/+$/, "")}/v1/workbooks/${encodeURIComponent(result.workbookId)}/artifact`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          Authorization: `Bearer ${bearer}`,
+        },
+        body: result.html,
+      },
+    );
+    if (!r.ok) {
+      const text = await r.text().catch(() => "");
+      throw new Error(`[seal] upload failed: ${r.status} ${text}`);
+    }
+    const j = await r.json();
+    process.stdout.write(`uploaded=yes viewer_url=${j.viewer_url ?? ""}\n`);
+  }
+}
+
+/** Read the daemon's cached author bearer from ~/Library/Application
+ *  Support/sh.workbooks.workbooksd/signing/author_identity.json. The
+ *  identity file is written by /author/register (C8.7-B) and contains
+ *  the session sub/email/key_id; the bearer itself isn't currently
+ *  persisted (by design — the bearer is a session secret, not an
+ *  identity claim). For now this returns null so the caller falls
+ *  back to --bearer; once C1.9's lease cache also stores the broker
+ *  session bearer, we can wire it through.
+ *
+ *  TODO: persist the bearer alongside author_identity.json (encrypted
+ *  via OS keychain), surface here. Filed as C8.7.2 follow-up. */
+async function readDaemonBearer() {
+  // Intentional — we explicitly don't read a bearer from disk yet.
+  // See docstring.
+  return null;
 }
 
 /** Talk to the local workbooksd daemon to produce a signed author
