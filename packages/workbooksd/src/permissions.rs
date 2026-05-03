@@ -134,19 +134,7 @@ fn path_fingerprint(path: &Path) -> String {
 }
 
 fn approvals_file() -> PathBuf {
-    let mut p: PathBuf = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
-    #[cfg(target_os = "macos")]
-    {
-        p.push("Library/Application Support/sh.workbooks.workbooksd");
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        p.push(".local/share/workbooksd");
-    }
-    p.push("approvals.json");
-    p
+    crate::runtime_state_dir().join("approvals.json")
 }
 
 #[derive(Default, Serialize, Deserialize)]

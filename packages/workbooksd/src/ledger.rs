@@ -80,19 +80,7 @@ const MAX_WORKBOOKS: usize = 10_000;
 const MAX_SAVES_PER_WORKBOOK: usize = 2_000;
 
 fn ledger_path() -> PathBuf {
-    let mut p: PathBuf = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
-    #[cfg(target_os = "macos")]
-    {
-        p.push("Library/Application Support/sh.workbooks.workbooksd");
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        p.push(".local/share/workbooksd");
-    }
-    p.push("ledger.json");
-    p
+    crate::runtime_state_dir().join("ledger.json")
 }
 
 fn load() -> LedgerFile {

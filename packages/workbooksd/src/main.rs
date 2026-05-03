@@ -827,10 +827,10 @@ async fn daemon_main() {
 
     // Spawn the downloads watcher AFTER bind so a watcher panic can't
     // prevent the daemon from accepting connections. Best-effort; if
-    // it fails to spawn (no $HOME, FSEvents permission denied, etc.)
-    // the daemon still serves — users just lose the auto-stamp magic
-    // and have to right-click → Open With → Workbooks the first time
-    // for fresh files.
+    // it fails to spawn (no resolvable known-folders, FSEvents perm
+    // denied, etc.) the daemon still serves — users just lose the
+    // auto-stamp magic and have to right-click → Open With → Workbooks
+    // the first time for fresh files.
     download_watcher::spawn();
 
     axum::serve(listener, app).await.expect("serve");
@@ -855,17 +855,25 @@ fn write_runtime_json(port: u16) -> Result<(), String> {
     Ok(())
 }
 
-/// `~/Library/Application Support/sh.workbooks.workbooksd/` on
-/// macOS, equivalent on Linux. Already used by the audit log and
-/// approvals.json — runtime.json is one more file in the same dir.
+/// Per-user state directory shared by every daemon-side file
+/// (runtime.json, approvals.json, ledger.json, signing identity,
+/// session log).
+///
+/// Resolved via `dirs::data_dir`, which honors each OS's convention:
+///   macOS:   ~/Library/Application Support/sh.workbooks.workbooksd
+///   Linux:   $XDG_DATA_HOME or ~/.local/share/workbooksd
+///   Windows: %APPDATA%\workbooksd
+///
+/// Hardcoding `$HOME` here used to silently break the Windows daemon
+/// because Windows doesn't set HOME — only USERPROFILE — so the path
+/// fell through to /tmp and then runtime.json never landed where the
+/// browser-side code looked. `dirs` reads the right OS-native source.
 pub(crate) fn runtime_state_dir() -> PathBuf {
-    let mut p: PathBuf = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    let mut p = dirs::data_dir().unwrap_or_else(std::env::temp_dir);
     #[cfg(target_os = "macos")]
-    { p.push("Library/Application Support/sh.workbooks.workbooksd"); }
+    { p.push("sh.workbooks.workbooksd"); }
     #[cfg(not(target_os = "macos"))]
-    { p.push(".local/share/workbooksd"); }
+    { p.push("workbooksd"); }
     p
 }
 
@@ -1815,20 +1823,27 @@ fn audit_log(path: &Path, action: &str, secret_id: Option<&str>, host: Option<&s
 }
 
 fn audit_log_path() -> PathBuf {
-    if let Some(home) = std::env::var_os("HOME") {
-        let mut p = PathBuf::from(home);
-        #[cfg(target_os = "macos")]
-        {
-            p.push("Library/Logs");
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            p.push(".local/share/workbooksd");
-        }
+    // Per-OS log location:
+    //   macOS:   ~/Library/Logs/workbooksd-audit.log
+    //   Linux:   share state dir (~/.local/share/workbooksd/...)
+    //   Windows: %LOCALAPPDATA%\workbooksd\Logs\workbooksd-audit.log
+    #[cfg(target_os = "macos")]
+    {
+        let mut p = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
+        p.push("Library/Logs");
         p.push("workbooksd-audit.log");
-        return p;
+        p
     }
-    PathBuf::from("/tmp/workbooksd-audit.log")
+    #[cfg(target_os = "linux")]
+    { runtime_state_dir().join("workbooksd-audit.log") }
+    #[cfg(target_os = "windows")]
+    {
+        let mut p = dirs::data_local_dir().unwrap_or_else(std::env::temp_dir);
+        p.push("workbooksd");
+        p.push("Logs");
+        p.push("workbooksd-audit.log");
+        p
+    }
 }
 
 /// chrono-free ISO8601 without subseconds — enough for an audit log.
@@ -1876,18 +1891,23 @@ fn shell_escape(s: &str) -> String {
 
 #[cfg(unix)]
 fn lockfile_path() -> PathBuf {
+    // Linux: prefer $XDG_RUNTIME_DIR (volatile per-user runtime dir) so
+    // the lock disappears at logout and we don't carry stale lockfiles
+    // across reboots.
     if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
         return PathBuf::from(dir).join("workbooksd.lock");
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        let mut p = PathBuf::from(home);
-        #[cfg(target_os = "macos")]
-        p.push("Library/Caches/sh.workbooks.workbooksd");
-        #[cfg(not(target_os = "macos"))]
-        p.push(".cache/workbooksd");
-        return p.join("lock");
-    }
-    PathBuf::from("/tmp/workbooksd.lock")
+    // Otherwise the OS cache dir:
+    //   macOS:   ~/Library/Caches/sh.workbooks.workbooksd/lock
+    //   Linux:   ~/.cache/workbooksd/lock
+    //   Windows: %LOCALAPPDATA%\workbooksd\lock
+    let mut p = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
+    #[cfg(target_os = "macos")]
+    { p.push("sh.workbooks.workbooksd"); }
+    #[cfg(not(target_os = "macos"))]
+    { p.push("workbooksd"); }
+    p.push("lock");
+    p
 }
 
 #[cfg(unix)]

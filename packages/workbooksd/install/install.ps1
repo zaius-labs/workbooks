@@ -197,6 +197,23 @@ public static extern void SHChangeNotify(int wEventId, int uFlags, System.IntPtr
 
 # ── main ───────────────────────────────────────────────────────────
 
+function Start-Daemon {
+  if ($env:WORKBOOKS_NO_DAEMON -eq '1') { Say "skipping daemon launch (WORKBOOKS_NO_DAEMON)"; return }
+  if ($DryRun) { Say "[dry-run] would launch $BinPath"; return }
+  # Stop any prior instance so we boot the freshly-installed binary
+  # rather than a stale process holding the old binary mapped.
+  Stop-RunningDaemon
+  try {
+    # -WindowStyle Hidden: no console window pops up.
+    # -PassThru: returns the Process object so we know the spawn worked.
+    $proc = Start-Process -FilePath $BinPath -WindowStyle Hidden -PassThru -ErrorAction Stop
+    Say "daemon launched (pid $($proc.Id))"
+  } catch {
+    Say "warning: daemon failed to start ($($_.Exception.Message))"
+    Say "         you can launch it manually: & '$BinPath'"
+  }
+}
+
 function Main {
   $target = Detect-Target
   Say "target: $target"
@@ -204,13 +221,10 @@ function Main {
   Add-ToUserPath $BinDir
   Register-RunAtLogin
   Register-FileAssociation
+  Start-Daemon
 
   Say ""
-  Say "done."
-  Say "Start the daemon now:"
-  Say "  & '$BinPath'"
-  Say ""
-  Say "Then open any .workbook.html — Cmd+S / Ctrl+S will save in place."
+  Say "done. Open any .workbook.html — Ctrl+S will save in place."
 }
 
 Main

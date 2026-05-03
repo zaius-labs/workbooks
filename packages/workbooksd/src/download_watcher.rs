@@ -45,18 +45,22 @@ pub fn spawn() {
 }
 
 fn watch_dirs() -> Vec<PathBuf> {
-    let home = match std::env::var_os("HOME") {
-        Some(h) => PathBuf::from(h),
-        None => return vec![],
-    };
-    let mut dirs = Vec::new();
-    for sub in ["Downloads", "Desktop", "Documents"] {
-        let p = home.join(sub);
-        if p.is_dir() {
-            dirs.push(p);
+    // Use the OS-native known-folder lookups. On Windows this calls
+    // SHGetKnownFolderPath, which respects user-relocated profile
+    // folders (Downloads moved to D:\, Documents redirected to
+    // OneDrive, etc.) and localized folder names (e.g. "Documenti"
+    // on an Italian Windows install). On macOS/Linux it returns the
+    // standard ~/Downloads, ~/Desktop, ~/Documents.
+    let mut watched = Vec::new();
+    for d in [dirs::download_dir(), dirs::desktop_dir(), dirs::document_dir()]
+        .into_iter()
+        .flatten()
+    {
+        if d.is_dir() {
+            watched.push(d);
         }
     }
-    dirs
+    watched
 }
 
 fn run(dirs: Vec<PathBuf>) -> Result<(), String> {

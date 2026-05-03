@@ -1,6 +1,6 @@
 [package]
 name = "workbooksd"
-version = "0.3.8"
+version = "0.3.9"
 edition = "2021"
 description = "Background daemon that serves and saves .html files for the local browser"
 license = "MIT"
@@ -48,6 +48,12 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # Defense against secrets leaking via panic backtraces or eprintln!.
 secrecy = "0.10"
 zeroize = "1"
+# Cross-platform user directory lookups. Wraps the OS-native APIs:
+# SHGetKnownFolderPath on Windows, $XDG_*_HOME / standard fallbacks on
+# Linux, ~/Library/* on macOS. Lets the daemon find runtime/cache/data
+# dirs and the user's Downloads/Desktop/Documents without hardcoding
+# $HOME (which Windows doesn't set).
+dirs = "5"
 # AES-256-GCM for studio-v1 envelope decryption (C1.8). Pure Rust;
 # matches the WebCrypto AES-GCM used on the author side in
 # packages/workbook-cli/src/encrypt/wrapStudio.mjs.

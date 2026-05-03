@@ -43,15 +43,7 @@ pub fn enabled() -> bool { true }
 /// (cert + key) shared across every workbook on this machine, so
 /// the portal can correlate "all saves from this signer."
 fn identity_dir() -> PathBuf {
-    let mut p: PathBuf = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
-    #[cfg(target_os = "macos")]
-    { p.push("Library/Application Support/sh.workbooks.workbooksd"); }
-    #[cfg(not(target_os = "macos"))]
-    { p.push(".local/share/workbooksd"); }
-    p.push("signing");
-    p
+    crate::runtime_state_dir().join("signing")
 }
 
 fn cert_path() -> PathBuf { identity_dir().join("cert.pem") }
@@ -60,7 +52,7 @@ fn key_path()  -> PathBuf { identity_dir().join("key.pem") }
 /// Re-export the identity dir for sister modules (claim_sign.rs).
 /// The directory holds cert.pem + key.pem from this module plus
 /// author_identity.json from claim_sign — keeping all per-machine
-/// signing identity material under one $HOME path simplifies
+/// signing identity material under one per-user state path simplifies
 /// backup, perms-tightening, and reset.
 pub fn identity_dir_for_claim_signer() -> PathBuf {
     identity_dir()
