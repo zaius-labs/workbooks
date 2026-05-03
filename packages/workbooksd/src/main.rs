@@ -57,8 +57,10 @@ use axum::{
 };
 
 mod acp;
+mod author_route;
 mod broker_client;
 mod c2pa_sign;
+mod claim_sign;
 mod default_handler;
 mod edit_log;
 mod envelope;
@@ -659,6 +661,11 @@ async fn daemon_main() {
         // on require_daemon_origin for CSRF defense.
         .route("/ledger/list", get(ledger_list_handler))
         .route("/ledger/:workbook_id", get(ledger_by_id_handler))
+        // Author-claim signing (C8.7-A). CLI's `workbook seal --sign`
+        // calls these to embed a signed claim into wrapStudio's
+        // envelope so recipients see a verified-by-author badge.
+        .route("/author/identity", get(author_route::get_identity))
+        .route("/author/sign-claim", post(author_route::sign_claim))
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)

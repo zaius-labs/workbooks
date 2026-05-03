@@ -84,6 +84,15 @@ time = "0.3"
 # Wildcard host matching for the per-secret domain allowlist.
 # (e.g. "*.fal.run" matches "queue.fal.run".)
 glob-match = "0.2"
+# Ed25519 signing for the C8.7 author-claim path. Same per-machine key
+# as c2pa_sign, surfaced via raw seed extraction from the rcgen-emitted
+# PKCS#8. Pure Rust, no OpenSSL. The recipient's pre-auth shell verifies
+# claims in-browser via WebCrypto Ed25519 — same algorithm, byte-
+# compatible signatures.
+ed25519-dalek = "2"
+# OsRng for the claim-signing unit tests (generate ephemeral keypairs
+# without touching the on-disk per-machine identity).
+rand = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

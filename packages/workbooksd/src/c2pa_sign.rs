@@ -57,6 +57,15 @@ fn identity_dir() -> PathBuf {
 fn cert_path() -> PathBuf { identity_dir().join("cert.pem") }
 fn key_path()  -> PathBuf { identity_dir().join("key.pem") }
 
+/// Re-export the identity dir for sister modules (claim_sign.rs).
+/// The directory holds cert.pem + key.pem from this module plus
+/// author_identity.json from claim_sign — keeping all per-machine
+/// signing identity material under one $HOME path simplifies
+/// backup, perms-tightening, and reset.
+pub fn identity_dir_for_claim_signer() -> PathBuf {
+    identity_dir()
+}
+
 /// Mint a per-machine ed25519 keypair + self-signed cert if none
 /// exists yet. Idempotent — every subsequent save loads the same
 /// identity. Returns `(cert_pem, key_pem)`.
