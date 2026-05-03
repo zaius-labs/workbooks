@@ -1,39 +1,34 @@
 #!/usr/bin/env bash
 # Build a notarizable Workbooks-<version>.pkg from this Mac.
 #
-# Why a .pkg (vs. the prior .command-in-zip):
+# Layout, post-consolidation:
 #
-#   The .command shell script we used to ship in the per-arch zips
-#   could be code-signed but NEVER stapled — Apple's `stapler` flatly
-#   refuses with "Stapler is incapable of working with Terminal shell
-#   script files." That meant Gatekeeper would reject the file on
-#   first launch with no offline ticket to fall back on. .pkg, .app,
-#   and .dmg are the asset types that DO carry stapleable tickets,
-#   so they survive Gatekeeper without needing online lookup.
+#   /Applications/Workbooks.app
+#       Tauri 2 + Svelte app that:
+#         - embeds workbooksd as a Tauri sidecar
+#           (Contents/MacOS/workbooksd, signed individually with
+#           the Hardened Runtime)
+#         - spawns the daemon detached at first launch (setsid)
+#         - claims sh.workbooks.workbook UTI + public.html Alternate
+#         - routes Finder odoc events to the daemon's /open
+#       This replaces both the prior shell-script Workbooks.app AND
+#       the standalone /usr/local/bin/workbooksd. One .app, one
+#       binary path.
 #
-# Output:
-#
-#   <stage>/Workbooks-<version>.pkg
-#       Universal installer (aarch64 + x86_64 lipo'd into one Mach-O).
-#       Drops:
-#         /usr/local/bin/workbooksd                    bare binary
-#         /Applications/Workbooks.app                  launcher .app
-#       Postinstall:
-#         bootstraps user LaunchAgent for $(stat -f%u /dev/console)
-#         registers the .app with Launch Services
+# Postinstall: removes the legacy LaunchAgent + /usr/local/bin/workbooksd
+# if either is present (clean migration off the old install). See
+# scripts/postinstall.
 #
 # Prereqs:
-#
-#   ~/.workbooks/notary.env populated by setup.sh, plus a Developer
-#   ID INSTALLER cert in keychain (separate from the Application cert
-#   used for signing the binary). Verify:
+#   ~/.workbooks/notary.env populated by setup.sh (APPLE_DEV_ID_NAME +
+#   notary credentials), plus a Developer ID INSTALLER cert in keychain
+#   (separate from the Application cert used for code signing). Verify:
 #     security find-identity -p basic -v | grep "Developer ID Installer"
 #
 # Usage:
-#
-#   ./build-pkg.sh 0.1.1                    # builds + signs + notarizes
-#   ./build-pkg.sh 0.1.1 --skip-notarize    # smoke-test without Apple round-trip
-#   ./build-pkg.sh 0.1.1 --skip-sign        # build unsigned (for layout debugging)
+#   ./build.sh 0.2.0                    # full build + sign + notarize
+#   ./build.sh 0.2.0 --skip-notarize    # smoke-test without Apple round-trip
+#   ./build.sh 0.2.0 --skip-sign        # build unsigned (layout debugging)
 
 set -euo pipefail
 
@@ -52,12 +47,13 @@ done
 HERE=$(cd "$(dirname "$0")" && pwd)
 RELEASE_DIR=$(cd "$HERE/.." && pwd)
 RUNTIME_DIR=$(cd "$RELEASE_DIR/.." && pwd)
+REPO_ROOT=$(cd "$RUNTIME_DIR/../.." && pwd)
+MANAGER_DIR="$REPO_ROOT/manager"
 ENV_FILE="$HOME/.workbooks/notary.env"
 
-# Identifiers — keep these stable across versions so launchd /
-# Launch Services correlate prior installs as the same product.
+# Stable identifier across versions so the installer database
+# correlates upgrades as the same product.
 PKG_ID="sh.workbooks.workbooksd"
-APP_ID="sh.workbooks.launcher"
 
 if [ "$SKIP_SIGN" = "0" ] || [ "$SKIP_NOTARIZE" = "0" ]; then
   if [ ! -f "$ENV_FILE" ]; then
@@ -70,19 +66,12 @@ fi
 
 if [ "$SKIP_SIGN" = "0" ]; then
   : "${APPLE_DEV_ID_NAME:?not set in $ENV_FILE}"
-  # Installer cert is named differently from the Application cert.
-  # Default: derive from APPLE_DEV_ID_NAME by swapping "Application"
-  # for "Installer". Override with APPLE_DEV_ID_INSTALLER_NAME.
   APPLE_DEV_ID_INSTALLER_NAME="${APPLE_DEV_ID_INSTALLER_NAME:-${APPLE_DEV_ID_NAME/Application/Installer}}"
   if ! security find-identity -p basic -v | grep -qF "$APPLE_DEV_ID_INSTALLER_NAME"; then
     echo "Developer ID Installer identity not found in keychain:" >&2
     echo "  $APPLE_DEV_ID_INSTALLER_NAME" >&2
-    echo
     echo "Available identities:" >&2
     security find-identity -p basic -v >&2
-    echo
-    echo "Generate one at https://developer.apple.com/account/resources/certificates/" >&2
-    echo "(choose 'Developer ID Installer'), download the .cer, double-click to install." >&2
     exit 1
   fi
 fi
@@ -93,169 +82,119 @@ if [ "$SKIP_NOTARIZE" = "0" ]; then
   : "${APPLE_NOTARY_ISSUER:?not set in $ENV_FILE}"
 fi
 
-# ── 1. Build universal binary ────────────────────────────────────
+# ── 1. Build workbooksd both arches ──────────────────────────────
 
 TARGETS=(aarch64-apple-darwin x86_64-apple-darwin)
-echo "[pkg] building both arches..."
+echo "[pkg] building workbooksd for both arches..."
 for t in "${TARGETS[@]}"; do
   rustup target add "$t" >/dev/null 2>&1 || true
   ( cd "$RUNTIME_DIR" && cargo build --release --target "$t" )
   strip "$RUNTIME_DIR/target/$t/release/workbooksd" || true
 done
 
-STAGE_DIR=$(mktemp -d -t workbooksd-pkg-XXXXXX)
+STAGE_DIR=$(mktemp -d -t workbooks-pkg-XXXXXX)
 trap 'rm -rf "$STAGE_DIR"' EXIT
 
-UNIVERSAL_BIN="$STAGE_DIR/workbooksd"
-echo "[pkg] lipo'ing into universal binary..."
-lipo -create -output "$UNIVERSAL_BIN" \
-  "$RUNTIME_DIR/target/aarch64-apple-darwin/release/workbooksd" \
-  "$RUNTIME_DIR/target/x86_64-apple-darwin/release/workbooksd"
-echo "  → $UNIVERSAL_BIN ($(wc -c < "$UNIVERSAL_BIN") bytes, $(lipo -archs "$UNIVERSAL_BIN"))"
+# ── 2. Stage signed sidecar binaries for Tauri's bundler ─────────
 
-# ── 2. Sign + notarize the universal binary ──────────────────────
-# (Notarization of the binary happens BEFORE pkg assembly so the
-# binary inside the .pkg is fully verified-and-stapled equivalent.
-# Only the bare binary needs notarytool individually; the .pkg
-# wrapper carries its own ticket once stapled.)
+# Tauri's bundler picks up `binaries/workbooksd-<TARGET>` from
+# manager/src-tauri/binaries/, copies into Workbooks.app/Contents/MacOS/
+# at bundle time, and strips the triple suffix. We pre-sign each
+# arch here so the bundle ships with Hardened Runtime + a timestamp
+# (Tauri's signing pass alone wouldn't cover externalBins).
+mkdir -p "$MANAGER_DIR/src-tauri/binaries"
+for t in "${TARGETS[@]}"; do
+  src="$RUNTIME_DIR/target/$t/release/workbooksd"
+  dst="$MANAGER_DIR/src-tauri/binaries/workbooksd-$t"
+  cp "$src" "$dst"
+  chmod +x "$dst"
+  if [ "$SKIP_SIGN" = "0" ]; then
+    echo "[pkg] codesigning sidecar $t..."
+    codesign --sign "$APPLE_DEV_ID_NAME" \
+             --options runtime --timestamp --force "$dst"
+    codesign --verify --strict --verbose=2 "$dst"
+  fi
+done
+
+# ── 3. Build the Tauri Manager bundle ────────────────────────────
+
+echo "[pkg] building Tauri Manager (Workbooks.app)..."
+( cd "$MANAGER_DIR" && bun install --silent 2>/dev/null || true
+  cd "$MANAGER_DIR" && bun tauri build --bundles app )
+
+TAURI_APP="$MANAGER_DIR/src-tauri/target/release/bundle/macos/Workbooks.app"
+[ -d "$TAURI_APP" ] || { echo "expected $TAURI_APP, not found" >&2; exit 1; }
+
+# ── 4. Re-sign the bundle (inner-out) ────────────────────────────
+# Tauri signs the outer .app but doesn't touch the embedded sidecar
+# during its own pass — and even when it does, --options runtime +
+# --timestamp aren't applied in a way Apple's notary accepts. We
+# re-sign explicitly: inner workbooksd first, then the outer .app.
+#
+# DO NOT use --deep here. --deep tries to re-sign every Mach-O it
+# finds (including bundled framework dylibs Tauri already signed
+# correctly) and Apple has been deprecating it. Inside-out manual
+# signing is the supported path.
 
 if [ "$SKIP_SIGN" = "0" ]; then
-  echo "[pkg] codesigning universal binary..."
+  echo "[pkg] re-signing Workbooks.app (inside-out)..."
   codesign --sign "$APPLE_DEV_ID_NAME" \
-           --options runtime \
-           --timestamp \
-           --force \
-           "$UNIVERSAL_BIN"
-  codesign --verify --strict --verbose=2 "$UNIVERSAL_BIN"
+           --options runtime --timestamp --force \
+           "$TAURI_APP/Contents/MacOS/workbooksd"
+  codesign --sign "$APPLE_DEV_ID_NAME" \
+           --options runtime --timestamp --force \
+           "$TAURI_APP/Contents/MacOS/workbooks-manager"
+  codesign --sign "$APPLE_DEV_ID_NAME" \
+           --options runtime --timestamp --force \
+           "$TAURI_APP"
+  codesign --verify --strict --verbose=2 "$TAURI_APP"
 fi
 
+# ── 5. Notarize the .app standalone (so the bundle stays valid
+#       even if the user pulls it OUT of the .pkg) ────────────────
+
 if [ "$SKIP_NOTARIZE" = "0" ]; then
-  echo "[pkg] notarizing universal binary..."
-  zip="/tmp/workbooksd-universal-$$.zip"
-  ditto -c -k --keepParent "$UNIVERSAL_BIN" "$zip"
-  xcrun notarytool submit "$zip" \
+  echo "[pkg] notarizing Workbooks.app (typically 30s–3m)..."
+  app_zip="/tmp/Workbooks-app-$$.zip"
+  ditto -c -k --keepParent "$TAURI_APP" "$app_zip"
+  xcrun notarytool submit "$app_zip" \
     --key "$APPLE_NOTARY_KEY_PATH" \
     --key-id "$APPLE_NOTARY_KEY_ID" \
     --issuer "$APPLE_NOTARY_ISSUER" \
     --wait
-  rm -f "$zip"
+  rm -f "$app_zip"
+
+  echo "[pkg] stapling Workbooks.app..."
+  xcrun stapler staple "$TAURI_APP"
+  xcrun stapler validate "$TAURI_APP"
 fi
 
-# ── 3. Assemble the .app bundle ──────────────────────────────────
+# ── 6. Stage payload tree (single entry: /Applications/Workbooks.app)
 
-APP_DIR="$STAGE_DIR/payload/Applications/Workbooks.app"
-mkdir -p "$APP_DIR/Contents/MacOS"
+PAYLOAD_DIR="$STAGE_DIR/payload"
+mkdir -p "$PAYLOAD_DIR/Applications"
+ditto "$TAURI_APP" "$PAYLOAD_DIR/Applications/Workbooks.app"
 
-cat > "$APP_DIR/Contents/Info.plist" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleExecutable</key><string>workbooks-launcher</string>
-  <key>CFBundleIdentifier</key><string>$APP_ID</string>
-  <key>CFBundleName</key><string>Workbooks</string>
-  <key>CFBundleDisplayName</key><string>Workbooks</string>
-  <key>CFBundleVersion</key><string>$VERSION</string>
-  <key>CFBundleShortVersionString</key><string>$VERSION</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>LSMinimumSystemVersion</key><string>10.13</string>
-  <key>LSUIElement</key><true/>
-  <key>CFBundleDocumentTypes</key>
-  <array>
-    <dict>
-      <key>CFBundleTypeName</key><string>Workbook</string>
-      <key>CFBundleTypeRole</key><string>Editor</string>
-      <key>LSItemContentTypes</key>
-      <array><string>sh.workbooks.workbook</string></array>
-    </dict>
-    <!--
-      Second entry: also claim plain HTML at LSHandlerRank=Alternate.
-      Workbooks IDs are content-based (`<script id="wb-meta">`), but
-      macOS routes apps by file extension. This makes Workbooks.app
-      show up in Finder's "Open With" list for any .html file —
-      necessary because Finder duplicates rename `foo.workbook.html`
-      to `foo.workbook (1).html`, losing the recognized suffix.
-      Default-app status stays with the system browser; we just want
-      to be a listed alternative the user can pick.
-    -->
-    <dict>
-      <key>CFBundleTypeName</key><string>HTML Document</string>
-      <key>CFBundleTypeRole</key><string>Viewer</string>
-      <key>LSHandlerRank</key><string>Alternate</string>
-      <key>LSItemContentTypes</key>
-      <array><string>public.html</string></array>
-    </dict>
-  </array>
-  <key>UTExportedTypeDeclarations</key>
-  <array>
-    <dict>
-      <key>UTTypeIdentifier</key><string>sh.workbooks.workbook</string>
-      <key>UTTypeDescription</key><string>Workbook</string>
-      <key>UTTypeConformsTo</key>
-      <array><string>public.html</string></array>
-      <key>UTTypeTagSpecification</key>
-      <dict>
-        <key>public.filename-extension</key>
-        <array><string>workbook.html</string></array>
-      </dict>
-    </dict>
-  </array>
-</dict>
-</plist>
-EOF
-
-# The .app's executable forwards to workbooksd at the well-known
-# install path. Hardcoded since the .pkg lays the binary down at
-# /usr/local/bin/workbooksd; if the user moves it later we can't
-# follow.
-cat > "$APP_DIR/Contents/MacOS/workbooks-launcher" <<'EOF'
-#!/bin/sh
-# Workbooks launcher — forwards Finder open events to the daemon.
-# Installed by the workbooksd .pkg; do not edit.
-exec /usr/local/bin/workbooksd open "$@"
-EOF
-chmod +x "$APP_DIR/Contents/MacOS/workbooks-launcher"
-
-if [ "$SKIP_SIGN" = "0" ]; then
-  echo "[pkg] codesigning the .app bundle..."
-  # Sign the inner script first, then the bundle outer (Apple
-  # requires inside-out signing).
-  codesign --sign "$APPLE_DEV_ID_NAME" --options runtime --timestamp \
-           --force "$APP_DIR/Contents/MacOS/workbooks-launcher"
-  codesign --sign "$APPLE_DEV_ID_NAME" --options runtime --timestamp \
-           --force "$APP_DIR"
-  codesign --verify --strict --verbose=2 "$APP_DIR"
-fi
-
-# ── 4. Lay out the binary at /usr/local/bin/ in the payload tree ─
-
-BIN_DEST_DIR="$STAGE_DIR/payload/usr/local/bin"
-mkdir -p "$BIN_DEST_DIR"
-cp "$UNIVERSAL_BIN" "$BIN_DEST_DIR/workbooksd"
-chmod +x "$BIN_DEST_DIR/workbooksd"
-
-# ── 5. Postinstall script — bootstraps user-scoped LaunchAgent ──
+# ── 7. Postinstall scripts ───────────────────────────────────────
 
 SCRIPTS_DIR="$STAGE_DIR/scripts"
 mkdir -p "$SCRIPTS_DIR"
-# Copy the canonical postinstall from the source tree so it stays
-# in version control.
 cp "$HERE/scripts/postinstall" "$SCRIPTS_DIR/postinstall"
 chmod +x "$SCRIPTS_DIR/postinstall"
 
-# ── 6. Build the component .pkg ──────────────────────────────────
+# ── 8. Build the component .pkg ──────────────────────────────────
 
 COMPONENT_PKG="$STAGE_DIR/component.pkg"
 echo "[pkg] running pkgbuild..."
 pkgbuild \
-  --root "$STAGE_DIR/payload" \
+  --root "$PAYLOAD_DIR" \
   --identifier "$PKG_ID" \
   --version "$VERSION" \
   --scripts "$SCRIPTS_DIR" \
   --install-location "/" \
   "$COMPONENT_PKG"
 
-# ── 7. Wrap in a distribution package (gives the GUI installer) ─
+# ── 9. Wrap in a distribution package (GUI installer) ────────────
 
 DIST_XML="$STAGE_DIR/distribution.xml"
 sed "s/{{VERSION}}/$VERSION/g" "$HERE/distribution.template.xml" > "$DIST_XML"
@@ -267,7 +206,7 @@ productbuild \
   --package-path "$STAGE_DIR" \
   "$UNSIGNED_PKG"
 
-# ── 8. Sign + notarize + staple the final pkg ────────────────────
+# ── 10. Sign + notarize + staple the final pkg ───────────────────
 
 OUT_PKG="$RELEASE_DIR/dist/Workbooks-$VERSION.pkg"
 mkdir -p "$(dirname "$OUT_PKG")"
@@ -283,7 +222,7 @@ else
 fi
 
 if [ "$SKIP_NOTARIZE" = "0" ]; then
-  echo "[pkg] notarizing pkg (typically 30s–3m)..."
+  echo "[pkg] notarizing pkg..."
   xcrun notarytool submit "$OUT_PKG" \
     --key "$APPLE_NOTARY_KEY_PATH" \
     --key-id "$APPLE_NOTARY_KEY_ID" \
