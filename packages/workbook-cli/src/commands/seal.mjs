@@ -6,7 +6,7 @@
 // Tracker: bd show core-1fi.1.3
 //
 // Usage:
-//   workbook seal --in dist/foo.workbook.html \
+//   workbook seal --in dist/foo.html \
 //                 --out dist/foo.sealed.html \
 //                 --broker https://broker.signal.ml \
 //                 --policy policy.json

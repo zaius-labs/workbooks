@@ -1,5 +1,5 @@
 // Install-Workbooks toast — fixed bottom-left card injected into every
-// built .workbook.html.
+// built .html.
 //
 // What this gives every workbook for free:
 //
@@ -76,7 +76,7 @@
   // bouncing back: if location.search includes ?wb-no-redirect we
   // skip the probe (lets users escape if something goes sideways).
   if (location.protocol === "file:" && !/[?&]wb-no-redirect\b/.test(location.search)) {
-    // file:// gives us location.pathname = /Users/.../foo.workbook.html
+    // file:// gives us location.pathname = /Users/.../foo.html
     // (URL-encoded). Decode for the daemon. On Windows this is
     // /C:/Users/... — strip the leading slash so it looks like a real
     // path. The daemon canonicalizes either way, so a stray leading
@@ -84,12 +84,11 @@
     let diskPath;
     try { diskPath = decodeURIComponent(location.pathname); } catch { diskPath = location.pathname; }
     if (/^\/[A-Za-z]:\//.test(diskPath)) diskPath = diskPath.slice(1); // Windows
-    // Accept either the legacy `.workbook.html` compound extension
-    // or the new canon `.html` (workbook identity is content-based
-    // since 0.4.0 — the file's wb-meta / wb-permissions inside is
-    // what makes it a workbook, not the filename). Bare `.html`
-    // catches files emitted by `wb build` v0.4+ and any user-renamed
-    // workbooks; `.workbook.html` keeps old artifacts working.
+    // Accept any HTML extension. Workbook identity is content-based
+    // since 0.4.0 — the file's `<meta name="wb-permissions">` /
+    // `<script id="wb-meta">` inside is what makes it a workbook, not
+    // the filename. Both new-canon `.html` and legacy `.workbook.html`
+    // files are caught by `.html` matching the trailing segment.
     if (diskPath.endsWith(".html") || diskPath.endsWith(".htm")) {
       // Don't await — show toast immediately as "trying"; redirect on success.
       (async () => {

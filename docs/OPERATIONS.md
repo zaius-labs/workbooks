@@ -4,7 +4,7 @@ A companion to `SPEC.md`. The spec defines *what a workbook is* — its format, 
 
 If the spec answers "what's in the file?", this answers "what happens when a user clicks the New button?"
 
-The lifecycle in this document focuses primarily on **document** and **notebook** workbooks — the analyst-facing artifacts produced by an agent. **SPA workbooks** (`manifest.type: "spa"`) follow a different lifecycle: they are authored by a developer using `@work.books/cli` (or hand-written), distributed as static `.workbook.html` files, and run client-side without any agent involvement at runtime. See `WORKBOOK_AS_APP.md` for the SPA authoring path. Some sections below — e.g. agent-driven creation, plan gates, server-side scheduling — apply only to document/notebook workbooks; that's noted inline.
+The lifecycle in this document focuses primarily on **document** and **notebook** workbooks — the analyst-facing artifacts produced by an agent. **SPA workbooks** (`manifest.type: "spa"`) follow a different lifecycle: they are authored by a developer using `@work.books/cli` (or hand-written), distributed as static `.html` files, and run client-side without any agent involvement at runtime. See `WORKBOOK_AS_APP.md` for the SPA authoring path. Some sections below — e.g. agent-driven creation, plan gates, server-side scheduling — apply only to document/notebook workbooks; that's noted inline.
 
 ---
 
@@ -12,7 +12,7 @@ The lifecycle in this document focuses primarily on **document** and **notebook*
 
 A workbook moves through five stages: creation, opening, running, editing, sharing. Archival is a sixth state, not a stage.
 
-> **Document/notebook only.** SPA workbooks have a much simpler lifecycle: a developer runs `workbook build`, the resulting `.workbook.html` is shared as a static file, and the recipient opens it. No plan gate, no agent loop, no server-side runtime, no quota enforcement (except whatever the app itself implements). The rest of this section assumes document/notebook unless stated otherwise.
+> **Document/notebook only.** SPA workbooks have a much simpler lifecycle: a developer runs `workbook build`, the resulting `.html` is shared as a static file, and the recipient opens it. No plan gate, no agent loop, no server-side runtime, no quota enforcement (except whatever the app itself implements). The rest of this section assumes document/notebook unless stated otherwise.
 
 ### Creation
 

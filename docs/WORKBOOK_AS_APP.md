@@ -1,7 +1,7 @@
 # Workbook as App
 
 Deep dive on the SPA workbook type — packaging a real browser app
-as a single `.workbook.html`.
+as a single HTML file.
 
 > See **`WORKBOOK_AUTHORING.md`** for the umbrella authoring guide
 > covering all shapes (document / notebook / spa) and all authoring
@@ -24,13 +24,13 @@ The two reference exemplars in this repo:
 - `examples/chat-app/index.html` — single-file, no build step. Four
   modes (general / data analyst / sql helper / agent), inline VFS
   + virtual bash, OpenRouter LLM client, streaming agent loop,
-  markdown renderer, save-as-portable-`.workbook.html`. ~1400 lines
+  markdown renderer, save-as-portable-`.html`. ~1400 lines
   of vanilla JS with `view-source` working end-to-end.
 - `examples/svelte-app/` — multi-file Svelte 5 project. Built with
   `@work.books/cli`. Three routes (Home / Editor / Settings) with
   hash routing, varlock env contract, lazy wasm runtime.
 
-Both produce a single `.workbook.html` of similar shape (~17 MB
+Both produce a single `.html` of similar shape (~17 MB
 with the wasm runtime inlined). The format doesn't care which
 authoring style you used.
 
@@ -77,7 +77,7 @@ export default {
 
 ```bash
 npx workbook dev      # http://localhost:5173 with HMR
-npx workbook build    # → dist/<slug>.workbook.html (single file)
+npx workbook build    # → dist/<slug>.html (single file)
 ```
 
 What `build` does:
@@ -90,7 +90,7 @@ What `build` does:
    `<!-- portable-assets-begin --> ... <!-- portable-assets-end -->`.
 4. The same plugin emits a `<script id="workbook-spec">` JSON blob
    carrying the manifest (slug, type, env, runtime features).
-5. Output is renamed `<slug>.workbook.html`.
+5. Output is renamed `<slug>.html`.
 
 User code accesses the runtime via a virtual import:
 
@@ -187,7 +187,7 @@ Two scopes:
 The hand-written chat-app uses localStorage for simplicity. Real
 data tools should use OPFS via `WorkbookVfs`.
 
-## Save as portable `.workbook.html`
+## Save as portable `.html`
 
 The CLI's `build` command produces a portable artifact directly.
 For hand-written workbooks (chat-app pattern), the saver fetches

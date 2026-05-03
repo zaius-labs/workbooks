@@ -1,6 +1,6 @@
 // Workbook install banner.
 //
-// Embedded by the workbook CLI in every emitted .workbook.html file.
+// Embedded by the workbook CLI in every emitted .html file.
 // Detects whether the workbook is running INSIDE the Workbooks PWA (T2
 // path, silent autosave) vs. in a regular browser tab (T3/T4 — needs
 // user action to enable saving). When running outside the PWA, surfaces

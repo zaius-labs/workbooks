@@ -9,7 +9,7 @@
 
 **Status:** v0 — released for early adopters; format may evolve, runtime contract is stable.
 
-The substrate is the file-as-database persistence layer for workbook applications. A `.workbook.html` file is, simultaneously:
+The substrate is the file-as-database persistence layer for workbook applications. A `.html` file is, simultaneously:
 
 1. A valid HTML5 document.
 2. The canonical container of a workbook's complete state — yjs CRDT bytes for the spec/composition, optionally SQLite bytes for relational data, optionally other typed data containers.

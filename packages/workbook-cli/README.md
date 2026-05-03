@@ -2,7 +2,7 @@
 
 Build tool for workbooks. Compiles a multi-file source tree (HTML, JS,
 CSS, Svelte components) into a **single, self-contained
-`.workbook.html`** that runs from `file://` with no server, no CDN, and
+`.html`** that runs from `file://` with no server, no CDN, and
 no `dist/` siblings.
 
 ## Why
@@ -47,7 +47,7 @@ export default {
 };
 ```
 
-Optional icon — single path or array of `{ src, sizes?, type? }`. Inlined as a data URL so the saved `.workbook.html` ships with its own browser-tab icon:
+Optional icon — single path or array of `{ src, sizes?, type? }`. Inlined as a data URL so the saved `.html` ships with its own browser-tab icon:
 
 ```js
 icon: "src/icon.svg",                              // short form
@@ -63,14 +63,14 @@ workbook glyph so every saved file has a recognizable favicon. Author
 HTML that already declares `<link rel="icon">` opts out automatically.
 
 Note: this only controls the **browser** icon (tab, bookmark). The OS
-file icon for `.workbook.html` files in Finder/Explorer requires
+file icon for `.html` files in Finder/Explorer requires
 platform-level registration and is intentionally out of scope here.
 
 ## Commands
 
 ```
 workbook dev             # Vite dev server with HMR
-workbook build           # → dist/<slug>.workbook.html (single file)
+workbook build           # → dist/<slug>.html (single file)
 workbook init <name>     # (todo) scaffold a project
 ```
 
@@ -93,7 +93,7 @@ Flags:
    `<!-- portable-assets-begin --> ... <!-- portable-assets-end -->`.
 3. The same plugin emits a `<script id="workbook-spec">` JSON blob
    carrying the manifest (slug, env declarations, runtime features).
-4. The output is renamed `<slug>.workbook.html`. That's it.
+4. The output is renamed `<slug>.html`. That's it.
 
 A `boot` shim in your entry HTML can detect the inlined assets and
 load wasm via `URL.createObjectURL` + dynamic `import()` — the

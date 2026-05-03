@@ -142,7 +142,7 @@
   // (see htmlBindings.ts and authoring/WorkbookApp.svelte for the
   // installer hooks). This is what makes "the file IS the database"
   // actually work — Loro CRDT changes and Arrow-memory appends round-
-  // trip back into the .workbook.html on every Cmd+S.
+  // trip back into the .html on every Cmd+S.
 
   async function bytesToBase64Async(bytes) {
     let binary = "";

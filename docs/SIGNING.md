@@ -120,7 +120,7 @@ jobs:
             apps/colorwave/dist/colorwave-mac.zip
             apps/colorwave/dist/colorwave-win.exe
             apps/colorwave/dist/colorwave-linux
-            apps/colorwave/dist/colorwave.workbook.html
+            apps/colorwave/dist/colorwave.html
 ```
 
 ## Without signing — what users see

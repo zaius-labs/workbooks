@@ -1,4 +1,4 @@
-// `workbook build` — compile project into a single .workbook.html.
+// `workbook build` — compile project into a single .html.
 
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -77,7 +77,7 @@ export async function runBuild(opts = {}) {
   });
 
   // Encryption stage. workbookInline already wrote the artifact at
-  // <slug>.html (0.4.0+ — the .workbook.html infix is retired);
+  // <slug>.html (0.4.0+ — the .html infix is retired);
   // we read it back, wrap it in a lock screen, and write it back
   // to the same path.
   if (encryptRequest) {

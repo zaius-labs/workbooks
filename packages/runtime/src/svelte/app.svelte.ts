@@ -16,7 +16,7 @@
  *
  * Backed by a single Y.Map under a stable root key. Each top-level
  * field is JSON-encoded into the map. Mutations propagate to Y.Doc
- * → substrate WAL → `.workbook.html` file. Reload restores the same
+ * → substrate WAL → `.html` file. Reload restores the same
  * state.
  *
  * # Lazy by default

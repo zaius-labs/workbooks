@@ -82,7 +82,7 @@ export function useExecutor(): () => ReactiveExecutor | null {
  *
  * Returns a getter that resolves to the Loro doc handle once the
  * runtime has registered it. The handle exposes Loro's full API for
- * mutations; changes round-trip through Cmd+S into the .workbook.html
+ * mutations; changes round-trip through Cmd+S into the .html
  * file on save. No IDB, no localStorage — the file is the database.
  *
  *   const composition = useDoc("composition");

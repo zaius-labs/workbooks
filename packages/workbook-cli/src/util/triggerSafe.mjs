@@ -12,7 +12,7 @@
 // If a generated script's source contains any of these literally, the
 // page's own parser may close the script earlier than intended and
 // dump the remainder as body text — which is the bug we hit when
-// chat-app's saved .workbook.html broke.
+// chat-app's saved .html broke.
 //
 // Mitigation: never write these substrings into source. Build them at
 // runtime by string concatenation. Helpers below produce the same

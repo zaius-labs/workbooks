@@ -14,7 +14,7 @@ A `.workbook` is the canonical artifact format for **portable browser apps with 
 | `notebook` | Linear runner with cells in a static DAG. Reactive execution; reader edits inputs, re-runs cells, sees outputs materialize. | an ML experiment, a data exploration | Notebook chrome with run/restart/clear controls |
 | `spa`      | Full canvas application. Author renders whatever UI they want; runtime is a service available on demand. | `examples/chat-app/`, `examples/svelte-app/` | None — workbook renders itself |
 
-Type is a hint to consumers about what chrome (if any) to wrap the workbook in. It is **not** a build-path branch — the same `.workbook.html` file format produces all three. Cells, inputs, manifest schema, runtime contract, env declarations are identical.
+Type is a hint to consumers about what chrome (if any) to wrap the workbook in. It is **not** a build-path branch — the same `.html` file format produces all three. Cells, inputs, manifest schema, runtime contract, env declarations are identical.
 
 ## Format
 

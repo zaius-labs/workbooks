@@ -148,7 +148,7 @@ export class OpfsDownloadTransport implements SubstrateTransport {
 function guessFileName(): string {
   if (typeof location === "undefined") return "workbook.html";
   const last = decodeURIComponent(location.pathname.split("/").pop() ?? "");
-  if (last.endsWith(".workbook.html")) return last;
+  if (last.endsWith(".html")) return last;
   if (last.endsWith(".html")) return last;
   return "workbook.html";
 }

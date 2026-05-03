@@ -1,4 +1,4 @@
-# `.workbook.html` format
+# Workbook file format
 
 A workbook is a single HTML document with three layers added on top of
 plain HTML:

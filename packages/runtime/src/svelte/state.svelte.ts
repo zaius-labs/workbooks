@@ -11,7 +11,7 @@
  *   // Before — lost on refresh:
  *   let count = $state(0);
  *
- *   // After — persisted in the .workbook.html file:
+ *   // After — persisted in the .html file:
  *   const count = state("count", 0);
  *   count.value++;            // reactive, persisted
  *

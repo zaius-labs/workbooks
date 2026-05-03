@@ -60,7 +60,7 @@ that makes "send a file to a counterparty" actually work.
 
 | Threat | Mitigation | Layer |
 |---|---|---|
-| Attacker steals the encrypted .workbook.html in transit | Content is AES-256-GCM encrypted; envelope reveals only workbook id + broker URL + view metadata. | format |
+| Attacker steals the encrypted .html in transit | Content is AES-256-GCM encrypted; envelope reveals only workbook id + broker URL + view metadata. | format |
 | Attacker who is not in the IdP allowlist authenticates and requests the key | Broker evaluates policy against verified OIDC claims; returns 403 + audits the denial. | broker |
 | Compromised broker tries to read workbook content | Broker holds wrapped DEKs only; the wrapping key (KEK) lives in a separate KMS the broker cannot exfiltrate keys from, only call. The KMS unwrap call is logged. A rogue broker operator can request an unwrap, but every unwrap is auditable. *Phase 2 (P2 of C1): require recipient public key in the lease request so the broker can't unwrap without the recipient's involvement.* | broker / KMS |
 | Subpoena targets the broker | Broker holds: workbook ids, policy, identity-of-accessor, timestamps. Broker does NOT hold: cleartext content, IdP credentials, view payloads. We can produce metadata; we structurally cannot produce content. | broker |

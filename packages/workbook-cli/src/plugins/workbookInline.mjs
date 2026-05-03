@@ -519,7 +519,7 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
         // Rename Vite's `index.html` to `<slug>.html`. Workbook
         // identity travels in the file content (`<meta name="wb-permissions">`
         // / `<script id="wb-meta">`) and per-file OpenWith xattr,
-        // not in the filename — so we drop the legacy `.workbook.html`
+        // not in the filename — so we drop the legacy `.html`
         // compound extension entirely as of 0.4.0. Files keep plain
         // `.html` so they open natively in any browser without our
         // app installed, and macOS Finder doesn't break them on
@@ -532,7 +532,7 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
         let target;
         if (base === "index.html") {
           target = path.join(dir, `${config.slug}.html`);
-        } else if (base.endsWith(".workbook.html")) {
+        } else if (base.endsWith(".html")) {
           // Strip the legacy infix on rebuild so old projects
           // migrate cleanly without manual rename.
           target = file.replace(/\.workbook\.html$/, ".html");
@@ -599,9 +599,9 @@ async function collectHtml(dir) {
 }
 
 // Build <link rel="icon"> tags for the workbook. Always inlines as a
-// data: URL so the saved .workbook.html ships with the icon and a
+// data: URL so the saved .html ships with the icon and a
 // file:// open shows the right glyph in the browser tab. The
-// ".workbook.html → OS file icon" association is a separate concern
+// ".html → OS file icon" association is a separate concern
 // that needs platform-level registration; see core-7fw.1.
 async function buildIconLinks(config) {
   const icons = config.icons ?? [{ src: DEFAULT_ICON_PATH, _isDefault: true }];

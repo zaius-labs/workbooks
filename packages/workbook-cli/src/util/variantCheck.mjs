@@ -141,7 +141,7 @@ export async function checkVariant({ runtimeDir, variant, bundleSrc }) {
     if (smallestThatWorks !== variant) {
       warnings.push(
         `wasmVariant="${variant}" larger than needed — bundle would work with ` +
-        `wasmVariant="${smallestThatWorks}". Saves ~MB on the .workbook.html.`,
+        `wasmVariant="${smallestThatWorks}". Saves ~MB on the .html.`,
       );
     }
   }

@@ -153,7 +153,7 @@ export async function decryptView({
  *  (no daemon installed) — the daemon parses meta tags directly and
  *  never reaches this UI.
  *
- *  Goal: a recipient who opens a sealed `.workbook.html` in their
+ *  Goal: a recipient who opens a sealed `.html` in their
  *  browser sees who sealed it, when, and a verifiable trust badge —
  *  BEFORE signing in. The author claim is embedded as `wb-author-*`
  *  meta tags signed with the author's registered ed25519 key (see

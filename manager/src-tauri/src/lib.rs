@@ -9,7 +9,7 @@
 //      to see workbook history, fork lineage, edit-log timelines.
 //
 // The third responsibility — being the macOS document handler for
-// .workbook.html and any HTML carrying wb-meta / wb-permissions —
+// .html and any HTML carrying wb-meta / wb-permissions —
 // folds into the Tauri shell via RunEvent::Opened. This replaces
 // the standalone `Workbooks.app` shell-script bundle that the
 // .pkg used to install at /Applications.

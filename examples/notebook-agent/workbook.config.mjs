@@ -1,7 +1,7 @@
 // notebook-agent — Svelte authoring of a workbook with cells + an
 // in-workbook agent that reads/writes those cells. Counterpart to
 // chat-app (vanilla JS single-file): different authoring style,
-// same .workbook.html output format.
+// same .html output format.
 export default {
   name: "notebook-agent · workbook",
   slug: "notebook-agent",

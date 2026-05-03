@@ -1,4 +1,4 @@
-// Inspect page — parses a .workbook.html (and optionally a .c2pa
+// Inspect page — parses a .html (and optionally a .c2pa
 // sidecar) entirely client-side and renders the workbook's identity
 // + edit log + signature info. Nothing is uploaded; the user can
 // verify by opening Network tab. Pure vanilla JS, no build step,
@@ -45,7 +45,7 @@ async function handleFiles(fileList) {
   clearError();
 
   if (htmlFiles.length === 0) {
-    showError("No .workbook.html in the drop. Add the HTML file too — the .c2pa sidecar alone doesn't carry the edit log.");
+    showError("No .html in the drop. Add the HTML file too — the .c2pa sidecar alone doesn't carry the edit log.");
     return;
   }
 

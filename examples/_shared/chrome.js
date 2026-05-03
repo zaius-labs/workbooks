@@ -38,7 +38,7 @@ export function mountChrome({ slug, version = "v0.1" } = {}) {
   document.body.insertBefore(nav, document.body.firstChild);
 
   // Wire the download button. Default click produces a self-contained
-  // .workbook.html runnable in any browser (open by double-click, no
+  // .html runnable in any browser (open by double-click, no
   // server needed). Holding alt/option produces the JSON-only .workbook
   // (smaller; needs a host that has the runtime — e.g. the runner page).
   const btn = nav.querySelector("#wb-download");
@@ -46,7 +46,7 @@ export function mountChrome({ slug, version = "v0.1" } = {}) {
     const jsonOnly = ev.altKey;
     downloadCurrentWorkbook(slug, jsonOnly);
   });
-  btn.title = "Click: download self-contained .workbook.html (runs anywhere)\n" +
+  btn.title = "Click: download self-contained .html (runs anywhere)\n" +
               "Option-click: download .workbook (JSON only — needs a host)";
 
   // Footer.
@@ -129,7 +129,7 @@ async function downloadCurrentWorkbook(fallbackSlug, jsonOnly) {
     return;
   }
 
-  // Default: self-contained .workbook.html.
+  // Default: self-contained .html.
   showHint("Building portable HTML (~15 MB) — takes a few seconds…");
   try {
     // Cache-buster: bump on every portable.js fix so reloads don't need
@@ -138,7 +138,7 @@ async function downloadCurrentWorkbook(fallbackSlug, jsonOnly) {
     const html = await buildPortableHtml(spec);
     triggerDownload(
       new Blob([html], { type: "text/html;charset=utf-8" }),
-      `${slug}.workbook.html`,
+      `${slug}.html`,
     );
     showHint("Saved · open the file with any browser to run it.");
   } catch (e) {

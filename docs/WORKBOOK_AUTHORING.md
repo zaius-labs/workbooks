@@ -2,7 +2,7 @@
 
 Workbooks are a **format**, not a framework. The runtime + build tool
 are open about how you author the source — pick whatever shape and
-tooling matches the work, get the same `.workbook.html` artifact at
+tooling matches the work, get the same `.html` artifact at
 the end.
 
 This document is the umbrella reference. Two axes:
@@ -30,7 +30,7 @@ Q: how big / complex is the source?
 └── utility-CSS-heavy UI ──→  Svelte + Tailwind v4 + @work.books/cli
 ```
 
-Same `.workbook.html` output across every combination. The format
+Same `.html` output across every combination. The format
 doesn't care which path you took.
 
 ---
@@ -152,7 +152,7 @@ export default {
 
 ```bash
 npx workbook dev      # vite dev server with HMR
-npx workbook build    # → dist/<slug>.workbook.html (single file)
+npx workbook build    # → dist/<slug>.html (single file)
 ```
 
 The runtime is available as a virtual import:
@@ -404,7 +404,7 @@ safe by default.
 ## Icons (favicon)
 
 `workbook.config.mjs` accepts `icon` or `icons[]`. The build inlines
-icons as data URLs so the saved `.workbook.html` ships with its own
+icons as data URLs so the saved `.html` ships with its own
 browser-tab glyph.
 
 ```js
@@ -419,7 +419,7 @@ icons: [
 Default: a lime-green squircle with a 📓 emoji. Override anytime.
 
 **Note**: this controls the **browser** tab icon only. The OS-level
-file icon (Finder/Explorer thumbnail) for `.workbook.html` files
+file icon (Finder/Explorer thumbnail) for `.html` files
 requires platform registration and is a separate concern (see bd
 issue `core-7fw.1`, deferred).
 
@@ -449,7 +449,7 @@ anchors on a unique sentinel instead of a `</head>` regex.
 
 ## Output format — same artifact, every lane
 
-`.workbook.html` is a single self-contained HTML file. Around 17 MB
+`.html` is a single self-contained HTML file. Around 17 MB
 with the full wasm runtime inlined; ~3 MB on the wire with brotli.
 
 What's inside:

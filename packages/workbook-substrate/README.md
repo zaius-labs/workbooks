@@ -4,7 +4,7 @@ Workbook substrate v0 — file-as-database persistence for workbook HTML files.
 
 ## Goal
 
-A workbook is a single `.workbook.html` file that is *the* database. State (yjs CRDT bytes for the spec/composition, optionally SQLite bytes for relational data) lives inline in the file. Edits are persisted by writing the file back to disk through the strongest transport available on the user's browser/OS.
+A workbook is a single `.html` file that is *the* database. State (yjs CRDT bytes for the spec/composition, optionally SQLite bytes for relational data) lives inline in the file. Edits are persisted by writing the file back to disk through the strongest transport available on the user's browser/OS.
 
 ## File model (v0)
 

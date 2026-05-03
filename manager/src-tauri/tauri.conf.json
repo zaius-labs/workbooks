@@ -41,8 +41,8 @@
       "icons/icon.icns"
     ],
     "category": "DeveloperTool",
-    "shortDescription": "Mediates every .workbook.html on your machine",
-    "longDescription": "Workbooks bundles the workbook daemon (workbooksd) and a manager UI in one app. Open a .workbook.html from Finder and it routes through the embedded daemon to your default browser; the manager UI surfaces edit-log timelines, fork lineage, and per-workbook permissions.",
+    "shortDescription": "Mediates every .html on your machine",
+    "longDescription": "Workbooks bundles the workbook daemon (workbooksd) and a manager UI in one app. Open a .html from Finder and it routes through the embedded daemon to your default browser; the manager UI surfaces edit-log timelines, fork lineage, and per-workbook permissions.",
     "externalBin": ["binaries/workbooksd"],
     "macOS": {
       "minimumSystemVersion": "10.15",

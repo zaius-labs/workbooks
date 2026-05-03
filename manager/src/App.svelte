@@ -45,13 +45,13 @@
 {:else if daemon.status === "no-daemon"}
   <EmptyState
     title="Daemon offline"
-    body={["Open a .workbook.html from Finder to wake the daemon, or reinstall via the latest .pkg."]}
+    body={["Open a .html from Finder to wake the daemon, or reinstall via the latest .pkg."]}
     action={{ label: "Retry", onClick: () => daemon.boot() }}
   />
 {:else if daemon.workbooks.length === 0}
   <EmptyState
     title="Nothing yet"
-    body={["Open any .workbook.html and it'll show up here."]}
+    body={["Open any .html and it'll show up here."]}
   />
 {:else if view === "details" && activeWorkbook}
   <DetailsView

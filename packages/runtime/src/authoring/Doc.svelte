@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * <Doc> — declarative CRDT document. The canonical persistent-state
-   * primitive: state lives in the .workbook.html file, round-trips
+   * primitive: state lives in the .html file, round-trips
    * through Cmd+S, no browser cache layer.
    *
    * Internally renders a <wb-doc> custom element. Once mounted, the

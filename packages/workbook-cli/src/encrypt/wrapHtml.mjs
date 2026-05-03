@@ -71,7 +71,7 @@ function bytesToBase64(bytes) {
  * Wrap a fully-built HTML string in the encryption shell.
  *
  * @param {Object} args
- * @param {string} args.html        the plaintext .workbook.html bytes
+ * @param {string} args.html        the plaintext .html bytes
  * @param {string} args.passphrase  unlock passphrase
  * @param {string} args.title       displayed on the lock screen
  * @returns {Promise<string>}       the wrapped HTML, ready to write

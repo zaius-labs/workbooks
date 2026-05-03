@@ -2,11 +2,11 @@
 
 **Status:** Draft, allowed to mutate during phase P1 of the substrate epic. Lock target: substrate runtime first stable release.
 
-**Audience:** Substrate runtime authors, workbook CLI authors, anyone reading a `.workbook.html` file with intent to interpret it.
+**Audience:** Substrate runtime authors, workbook CLI authors, anyone reading a workbook file with intent to interpret it.
 
 ## Goals
 
-A `.workbook.html` file is, simultaneously:
+A workbook file is, simultaneously:
 
 1. A valid HTML5 document that any browser can render.
 2. The canonical, portable container of a workbook's complete state — yjs CRDT bytes for the spec/composition, optionally SQLite bytes for relational data, optionally other typed data containers.

@@ -5,7 +5,7 @@
 //   1. `workbook:data` is the SDK. Always import from there, not from
 //      apache-arrow directly. `workbook check` will tell you if you slip.
 //
-//   2. The build (`workbook build`) produces ONE .workbook.html file
+//   2. The build (`workbook build`) produces ONE .html file
 //      that contains everything — your code, your data, the Polars/
 //      Candle/Plotters runtime. Open it in any browser, anywhere.
 //

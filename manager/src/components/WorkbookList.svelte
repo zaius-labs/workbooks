@@ -198,7 +198,7 @@
     vertical-align: 1px;
   }
 
-  /* Lineage line — a clickable "forked from foo.workbook.html"
+  /* Lineage line — a clickable "forked from foo.html"
    * caption that navigates to the parent. Sub-meta hierarchy:
    * smaller than name, larger than meta dim, dim color so it
    * doesn't fight the filename for attention. */

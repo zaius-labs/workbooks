@@ -67,7 +67,7 @@ Share the file → you ship the state with it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/runtime.svg">
-  <img src="assets/diagrams/runtime.svg" alt="Double-click a .workbook.html file. The OS routes to Workbooks.app, which asks workbooksd to mint a session token and open the daemon URL in your default browser. Cmd+S writes new bytes to the daemon, which atomically rewrites the file on disk." width="100%">
+  <img src="assets/diagrams/runtime.svg" alt="Double-click a workbook .html file. The OS routes to Workbooks.app, which asks workbooksd to mint a session token and open the daemon URL in your default browser. Cmd+S writes new bytes to the daemon, which atomically rewrites the file on disk." width="100%">
 </picture>
 
 Workbooks needs exactly one component you don't already have: a tiny
@@ -75,13 +75,15 @@ Rust daemon (`workbooksd`, ~1 MB) that runs in the background and
 brokers between the browser and your filesystem. Every other piece is
 already on your machine.
 
-When you double-click a `.workbook.html`:
+When you double-click a workbook `.html` file:
 
-1. The OS routes the file to `Workbooks.app` — a thin shim installed by `workbooks.sh`.
-2. The shim asks the daemon to bind the file's path to a session token.
-3. The daemon spawns your default browser at `http://127.0.0.1:47119/wb/<token>/`.
+1. The OS routes the file to `Workbooks.app` — installed by `workbooks.sh` and registered as the per-file handler via the `LaunchServices.OpenWith` extended attribute the daemon stamps on every workbook it sees.
+2. The app asks the daemon to bind the file's path to a session token.
+3. The daemon opens your default browser at `http://127.0.0.1:<port>/wb/<token>/` (the daemon binds a random port at startup; the app reads it from `runtime.json`).
 4. The browser loads the workbook from the daemon (same origin, full power).
 5. ⌘S sends the new bytes back; the daemon does an atomic rename. **No partial writes, no temp leftovers, no race with whatever is reading the file.**
+
+A workbook is just an HTML file — open it in any browser without installing the daemon and it still renders. The daemon is what unlocks save-in-place, secrets, and per-file API key allowlists.
 
 The daemon is small on purpose. Less than 4 MB on disk. Single
 binary, no Electron, no WebView, no Tauri. Your default browser does
@@ -116,7 +118,7 @@ You get an "ending in `xyzy`" preview computed daemon-side so the UI
 can confirm the right key is set without ever re-reading the value
 back to browser memory.
 
-> **Plain English:** sharing a `.workbook.html` is safe. Receiving one
+> **Plain English:** sharing a workbook file is safe. Receiving one
 > someone else built is safe. Pasting a key into one is safe. Each of
 > those statements is the daemon's job.
 
@@ -131,14 +133,14 @@ curl -fsSL https://workbooks.sh/install | sh
 ```
 
 This puts a small program (about 1 MB) in the background of your Mac.
-After that, every `.workbook.html` file you double-click opens in your
-browser and can save in place — like a document.
+After that, every workbook you double-click opens in your browser and
+can save in place — like a document.
 
 Then grab any of the examples and double-click:
 
 ```sh
 git clone https://github.com/shinyobjectz-sh/workbooks
-open workbooks/examples/csv-explore/dist/csv-explore.workbook.html
+open workbooks/examples/csv-explore/dist/csv-explore.html
 ```
 
 The page comes up. Drop a CSV. Type SQL. Hit save. The file changes
@@ -163,8 +165,8 @@ When you're done:
 workbook build
 ```
 
-Out comes one `dist/my-thing.workbook.html` file. Email it. Drop it
-on a USB stick. Put it on a CDN. It opens anywhere.
+Out comes one `dist/my-thing.html` file. Email it. Drop it
+on a USB stick. Put it on a CDN. It opens anywhere — it's plain HTML.
 
 A starter `workbook.config.mjs` declares what your workbook needs:
 
@@ -218,7 +220,7 @@ The constraint isn't the format. The constraint is figuring out what
 | `packages/runtime-wasm` | The Rust + WASM heavy lifters (Polars, Plotters, Rhai, Candle). Three pre-built feature slices. | npm: `@work.books/runtime-wasm` |
 | `packages/workbook-cli` | Author tools: `workbook init`, `dev`, `build`, `check`. | npm: `@work.books/cli` |
 | `packages/workbook-substrate` | The file-as-database parser, hydrator, integrity guard. | npm: `@work.books/substrate` |
-| `examples/` | Reference workbooks. Each ships a built `.workbook.html` you can open. | clone-and-open |
+| `examples/` | Reference workbooks. Each ships a built `.html` artifact you can open. | clone-and-open |
 | `site/` | The workbooks.sh landing page + installer script. | Cloudflare Pages |
 | `docs/` | Spec, operations, security model, refactor notes. | start [here](docs/SPEC.md) |
 

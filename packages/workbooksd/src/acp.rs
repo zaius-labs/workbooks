@@ -405,7 +405,7 @@ pub async fn ws_handler(
 /// file I/O. Pointing it at the user's home dir or the workbook's
 /// parent dir would let the agent reach beyond the workbook (and
 /// give us no good story for syncing edits back into the
-/// .workbook.html file).
+/// .html file).
 ///
 /// Instead, every session gets its own scratch dir:
 ///

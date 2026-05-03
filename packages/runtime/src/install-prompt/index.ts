@@ -115,7 +115,7 @@ export function detectInstallTarget(baseUrl = "https://workbooks.sh"): InstallTa
   if (os === "macos") {
     // Workbooks.pkg is universal (aarch64 + x86_64), signed and
     // notarized, double-clickable in Finder, and registers launchd +
-    // the .workbook.html file association during install. The stable
+    // the .html file association during install. The stable
     // URL is maintained by the release pipeline (see
     // packages/workbooksd/release/release.sh).
     return {
@@ -142,7 +142,7 @@ export function detectInstallTarget(baseUrl = "https://workbooks.sh"): InstallTa
   }
   if (os === "windows") {
     // Workbooks.msi is the per-user installer (no UAC prompt) with the
-    // .workbook.html file association and Run-at-login registration
+    // .html file association and Run-at-login registration
     // baked in. Signed via Microsoft Trusted Signing in the release
     // pipeline so SmartScreen passes silently.
     return {

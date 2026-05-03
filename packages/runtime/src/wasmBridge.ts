@@ -620,7 +620,7 @@ export function createRuntimeClient(opts: RuntimeClientOptions): RuntimeClient {
     getDocHandle(id) {
       // Synchronous handle lookup for the SDK's useDoc() hook. Authors
       // call Loro's mutation API directly on the returned handle;
-      // changes round-trip back into the .workbook.html file via the
+      // changes round-trip back into the .html file via the
       // save handler's exportDoc() call on Cmd+S.
       return docHandles.get(id);
     },

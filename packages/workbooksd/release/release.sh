@@ -159,8 +159,8 @@ if command -v gh >/dev/null 2>&1; then
 **For end users**: download \`Workbooks.pkg\` and double-click. The
 installer is universal (aarch64 + x86_64), Gatekeeper-accepted via
 a stapled notarization ticket, and sets up the daemon LaunchAgent
-+ .workbook.html file association. Double-clicking any
-.workbook.html file afterwards opens it through the daemon.
++ .html file association. Double-clicking any
+.html file afterwards opens it through the daemon.
 
 **For automation / homebrew / install scripts**: the bare
 \`workbooksd-*\` binaries are individually notarized and

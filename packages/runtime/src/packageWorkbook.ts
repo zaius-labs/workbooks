@@ -2,7 +2,7 @@
  * Browser-side workbook packager — produces a .workbook.zip Blob
  * containing the workbook HTML plus extracted assets.
  *
- * Single-file workbooks (.workbook.html) inline everything as base64
+ * Single-file workbooks (.html) inline everything as base64
  * up to a 25 MB cap. Past that, large media (videos, audio, big
  * images) need a different shape: a zip with assets/<sha256>.<ext>
  * siblings and the HTML rewritten to reference them by relative path.

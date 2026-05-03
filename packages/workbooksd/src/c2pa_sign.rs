@@ -3,13 +3,13 @@
 // On every save (when the workbook has approved the `c2pa`
 // permission), we build a Content Credentials manifest from the
 // in-file edit log and sign it with a per-machine ed25519 key,
-// writing the result as a sidecar `.workbook.html.c2pa`.
+// writing the result as a sidecar `.html.c2pa`.
 //
 // Why sidecar and not embedded:
 //   - The official c2pa Rust crate doesn't yet support HTML as
 //     an asset binding format. Sidecars are the documented
 //     escape hatch and the Reader auto-pairs by filename.
-//   - Sidecar means the .workbook.html stays one self-contained
+//   - Sidecar means the .html stays one self-contained
 //     file (the project's north-star). The .c2pa is a second
 //     file you SHIP IF YOU CARE — clone-and-open without it
 //     keeps working.

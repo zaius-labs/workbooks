@@ -14,7 +14,7 @@ bunx -p @work.books/cli workbook <command>
 ```
 workbook init <name>         scaffold (--template=spa | document | notebook)
 workbook dev   [project]     dev server with HMR (default :5173)
-workbook build [project]     compile to dist/<slug>.workbook.html
+workbook build [project]     compile to dist/<slug>.html
 workbook check [project]     lint the project
 workbook explain <rule>      print rationale + fix for a check rule
 workbook encrypt             wrap a payload in a passphrase lock
@@ -57,7 +57,7 @@ dev server to the network.
 
 ## `workbook build`
 
-Bundles the project into a single `.workbook.html` file. The pipeline:
+Bundles the project into a single `.html` file. The pipeline:
 
 1. Vite assembles the user code (single-file plugin)
 2. Workbook plugin injects:
@@ -70,12 +70,14 @@ Bundles the project into a single `.workbook.html` file. The pipeline:
 
 ```bash
 workbook build
-# → dist/my-thing.workbook.html  (typical: 800 KB – 8 MB)
+# → dist/my-thing.html  (typical: 800 KB – 8 MB)
 ```
 
-Output is always `dist/<slug>.workbook.html`. **Don't rename it to
-`<slug>.html`** — the double extension is required by the workbooksd
-path validator and the macOS file-type association.
+Output is always `dist/<slug>.html`. The legacy `.workbook.html`
+compound extension was retired in 0.4.0 — workbook identity is
+content-based (`<meta name="wb-permissions">` / `<script id="wb-meta">`)
+and macOS routing is via the per-file `LaunchServices.OpenWith`
+xattr the daemon stamps, neither of which depend on the filename.
 
 ### Build flags
 

@@ -99,7 +99,7 @@
     </section>
 
     <footer class="mt-8 pt-4 border-t border-border text-xs text-fg-muted font-mono">
-      Built with @work.books/cli + @tailwindcss/vite. Same .workbook.html
+      Built with @work.books/cli + @tailwindcss/vite. Same .html
       format as svelte-app, notebook-agent, chat-app — different CSS
       authoring style.
     </footer>

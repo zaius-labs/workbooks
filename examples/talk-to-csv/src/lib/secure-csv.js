@@ -27,7 +27,7 @@
 // localStorage envelope so the next visit returns to passphrase).
 
 // age-encryption is imported statically so Vite bundles it into the
-// portable .workbook.html. The runtime package's lazy-load wrapper
+// portable .html. The runtime package's lazy-load wrapper
 // (loadAge) uses a vite-ignored dynamic import that doesn't survive
 // the singlefile build; calling typage directly avoids that.
 import { Encrypter, Decrypter, webauthn } from "age-encryption";

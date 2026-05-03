@@ -1,4 +1,4 @@
-// Portable workbook export — produces a self-contained .workbook.html
+// Portable workbook export — produces a self-contained .html
 // file that runs in any browser without a server, a pkg/ directory, or
 // network access. Opens by double-click.
 //

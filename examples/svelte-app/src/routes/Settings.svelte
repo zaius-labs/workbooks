@@ -39,7 +39,7 @@
   <p>
     Values flagged <code>secret: true</code> are stored in localStorage
     namespaced to this workbook (<code>wb.env.{SLUG}.*</code>) and
-    never serialize back into a saved <code>.workbook.html</code>.
+    never serialize back into a saved <code>.html</code>.
   </p>
 
   {#if Object.keys(envDecls).length === 0}

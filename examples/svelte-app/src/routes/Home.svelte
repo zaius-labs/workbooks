@@ -7,7 +7,7 @@
   <h1>This isn't a notebook. It's a Svelte app shipped as a single HTML file.</h1>
   <p>
     Three routes, hash-based navigation, all components compiled into
-    one self-contained <code>.workbook.html</code>. Same wasm runtime
+    one self-contained <code>.html</code>. Same wasm runtime
     available under the hood (Polars / Rhai / charts) when you need it.
     Open this file from a USB stick, an email attachment, or
     <code>file://</code> — it just runs.
@@ -23,7 +23,7 @@
   <ul>
     <li><strong>Multi-page navigation.</strong> svelte-spa-router for hash routes — works under file://, browser back/forward all functional.</li>
     <li><strong>Component model.</strong> Real Svelte 5 components, not hand-written templates. <code>workbook build</code> compiles them.</li>
-    <li><strong>Single artifact.</strong> No <code>dist/</code> folder. One <code>.workbook.html</code>, ~17 MB with the wasm runtime included.</li>
+    <li><strong>Single artifact.</strong> No <code>dist/</code> folder. One <code>.html</code>, ~17 MB with the wasm runtime included.</li>
     <li><strong>Optional runtime.</strong> Pull in Polars, Rhai, charts on demand from <code>virtual:workbook-runtime</code>. Most pages don't need them.</li>
   </ul>
 </section>

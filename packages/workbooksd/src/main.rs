@@ -1,5 +1,5 @@
 // workbooksd — local background daemon that serves and saves
-// .workbook.html files to the user's browser.
+// .html files to the user's browser.
 //
 // Subcommands:
 //   workbooksd                    run as daemon (long-running)
@@ -41,7 +41,7 @@
 //   - Tokens bind a single canonicalized absolute path. PUT /wb/:token/save
 //     can only ever overwrite that one path.
 //   - Open candidates must (a) canonicalize successfully (file exists)
-//     and (b) end in `.workbook.html` — defense-in-depth so a stray
+//     and (b) end in `.html` — defense-in-depth so a stray
 //     /open call can't bind /etc/passwd.
 //   - /health is the only route with permissive CORS, since file:// pages
 //     probe it as a fallback. Bound /wb/* routes are same-origin
@@ -580,7 +580,7 @@ fn main() {
             // workbooksd stamp <path>
             // Writes the com.apple.LaunchServices.OpenWith xattr so
             // the file always opens via Workbooks. Used by the .pkg
-            // postinstall to bulk-stamp existing .workbook.html files
+            // postinstall to bulk-stamp existing .html files
             // in the user's common locations. Best-effort: missing
             // file or write failure prints to stderr and exits non-zero,
             // but the caller (postinstall) ignores it.
@@ -993,7 +993,7 @@ code { background:var(--code); padding:0.05rem 0.4rem; border-radius:4px;
 That usually means the workbook was opened on a different computer, the
 daemon's session storage was cleared, or you bookmarked a URL from a
 previous run.</p>
-<p>To open it again: find the <code>.workbook.html</code> file in Finder
+<p>To open it again: find the <code>.html</code> file in Finder
 and double-click it. The daemon will hand you a fresh URL.</p>
 <p class="meta">workbooks daemon · <a href="https://workbooks.sh/" style="color:inherit">workbooks.sh</a></p>
 </main></body></html>"#;
@@ -1006,7 +1006,7 @@ async fn health() -> &'static str {
 
 // Icon serving — baked into the binary with include_str! so workbooks
 // don't have to inline Claude / Codex / native marks in every shipped
-// .workbook.html file. Pages reference them as
+// .html file. Pages reference them as
 // `<img src="http://127.0.0.1:47119/icons/claude.svg">` (or the
 // corresponding /icons/<id> path). Adds ~7 KB to the daemon binary
 // total. Source SVGs in packages/workbooksd/static/icons/.
@@ -1095,7 +1095,7 @@ async fn open_handler(
 
     // Plaintext branch: sniff for a workbook marker to confirm this
     // HTML is actually a workbook. Filename used to gate this
-    // (`.workbook.html`), but macOS Finder duplicates rename to
+    // (`.html`), but macOS Finder duplicates rename to
     // `foo.workbook (1).html` and lose the recognized suffix — so
     // we moved the gate from the name to the content.
     //
@@ -2065,10 +2065,10 @@ async fn ledger_by_id_handler(
 ///
 /// Response shape (all fields optional, missing on the no-info case):
 ///   {
-///     "current_path":    "/Users/.../foo (1).workbook.html",
+///     "current_path":    "/Users/.../foo (1).html",
 ///     "current_sha":     "<sha256 of file as it sits on disk>",
 ///     "behind":          2,                     // saves newer than current_sha
-///     "latest_path":     "/Users/.../foo.workbook.html",
+///     "latest_path":     "/Users/.../foo.html",
 ///     "latest_sha":      "<sha256>",
 ///     "latest_url":      "http://127.0.0.1:<port>/wb/<token>/",
 ///     "paths_seen":      [...]                  // every path this id has used
@@ -2247,8 +2247,8 @@ fn keychain_account(path: &Path, secret_id: &str) -> String {
 /// workbook_id-keyed keychain account name. The PRIMARY identity
 /// for substrate workbooks — survives renames, duplicates, and
 /// any other path change. A user setting an API key on
-/// `myworkbook.workbook.html` makes it instantly available on
-/// `myworkbook (1).workbook.html` (the macOS-rename copy) since
+/// `myworkbook.html` makes it instantly available on
+/// `myworkbook (1).html` (the macOS-rename copy) since
 /// both files have the same wb-meta workbook_id.
 fn keychain_account_by_id(workbook_id: &str, secret_id: &str) -> String {
     // "wb:" prefix distinguishes id-keyed from path-keyed accounts
@@ -2989,17 +2989,17 @@ fn validate_workbook_path(raw: &str) -> Result<PathBuf, String> {
     // "is this a workbook?" decision happens in open_handler by
     // sniffing wb-meta from the content — that way macOS-renamed
     // duplicates like `foo.workbook (1).html` (which lose the
-    // `.workbook.html` suffix during Finder duplication) still
+    // `.html` suffix during Finder duplication) still
     // open. Brand-new files coming out of `wb build` get wb-meta
     // injected by the substrate plugin, so the content check is
     // the canonical truth.
     // We deliberately do NOT gate on file extension. As of 0.3.1
     // workbooks are identified by content (`<meta name="wb-permissions">`
-    // or `<script id="wb-meta">`), not by name. The .workbook.html
+    // or `<script id="wb-meta">`), not by name. The .html
     // convention is being retired — files should just be `.html`,
     // because:
     //   - macOS Finder breaks the compound extension on duplicate
-    //     ("foo.workbook.html" → "foo.workbook (1).html")
+    //     ("foo.html" → "foo.workbook (1).html")
     //   - the per-file OpenWith xattr we stamp on /open and /save
     //     is what actually routes; the extension is irrelevant
     //   - dropping the convention removes a class of "looks weird in

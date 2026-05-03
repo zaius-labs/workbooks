@@ -2,7 +2,7 @@
 name = "workbooksd"
 version = "0.3.1"
 edition = "2021"
-description = "Background daemon that serves and saves .workbook.html files for the local browser"
+description = "Background daemon that serves and saves .html files for the local browser"
 license = "MIT"
 
 [[bin]]
@@ -66,7 +66,7 @@ hpke = "0.13"
 sha2 = "0.10"
 hex = "0.4"
 # C2PA / Content Authenticity Initiative — produces a sidecar
-# `.workbook.html.c2pa` manifest signed by a per-machine ed25519
+# `.html.c2pa` manifest signed by a per-machine ed25519
 # keypair. rust_native_crypto avoids OpenSSL; file_io lets the
 # Builder write sidecars directly. Crate is large (~250 transitive
 # crates) but feature-gated below the line via the daemon's c2pa
@@ -89,7 +89,7 @@ glob-match = "0.2"
 # daemon serves or writes — macOS Sequoia honours per-file OpenWith
 # overrides above the system default for public.html (which is
 # locked to whatever browser the user picked), so this is how we
-# claim .workbook.html opens for Workbooks WITHOUT requiring the
+# claim .html opens for Workbooks WITHOUT requiring the
 # user to do Get Info → Change All. See xattr_openwith.rs.
 plist = "1"
 # Ed25519 signing for the C8.7 author-claim path. Same per-machine key

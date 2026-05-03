@@ -73,7 +73,7 @@ export async function loadConfig(projectDir) {
   // Icons — accept short form (single string path) or long form (array of
   // { src, sizes?, type? }). Normalize to the long form. If neither is
   // provided, the build plugin substitutes a default workbook glyph so
-  // every saved .workbook.html has a recognizable browser-tab icon.
+  // every saved .html has a recognizable browser-tab icon.
   let icons = null;
   if (typeof cfg.icon === "string" && cfg.icon) {
     icons = [{ src: cfg.icon }];
@@ -164,7 +164,7 @@ export async function loadConfig(projectDir) {
   //
   // Recognized ids:
   //   agents   — open ACP sessions to Claude Code / Codex / etc.
-  //   autosave — write-back to the .workbook.html file as the user
+  //   autosave — write-back to the .html file as the user
   //              edits (default behavior on for save-capable apps,
   //              but still declared so the dialog explains it)
   //   secrets  — store + use API keys via the keychain proxy

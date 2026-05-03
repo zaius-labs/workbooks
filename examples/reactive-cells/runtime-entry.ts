@@ -1,5 +1,5 @@
 // Runtime bundle entry — the JS that gets inlined into every built
-// .workbook.html artifact via the workbook-cli's workbookInline plugin.
+// .html artifact via the workbook-cli's workbookInline plugin.
 // Exports the non-Svelte runtime surface so the bundle stays small;
 // Svelte components are imported separately by SDK consumers.
 //

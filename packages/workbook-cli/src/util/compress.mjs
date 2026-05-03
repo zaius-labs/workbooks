@@ -1,4 +1,4 @@
-// Brotli-sandwich compression for portable .workbook.html artifacts.
+// Brotli-sandwich compression for portable .html artifacts.
 //
 // Wraps the finalized HTML in a self-decompressing shim:
 //

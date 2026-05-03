@@ -3,7 +3,7 @@
 // The companion to the per-machine ledger (ledger.rs). Where the
 // ledger lives in `~/Library/Application Support/...` and is the
 // view of "what's happened to this workbook ON THIS MACHINE", the
-// edit log is INSIDE the .workbook.html file and TRAVELS WITH IT.
+// edit log is INSIDE the .html file and TRAVELS WITH IT.
 // Send a workbook to a coworker, the log goes too — they can see
 // "saved 14 times, last 6 by claude, before that codex, before that
 // human." No CAI/PKI required for v1; per-machine ed25519 signatures

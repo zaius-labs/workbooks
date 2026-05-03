@@ -242,7 +242,7 @@ pub struct ForkRef {
     /// workbook's first save — i.e. the moment of the fork.
     pub parent_save_ts: String,
     /// Latest path of the parent — lets the manager show
-    /// "forked from foo.workbook.html" without an extra lookup.
+    /// "forked from foo.html" without an extra lookup.
     pub parent_path: Option<String>,
 }
 

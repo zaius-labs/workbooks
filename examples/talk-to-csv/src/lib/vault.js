@@ -65,7 +65,7 @@ export function clearVault() {
 
 /** WebAuthn requires a "real" origin. file:// is rejected; localhost
  *  and https: are allowed. Surface this so the setup UI can disable
- *  the passkey option when the user opens the .workbook.html from
+ *  the passkey option when the user opens the .html from
  *  disk. */
 export function passkeyAvailable() {
   if (typeof navigator === "undefined") return false;

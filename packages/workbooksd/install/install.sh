@@ -7,7 +7,7 @@
 # What this does:
 #   1. Downloads the workbooksd binary for your platform → ~/.local/bin/workbooksd
 #   2. macOS: installs a launchd user agent so the daemon runs at login,
-#      and a tiny .app bundle that registers `.workbook.html` as a
+#      and a tiny .app bundle that registers `.html` as a
 #      document type — double-click any workbook to open it.
 #   3. Linux: stub (TODO: systemd user unit + xdg-mime).
 #   4. Windows: not yet supported.
@@ -224,7 +224,7 @@ EOF
 
   cat > "$app/Contents/MacOS/workbooks-launcher" <<EOF
 #!/bin/sh
-# Forwarded by Finder when a user double-clicks a .workbook.html file.
+# Forwarded by Finder when a user double-clicks a .html file.
 # We just hand the path off to workbooksd, which mints a token and
 # spawns the user's default browser.
 exec "$WORKBOOKS_BIN" open "\$@"
@@ -237,7 +237,7 @@ EOF
   [ -x "$lsregister" ] && "$lsregister" -f "$app" >/dev/null 2>&1 || true
 
   say "[install] file-association app → $app"
-  say "[install] note: if double-click still opens .workbook.html in your browser,"
+  say "[install] note: if double-click still opens .html in your browser,"
   say "         right-click a file → Get Info → 'Open with: Workbooks' → 'Change All…'"
 }
 
@@ -269,8 +269,8 @@ main() {
   say
   say "[install] done."
   say "         daemon binary : $WORKBOOKS_BIN"
-  say "         double-click a .workbook.html to open it (macOS),"
-  say "         or run: workbooksd open path/to/file.workbook.html"
+  say "         double-click a .html to open it (macOS),"
+  say "         or run: workbooksd open path/to/file.html"
 
   case ":$PATH:" in
     *":$WORKBOOKS_BIN_DIR:"*) ;;

@@ -6,7 +6,7 @@
 //   - Rust+WASM decrypt with plaintext-handle isolation (Phase E)
 //   - X25519 / WebAuthn unlock paths (Phase D, B — opt-in via UI)
 //
-// Operationally: a single .workbook.html file the user can open from
+// Operationally: a single .html file the user can open from
 // disk. They unlock the embedded encrypted CSV, then ask natural-
 // language questions about it. The LLM (if configured) sees only the
 // schema; the actual rows never leave the user's machine.

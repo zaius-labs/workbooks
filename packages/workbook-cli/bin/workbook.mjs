@@ -14,11 +14,11 @@ const cmdRoot = path.resolve(HERE, "..", "src", "commands");
 
 async function help() {
   process.stdout.write([
-    "workbook — build tool for portable .workbook.html artifacts",
+    "workbook — build tool for portable .html artifacts",
     "",
     "Commands:",
     "  workbook dev [project]     start a Vite dev server with HMR",
-    "  workbook build [project]   compile project into dist/<slug>.workbook.html",
+    "  workbook build [project]   compile project into dist/<slug>.html",
     "  workbook check [project]   lint a workbook source tree (--reporter=json for tools)",
     "  workbook explain <rule>    show rationale + fix for a check rule",
     "  workbook encrypt           emit an encrypted <wb-data> element from a file",

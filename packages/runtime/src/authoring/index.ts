@@ -22,7 +22,7 @@ export { default as Output } from "./Output.svelte";
 // Persistent state primitives. These render hyphenated <wb-doc> /
 // <wb-memory> custom elements internally (HTML spec requires custom
 // elements to contain a hyphen) but authors only ever write the
-// plain SDK names. State lives in the .workbook.html file —
+// plain SDK names. State lives in the .html file —
 // no IndexedDB, no localStorage, no browser cache.
 export { default as Doc } from "./Doc.svelte";
 export { default as Memory } from "./Memory.svelte";

@@ -3,7 +3,7 @@
  *
  * Drop-in replacements for `$state` that round-trip through the
  * workbook's Y.Doc and substrate. Every mutation persists to the
- * `.workbook.html` file on the next commit; every reload restores
+ * `.html` file on the next commit; every reload restores
  * the same state.
  *
  *   import { state, list, text } from "@work.books/runtime/svelte";

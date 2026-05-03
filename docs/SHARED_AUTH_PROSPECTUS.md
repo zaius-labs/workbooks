@@ -8,7 +8,7 @@ single-user, single-machine threat model this proposal extends.
 
 Two features that are tempting to ship together but are actually separable:
 
-1. **SSO-gated workbook encryption.** A `.workbook.html` is encrypted at rest.
+1. **SSO-gated workbook encryption.** A `.html` is encrypted at rest.
    Opening it forces the recipient through an OAuth/SSO flow against an IdP
    (WorkOS, Clerk, Okta, Google Workspace, the author's own). On successful
    auth, a key broker hands the decryption key back to the recipient's daemon.
@@ -116,7 +116,7 @@ Workbook content becomes a CRDT document — Automerge or Yjs. Even with one
 user, this is a quiet upgrade: it gives us free undo/redo, conflict-free
 merge across the user's own devices, and a clean change log.
 
-The `.workbook.html` file format gains an embedded CRDT log alongside the
+The `.html` file format gains an embedded CRDT log alongside the
 rendered HTML. Reading the file = applying the log to get current state.
 
 This is the piece you said you "weren't sure how it works." The short
