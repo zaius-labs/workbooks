@@ -235,10 +235,33 @@ chmod +x "$SCRIPTS_DIR/preinstall" "$SCRIPTS_DIR/postinstall"
 
 # ── 9. Build the component .pkg ──────────────────────────────────
 
+# pkgbuild's default behavior is to AUTO-INFER bundle components and
+# mark them BundleIsRelocatable=YES. PackageKit then searches the
+# user's disk for any other bundle with the same identifier and
+# silently installs there instead of /Applications/. With dev builds
+# of Workbooks.app sitting in ~/Apps/.../target/release/bundle/, every
+# user install gets relocated into the dev tree — leaving
+# /Applications/Workbooks.app deleted by preinstall and never re-laid.
+#
+# Generate an explicit component plist that pins the install location.
+COMPONENT_PLIST="$STAGE_DIR/component.plist"
+pkgbuild --analyze --root "$PAYLOAD_DIR" "$COMPONENT_PLIST" >/dev/null
+# Flip BundleIsRelocatable to NO for every entry in the plist.
+/usr/libexec/PlistBuddy -c "Print" "$COMPONENT_PLIST" >/dev/null
+plutil -convert xml1 "$COMPONENT_PLIST"
+ENTRY_COUNT=$(/usr/libexec/PlistBuddy -c "Print" "$COMPONENT_PLIST" \
+  | grep -c "BundleIsRelocatable" || echo 0)
+i=0
+while [ "$i" -lt "$ENTRY_COUNT" ]; do
+  /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" "$COMPONENT_PLIST"
+  i=$((i + 1))
+done
+
 COMPONENT_PKG="$STAGE_DIR/component.pkg"
-echo "[pkg] running pkgbuild..."
+echo "[pkg] running pkgbuild (relocation disabled)..."
 pkgbuild \
   --root "$PAYLOAD_DIR" \
+  --component-plist "$COMPONENT_PLIST" \
   --identifier "$PKG_ID" \
   --version "$VERSION" \
   --scripts "$SCRIPTS_DIR" \
