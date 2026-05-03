@@ -38,6 +38,14 @@ ureq = { version = "2", default-features = false, features = ["json"] }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Note: core-foundation was added in 0.2.4 for inline
+# LSSetDefaultRoleHandlerForContentType, then proven dead — macOS
+# Ventura+ blocks the call for browser-class UTIs regardless of GUI
+# context. The set-default-handler logic still exists in workbooksd
+# (where it's used for the sh.workbooks.workbook UTI, which DOES
+# accept LSSet because we own it), but the manager doesn't need to
+# call any LaunchServices APIs. Removed to keep the bundle slim.
+
 [profile.release]
 opt-level = "z"
 lto = true

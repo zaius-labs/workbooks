@@ -2792,9 +2792,23 @@ fn validate_workbook_path(raw: &str) -> Result<PathBuf, String> {
     // open. Brand-new files coming out of `wb build` get wb-meta
     // injected by the substrate plugin, so the content check is
     // the canonical truth.
+    // Accept either:
+    //   .html / .htm  — the legacy compound `foo.workbook.html` pattern,
+    //                   plus arbitrary HTML the user may want to open
+    //                   (the content sniff in open_handler is the real
+    //                   gate; this is just defense-in-depth so a stray
+    //                   request can't ask the daemon to serve /etc/passwd).
+    //   .workbook     — the single-segment extension that macOS Sequoia
+    //                   actually honors via UTI tag-spec (compound
+    //                   `.workbook.html` is silently broken in 15+).
+    //                   File contents are still HTML; the extension is
+    //                   purely a routing hint.
     let lower = name.to_ascii_lowercase();
-    if !lower.ends_with(".html") && !lower.ends_with(".htm") {
-        return Err("not an html file".into());
+    let ok = lower.ends_with(".html")
+        || lower.ends_with(".htm")
+        || lower.ends_with(".workbook");
+    if !ok {
+        return Err("not an html or .workbook file".into());
     }
     Ok(abs)
 }

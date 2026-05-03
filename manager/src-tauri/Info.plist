@@ -24,21 +24,17 @@
     </dict>
     <dict>
       <!--
-        Claim public.html at LSHandlerRank=Owner so Workbooks can
-        be set as the system default for HTML. We don't OWN the UTI
-        (Apple does), but Owner-rank registration tells LaunchServices
-        we're a first-class candidate. The postinstall flips the
-        user's per-UTI default to us via the LSHandlers preference.
-        Workbooks.app then content-sniffs each opened file: workbook
-        markers → daemon, plain HTML → forwarded to the user's
-        previous default (captured at install time as "fallback
-        browser"). End result: workbook files route through the
-        daemon, every other .html keeps going to the browser the
-        user always preferred.
+        Keep public.html only at LSHandlerRank=Alternate. macOS
+        Ventura+ blocks programmatic claiming of public.html as
+        default (browser-class protection), so Owner-rank gives no
+        benefit and just clutters the OS's "Open With" menu in
+        unusual places. The real routing happens through the
+        sh.workbooks.workbook UTI below — IF macOS recognises the
+        .workbook.html compound extension.
       -->
       <key>CFBundleTypeName</key><string>HTML Document</string>
-      <key>CFBundleTypeRole</key><string>Editor</string>
-      <key>LSHandlerRank</key><string>Owner</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
       <key>LSItemContentTypes</key>
       <array><string>public.html</string></array>
     </dict>
@@ -46,14 +42,33 @@
   <key>UTExportedTypeDeclarations</key>
   <array>
     <dict>
+      <!--
+        The workbook file format. Conforms to BOTH public.html (so
+        it inherits HTML semantics — browsers can render it, our
+        web pipelines treat it like HTML) AND public.data (the
+        physical-file root Apple's UTI guidance requires for
+        on-disk file formats; without this, lsregister silently
+        downgrades the registration in macOS Sonoma+).
+        Tag spec lists workbook.html as the compound extension AND
+        workbook as a single-segment fallback — Sequoia's UTI
+        inference sometimes only matches the trailing dot-segment,
+        so the bare `workbook` ext is a backup for users who rename
+        their files to drop the .html suffix.
+      -->
       <key>UTTypeIdentifier</key><string>sh.workbooks.workbook</string>
       <key>UTTypeDescription</key><string>Workbook</string>
       <key>UTTypeConformsTo</key>
-      <array><string>public.html</string></array>
+      <array>
+        <string>public.html</string>
+        <string>public.data</string>
+      </array>
       <key>UTTypeTagSpecification</key>
       <dict>
         <key>public.filename-extension</key>
-        <array><string>workbook.html</string></array>
+        <array>
+          <string>workbook.html</string>
+          <string>workbook</string>
+        </array>
       </dict>
     </dict>
   </array>

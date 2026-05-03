@@ -142,58 +142,16 @@ fn resolve_sidecar_path(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
     from_cwd.ok_or_else(|| "workbooksd sidecar not found in bundle or dev tree".to_string())
 }
 
-/// Bundle ID of the consolidated Workbooks app — kept in sync with
-/// tauri.conf.json's identifier. Used as the handler bundle ID when
-/// claiming the default for public.html.
-const WORKBOOKS_BUNDLE_ID: &str = "sh.workbooks.launcher";
-
-/// Marker file: presence means we already prompted the user (or set
-/// successfully) to make Workbooks the default for public.html.
-/// Lives next to runtime.json. Removed only by uninstall — re-install
-/// won't re-prompt.
-fn default_handler_marker() -> PathBuf {
-    let mut p: PathBuf = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
-    #[cfg(target_os = "macos")]
-    {
-        p.push("Library/Application Support/sh.workbooks.workbooksd");
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        p.push(".local/share/workbooksd");
-    }
-    p.push("default-handler-prompted");
-    p
-}
-
-/// Ask macOS to make Workbooks the default app for public.html. Must
-/// run in a GUI session — postinstall can't because macOS shows a
-/// "Change All" confirmation dialog the user has to click. We invoke
-/// the workbooksd subcommand we ship for exactly this purpose; it
-/// links CoreServices and calls LSSetDefaultRoleHandlerForContentType.
-///
-/// Idempotent via a marker file: only attempted on the very first
-/// launch after install. If the user dismisses the prompt, we don't
-/// nag — they can run "Set as default" from the manager UI later.
-#[cfg(target_os = "macos")]
-fn maybe_claim_default_handler(daemon_bin: &PathBuf) {
-    let marker = default_handler_marker();
-    if marker.exists() {
-        return;
-    }
-    let _ = std::process::Command::new(daemon_bin)
-        .args(["set-default-handler", "public.html", WORKBOOKS_BUNDLE_ID])
-        .spawn();
-    // Touch the marker regardless of whether the user accepts the
-    // prompt — repeated nags are worse than a missed default. Users
-    // who declined can change it back later via Finder Get Info, and
-    // we'll add a manager-UI control in a follow-up.
-    if let Some(parent) = marker.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(&marker, "");
-}
+// Note: programmatic claiming of public.html as default handler was
+// attempted here in 0.2.4 and confirmed dead — macOS Ventura+ blocks
+// LSSetDefaultRoleHandlerForContentType for browser-class UTIs at every
+// layer (LSSet, defaults plist write, even removing the existing entry
+// is silently overridden by launchservicesd). The user MUST do
+// Get Info → "Open with: Workbooks" → "Change All…" once. Apple
+// requires explicit user consent for browser-default changes and we
+// can't bypass that. We DO claim sh.workbooks.workbook UTI default at
+// install time (see postinstall + workbooksd's set-default-handler
+// subcommand), since that UTI is ours to assign.
 
 /// Wait up to `total` for runtime.json to appear AND respond healthy.
 /// Polled at 100 ms intervals — daemon startup is typically under
@@ -303,14 +261,14 @@ fn route_file_open(path: &str) -> Result<(), String> {
         .into_json()
         .map_err(|e| format!("decode /open response: {e}"))?;
 
-    // Hand the wb/<token>/ URL to the user's default browser. We
-    // use the fallback bundle ID here too so the workbook lands in
-    // the SAME browser the user prefers for plain HTML — not in
-    // Workbooks itself (which has no rendering capability).
-    let bundle = fallback_browser_bundle_id();
-    let _ = std::process::Command::new("open")
-        .args(["-b", &bundle, &parsed.url])
-        .spawn();
+    // Open the wb/<token>/ URL in the user's default browser. A
+    // bare `open <url>` is the NSWorkspace-equivalent: macOS routes
+    // by URL scheme (http →) the user's chosen default browser,
+    // independent of which app handles HTML files. Workbooks isn't
+    // registered as a URL-scheme handler, so there's no loop risk
+    // even when Workbooks IS the default for public.html.
+    let _ = std::process::Command::new("open").arg(&parsed.url).spawn();
+    eprintln!("[manager] routed workbook → {}", parsed.url);
     Ok(())
 }
 
@@ -333,12 +291,6 @@ pub fn run() {
                     eprintln!("[manager] warning: daemon didn't respond within 3s");
                 }
             }
-            // First-launch only: ask macOS to make Workbooks the
-            // default for public.html. Triggers a system prompt the
-            // user must accept; we run it here (in a GUI session)
-            // because postinstall can't show that dialog.
-            #[cfg(target_os = "macos")]
-            maybe_claim_default_handler(&sidecar);
             Ok(())
         })
         .build(tauri::generate_context!())

@@ -113,17 +113,19 @@ PY
   echo "[postinstall] captured fallback browser: $CURRENT_DEFAULT" >&2
 fi
 
-# 5. Setting Workbooks as the default handler for public.html
-# happens at FIRST LAUNCH of Workbooks.app, not here. macOS gates
-# default-handler changes behind a "Change All" confirmation
-# dialog, which can't appear from postinstall context (returns
-# permErr -54). Workbooks.app's setup hook calls
-# `workbooksd set-default-handler public.html sh.workbooks.launcher`
-# — running in a GUI session, the dialog appears and the user can
-# confirm.
-#
+# 5. Make Workbooks the default for sh.workbooks.workbook UTI
+# (our OWNED UTI — works without browser-default protection
+# kicking in). This way `.workbook` files (single-segment ext)
+# route to us via UTI without any user setup. Files that keep
+# the legacy `.workbook.html` compound extension still need
+# Get Info → Change All to set public.html → Workbooks, since
+# macOS Sequoia blocks programmatic claiming of public.html.
+sudo -u "$CONSOLE_USER" "$BIN" set-default-handler \
+  sh.workbooks.workbook sh.workbooks.launcher >/dev/null 2>&1 || true
+
 # Reload LaunchServices DB so the bundle's UTI claims (registered
-# above by lsregister -f) are visible in Open-With menus right away.
+# above by lsregister -f) and our default-handler claim are visible
+# in Open-With menus right away.
 [ -x "$LSREGISTER" ] && "$LSREGISTER" -kill -r -domain user >/dev/null 2>&1 || true
 
 exit 0
