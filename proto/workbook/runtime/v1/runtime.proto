@@ -1,0 +1,99 @@
+// Workbook Runtime control plane.
+//
+// Connect-based service implemented by every runtime tier:
+// - Tier 1 (browser): in-page WASM module exposed via JS bridge
+// - Tier 2 (self-hosted): Docker image serving over HTTP
+// - Tier 3 (managed): hosted runtime fleet
+//
+// All three implement this exact interface. Wire format is identical;
+// only the host changes. Connect speaks both Protobuf-binary and JSON
+// over HTTP/1.1 + HTTP/2 + HTTP/3.
+//
+// Reference: docs/SPEC.md > 'Runtime Hosts'.
+
+syntax = "proto3";
+
+package workbook.runtime.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "workbook/v1/workbook.proto";
+
+service WorkbookRuntimeService {
+  // Initialize a runtime instance with the workbook's environment.
+  rpc InitRuntime(InitRuntimeRequest) returns (InitRuntimeResponse);
+
+  // Execute a cell. Returns a stream of RunCellResponse events
+  // (incremental for streaming cells; single response for non-streaming).
+  rpc RunCell(RunCellRequest) returns (stream RunCellResponse);
+
+  // Pause the runtime; in-memory state is preserved for resume.
+  rpc PauseRuntime(PauseRuntimeRequest) returns (PauseRuntimeResponse);
+
+  // Tear down the runtime. State discarded.
+  rpc DestroyRuntime(DestroyRuntimeRequest) returns (DestroyRuntimeResponse);
+
+  // Inspect runtime state for debugging/observability.
+  rpc GetRuntimeState(GetRuntimeStateRequest) returns (GetRuntimeStateResponse);
+}
+
+message InitRuntimeRequest {
+  string workbook_slug = 1;
+  workbook.v1.Environment environment = 2;
+}
+
+message InitRuntimeResponse {
+  string runtime_id = 1;
+  int32 init_ms = 2;
+  bool warm_start = 3;
+}
+
+message RunCellRequest {
+  string runtime_id = 1;
+  workbook.v1.Cell cell = 2;
+  google.protobuf.Struct params = 3;
+}
+
+message RunCellResponse {
+  workbook.v1.CellOutput output = 1;
+}
+
+message PauseRuntimeRequest {
+  string runtime_id = 1;
+}
+
+message PauseRuntimeResponse {}
+
+message DestroyRuntimeRequest {
+  string runtime_id = 1;
+}
+
+message DestroyRuntimeResponse {}
+
+message GetRuntimeStateRequest {
+  string runtime_id = 1;
+}
+
+message GetRuntimeStateResponse {
+  RuntimeState state = 1;
+}
+
+message RuntimeState {
+  string runtime_id = 1;
+  RuntimeStatus status = 2;
+  repeated string active_cell_ids = 3;
+  repeated string bound_variables = 4;
+  google.protobuf.Timestamp started_at = 5;
+  google.protobuf.Timestamp last_activity_at = 6;
+  int64 memory_bytes = 7;
+}
+
+enum RuntimeStatus {
+  RUNTIME_STATUS_UNSPECIFIED = 0;
+  RUNTIME_STATUS_INITIALIZING = 1;
+  RUNTIME_STATUS_READY = 2;
+  RUNTIME_STATUS_RUNNING = 3;
+  RUNTIME_STATUS_PAUSED = 4;
+  RUNTIME_STATUS_ERROR = 5;
+  RUNTIME_STATUS_DESTROYED = 6;
+}

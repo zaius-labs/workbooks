@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Earthquakes — explore the USGS feed</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<article class="doc">
+  <header>
+    <p class="kicker">Workbook · live data · interactive</p>
+    <h1>Earthquakes</h1>
+    <p class="lede">
+      A live look at the <a href="https://earthquake.usgs.gov/" target="_blank" rel="noreferrer">USGS</a>
+      seismic feed — the same JSON the agency publishes every minute. Move the
+      sliders below to filter by magnitude and time window; the map and
+      summaries recompute on the fly using the workbook runtime's Polars
+      SQL engine, in your browser, with no server.
+    </p>
+  </header>
+
+  <section class="controls" aria-label="Filter controls">
+    <div class="control">
+      <label for="mag-min">Minimum magnitude</label>
+      <div class="control-row">
+        <input id="mag-min" type="range" min="0" max="7" step="0.1" value="2.5">
+        <output id="mag-min-out">2.5</output>
+      </div>
+    </div>
+    <div class="control">
+      <label for="hours">Time window (hours back)</label>
+      <div class="control-row">
+        <input id="hours" type="range" min="1" max="168" step="1" value="24">
+        <output id="hours-out">24h</output>
+      </div>
+    </div>
+  </section>
+
+  <section class="metrics" aria-live="polite">
+    <div class="metric"><span class="metric-num" id="m-count">—</span><span class="metric-label">events</span></div>
+    <div class="metric"><span class="metric-num" id="m-largest">—</span><span class="metric-label">largest mag</span></div>
+    <div class="metric"><span class="metric-num" id="m-deepest">—</span><span class="metric-label">deepest (km)</span></div>
+    <div class="metric"><span class="metric-num" id="m-felt">—</span><span class="metric-label">"felt" reports</span></div>
+  </section>
+
+  <section>
+    <h2>Where</h2>
+    <p>
+      Plate boundaries are the easy story — the Pacific Ring of Fire, the
+      Mid-Atlantic Ridge, the Himalayan front. Watch what happens when you
+      drop the magnitude floor: thousands of micro-quakes appear that the
+      news never covers, but which seismologists use to track stress
+      build-up along faults.
+    </p>
+    <div id="map" role="figure" aria-label="Map of recent earthquakes"></div>
+    <p class="caption">Each dot is one event. Color is magnitude (cool = small, warm = large); size scales with magnitude squared so a 6.0 stands out from a 4.0.</p>
+  </section>
+
+  <section>
+    <h2>How big, how often</h2>
+    <p>
+      The Gutenberg–Richter law says the count of earthquakes drops roughly
+      tenfold for every unit of magnitude. A clean log-linear histogram is
+      one of the cleanest "natural laws" in seismology — you can read the
+      <em>b-value</em> straight off the slope. Drag the magnitude floor up
+      and down: the slope holds remarkably well.
+    </p>
+    <div id="hist" class="chart" role="figure" aria-label="Magnitude histogram"></div>
+    <p class="caption">Log-scale counts per magnitude bin. The dashed line is a least-squares fit to b-value computed in real time by the runtime.</p>
+  </section>
+
+  <section>
+    <h2>Time of day</h2>
+    <p>
+      Tectonic earthquakes don't care what time it is — but human-induced
+      ones (mining, fluid injection, reservoir loading) often do. A dataset
+      that's <em>flat</em> across the 24-hour clock is a healthy
+      seismically-natural one. A dataset that <em>spikes</em> during work
+      hours is a tell.
+    </p>
+    <div id="hour" class="chart" role="figure" aria-label="Hour-of-day chart"></div>
+  </section>
+
+  <footer>
+    <p class="footer-note">
+      Data: <code>earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_week.geojson</code>.
+      Computed in-browser with the workbook runtime's Polars SQL engine
+      (<code>runPolarsSqlIpc</code>) and rendered with D3 + Leaflet —
+      no backend.
+    </p>
+  </footer>
+</article>
+
+<script type="module" src="./main.js"></script>
+</body>
+</html>

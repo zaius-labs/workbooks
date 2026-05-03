@@ -1,0 +1,224 @@
+// Workbook LLM service.
+//
+// Cell-side code (chat cells, agent cells, embedding cells) calls into
+// LlmService instead of fetching providers directly. The transport
+// underneath varies by tier:
+//
+//   Tier 1 (browser)        → fetch() to provider; key from input binding
+//                             or local storage. Streaming via SSE/fetch
+//                             ReadableStream.
+//   Tier 2 (CF Worker host) → fetch() to Cloudflare AI Gateway; cost
+//                             attribution + caching at the gateway.
+//   Tier 3 (managed)        → server-side proxy; provider keys never
+//                             leave the host.
+//
+// Same proto, three transports, identical caller surface. Workbooks that
+// run on a friend's laptop and workbooks that run in production hit the
+// same method names with the same shapes.
+//
+// Reference: docs/SPEC.md > 'LLM access'.
+
+syntax = "proto3";
+
+package workbook.llm.v1;
+
+import "google/protobuf/struct.proto";
+
+service LlmService {
+  // Generate text given a sequence of chat messages. Streams a partial
+  // result for each token / chunk; the final response carries the full
+  // text plus token-usage metadata.
+  rpc GenerateChat(GenerateChatRequest) returns (stream GenerateChatResponse);
+
+  // Embed text into a fixed-dimensional vector.
+  rpc Embed(EmbedRequest) returns (EmbedResponse);
+
+  // Inspect the connected provider — model list, available capabilities,
+  // pricing if exposed. Lets the runner UI populate model pickers.
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+}
+
+// ---------------------------------------------------------------------
+// Chat / generation
+// ---------------------------------------------------------------------
+
+message GenerateChatRequest {
+  // Provider model identifier — `provider/model-name` style:
+  //   openrouter/openai/gpt-5
+  //   openrouter/anthropic/claude-4-sonnet
+  //   workers-ai/@cf/meta/llama-3.1-70b
+  // Caller passes whatever the connected transport understands; opaque
+  // to this service definition.
+  string model = 1;
+
+  // Conversation history. Most recent message last.
+  repeated ChatMessage messages = 2;
+
+  // Sampling controls. Optional; transport supplies defaults.
+  optional double temperature = 3;
+  optional uint32 max_output_tokens = 4;
+  optional double top_p = 5;
+  repeated string stop = 6;
+
+  // Tool surface. Empty = pure generation. Non-empty = tool-using agent
+  // loop; the response stream interleaves text deltas and tool_call
+  // events. The caller (typically pi-agent-core) loops execute → reply.
+  repeated ToolDefinition tools = 7;
+
+  // Hard budget: max tokens this generation may emit before the stream
+  // is force-closed. Belt + suspenders against runaway loops.
+  optional uint32 budget_tokens = 8;
+
+  // Free-form provider passthrough — the few knobs we don't model
+  // explicitly (response_format, seed, logit_bias, etc.).
+  optional google.protobuf.Struct provider_options = 9;
+}
+
+message ChatMessage {
+  Role role = 1;
+  // Plain text. For multimodal, prefer `content_parts` below.
+  string content = 2;
+  // Multimodal content parts (image_url, audio, etc.). When set, takes
+  // precedence over `content`.
+  repeated ContentPart content_parts = 3;
+  // For role=ASSISTANT messages that contain tool calls.
+  repeated ToolCall tool_calls = 4;
+  // For role=TOOL messages — the call this message answers.
+  optional string tool_call_id = 5;
+  // Display-only label (e.g. "Claude 4 Sonnet"). Not sent upstream.
+  optional string display_name = 6;
+}
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_SYSTEM = 1;
+  ROLE_USER = 2;
+  ROLE_ASSISTANT = 3;
+  ROLE_TOOL = 4;
+}
+
+message ContentPart {
+  oneof part {
+    string text = 1;
+    ImagePart image = 2;
+  }
+}
+
+message ImagePart {
+  // Either a URL, a data: URI, or base64 bytes (one of).
+  oneof source {
+    string url = 1;
+    string base64 = 2;
+  }
+  optional string mime_type = 3;
+}
+
+message ToolDefinition {
+  string name = 1;
+  string description = 2;
+  // JSON Schema describing the tool's input shape.
+  google.protobuf.Struct parameters = 3;
+}
+
+message ToolCall {
+  string id = 1;
+  string name = 2;
+  // JSON-encoded arguments matching the tool's `parameters` schema.
+  string arguments_json = 3;
+}
+
+message GenerateChatResponse {
+  oneof event {
+    // Partial text — append to whatever's been streamed so far.
+    Delta delta = 1;
+    // The model wants to call a tool. Caller dispatches and replies
+    // with a role=TOOL message in a follow-up GenerateChatRequest.
+    ToolCallEvent tool_call = 2;
+    // Final response — terminates the stream.
+    Done done = 3;
+  }
+}
+
+message Delta {
+  // Token / chunk text appended to the assistant message in flight.
+  string text = 1;
+}
+
+message ToolCallEvent {
+  ToolCall call = 1;
+}
+
+message Done {
+  // Reason the generation stopped.
+  StopReason stop_reason = 1;
+  // Final assembled text (sum of all deltas).
+  string final_text = 2;
+  // Any final tool calls (some providers emit them only at done).
+  repeated ToolCall tool_calls = 3;
+  // Token accounting.
+  TokenUsage usage = 4;
+  // Provider-reported wall-clock latency, if known.
+  optional double latency_ms = 5;
+  // Provider-supplied error message — non-empty only when
+  // `stop_reason == STOP_REASON_ERROR`.
+  optional string error_message = 6;
+}
+
+enum StopReason {
+  STOP_REASON_UNSPECIFIED = 0;
+  STOP_REASON_END_TURN = 1;        // model said stop normally
+  STOP_REASON_MAX_TOKENS = 2;      // hit max_output_tokens or budget
+  STOP_REASON_STOP_SEQUENCE = 3;   // hit one of `stop`
+  STOP_REASON_TOOL_USE = 4;        // model is requesting tool calls
+  STOP_REASON_CANCELLED = 5;       // caller cancelled
+  STOP_REASON_ERROR = 6;           // provider/transport error
+}
+
+message TokenUsage {
+  uint32 prompt_tokens = 1;
+  uint32 completion_tokens = 2;
+  // Tokens billed at the higher cached/system rate (provider-specific).
+  optional uint32 cached_prompt_tokens = 3;
+  // Reasoning / thinking tokens for o1/claude-thinking-style models.
+  optional uint32 reasoning_tokens = 4;
+}
+
+// ---------------------------------------------------------------------
+// Embeddings
+// ---------------------------------------------------------------------
+
+message EmbedRequest {
+  string model = 1;
+  repeated string inputs = 2;
+}
+
+message EmbedResponse {
+  repeated Embedding embeddings = 1;
+  TokenUsage usage = 2;
+}
+
+message Embedding {
+  repeated float vector = 1;
+}
+
+// ---------------------------------------------------------------------
+// Provider description
+// ---------------------------------------------------------------------
+
+message DescribeRequest {}
+
+message DescribeResponse {
+  string transport_name = 1;
+  string transport_version = 2;
+  repeated ModelInfo available_models = 3;
+}
+
+message ModelInfo {
+  string id = 1;
+  string display_name = 2;
+  // Capabilities: ["chat", "vision", "tool_use", "embeddings", "thinking"].
+  repeated string capabilities = 3;
+  optional uint32 context_window = 4;
+  optional double price_per_million_input_tokens = 5;
+  optional double price_per_million_output_tokens = 6;
+}

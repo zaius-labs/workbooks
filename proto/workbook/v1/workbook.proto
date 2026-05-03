@@ -1,0 +1,684 @@
+// workbook canonical schema.
+//
+// The single source of truth for every type in the system: manifest, blocks,
+// cell outputs, runtime config. From this schema we generate TypeScript
+// bindings (Svelte UI), Rust types (WASM runtime), Python/Go/Rust client SDKs,
+// JSON Schema (validation), and OpenAPI (cell-as-API).
+//
+// The embedded manifest encoding in a .workbook file is JSON, not Protobuf
+// binary — this keeps workbooks inspectable via View Source. The Protobuf
+// schema is the type definition; JSON is the wire encoding.
+//
+// Reference: docs/WORKBOOK_SPEC.md
+//
+// Versioning: this file uses workbook.v1. Breaking changes increment
+// the major version (v2). Minor backward-compatible field additions stay in v1.
+
+syntax = "proto3";
+
+package workbook.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// Top-level manifest
+// =============================================================================
+
+message Workbook {
+  // Schema version. Increments with breaking changes.
+  string version = 1;
+
+  // Always "workbook".
+  string kind = 2;
+
+  // Convex record ID. Stable across renames.
+  string id = 3;
+
+  // Human-readable slug, unique per user namespace.
+  string slug = 4;
+
+  string title = 5;
+  string emoji = 6;
+  string description = 7;
+
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  google.protobuf.Timestamp exported_at = 10;
+
+  ExportMode export_mode = 11;
+
+  // Block tree — the document content.
+  repeated Block blocks = 12;
+
+  // Parameters declared by the workbook. Inputs and URL query params bind here.
+  map<string, Parameter> parameters = 13;
+
+  Data data = 14;
+  RuntimeConfig runtime = 15;
+  Environment environment = 16;
+  Schedule schedule = 17;
+  Permissions permissions = 18;
+  ApiConfig api = 19;
+  McpConfig mcp = 20;
+  Provenance provenance = 21;
+
+  // Embedded agent runtime config. Optional.
+  AgentConfig agent = 22;
+}
+
+enum ExportMode {
+  EXPORT_MODE_UNSPECIFIED = 0;
+  EXPORT_MODE_LINKED = 1;
+  EXPORT_MODE_PORTABLE = 2;
+}
+
+// =============================================================================
+// Parameters
+// =============================================================================
+
+message Parameter {
+  ParameterType type = 1;
+  google.protobuf.Value default = 2;
+  string description = 3;
+  // Only used when type = ENUM.
+  repeated string enum_values = 4;
+}
+
+enum ParameterType {
+  PARAMETER_TYPE_UNSPECIFIED = 0;
+  PARAMETER_TYPE_STRING = 1;
+  PARAMETER_TYPE_NUMBER = 2;
+  PARAMETER_TYPE_BOOLEAN = 3;
+  PARAMETER_TYPE_DATE = 4;
+  PARAMETER_TYPE_ENUM = 5;
+}
+
+// =============================================================================
+// Data layer config
+// =============================================================================
+
+message Data {
+  DataMode mode = 1;
+  string external_url = 2; // Only when mode = EXTERNAL.
+  bool preview_slice = 3;
+}
+
+enum DataMode {
+  DATA_MODE_UNSPECIFIED = 0;
+  DATA_MODE_EMBEDDED = 1;
+  DATA_MODE_EXTERNAL = 2;
+}
+
+// =============================================================================
+// Runtime config (pinning UI + WASM bundle versions)
+// =============================================================================
+
+message RuntimeConfig {
+  BundleSource ui_source = 1;
+  string ui_cdn_url = 2;
+  BundleSource wasm_source = 3;
+  string wasm_cdn_url = 4;
+  PreferredHost preferred_host = 5;
+  string contract_version = 6;
+  string bundle_version = 7;
+}
+
+enum BundleSource {
+  BUNDLE_SOURCE_UNSPECIFIED = 0;
+  BUNDLE_SOURCE_CDN = 1;
+  BUNDLE_SOURCE_INLINE = 2;
+}
+
+enum PreferredHost {
+  PREFERRED_HOST_UNSPECIFIED = 0;
+  PREFERRED_HOST_BROWSER = 1;
+  PREFERRED_HOST_SIGNAL_HOSTED = 2;
+  PREFERRED_HOST_SELF_HOSTED = 3;
+}
+
+// =============================================================================
+// Environment (runtime features + model artifacts)
+// =============================================================================
+
+message Environment {
+  // Which slices of the WASM runtime bundle this workbook uses.
+  // Examples: "polars", "duckdb", "candle", "linfa", "plotters", "rhai".
+  repeated string runtime_features = 1;
+
+  // ML models referenced by name from cells.
+  repeated ModelArtifact model_artifacts = 2;
+
+  // True if any cell requires Tier 3 capabilities (large training, MCP, etc.).
+  bool tier3_required = 3;
+}
+
+message ModelArtifact {
+  string name = 1;
+  string url = 2;
+  ModelFormat format = 3;
+  int64 size = 4;
+  string sha256 = 5;
+}
+
+enum ModelFormat {
+  MODEL_FORMAT_UNSPECIFIED = 0;
+  MODEL_FORMAT_SAFETENSORS = 1;
+  MODEL_FORMAT_ONNX = 2;
+  MODEL_FORMAT_GGUF = 3;
+}
+
+// =============================================================================
+// Schedule
+// =============================================================================
+
+message Schedule {
+  string cron = 1;
+  string timezone = 2;
+  bool enabled = 3;
+  RetryPolicy retry_policy = 4;
+  MissedRunPolicy missed_run_policy = 5;
+  ConcurrencyPolicy concurrency_policy = 6;
+  google.protobuf.Timestamp last_run_at = 7;
+  RunStatus last_run_status = 8;
+  string last_run_id = 9;
+}
+
+message RetryPolicy {
+  int32 max_attempts = 1;
+  repeated int32 backoff_seconds = 2;
+}
+
+enum MissedRunPolicy {
+  MISSED_RUN_POLICY_UNSPECIFIED = 0;
+  MISSED_RUN_POLICY_LATEST = 1;
+}
+
+enum ConcurrencyPolicy {
+  CONCURRENCY_POLICY_UNSPECIFIED = 0;
+  CONCURRENCY_POLICY_SKIP = 1;
+}
+
+enum RunStatus {
+  RUN_STATUS_UNSPECIFIED = 0;
+  RUN_STATUS_OK = 1;
+  RUN_STATUS_ERROR = 2;
+  RUN_STATUS_RUNNING = 3;
+}
+
+// =============================================================================
+// Permissions
+// =============================================================================
+
+message Permissions {
+  Visibility visibility = 1;
+  repeated Collaborator collaborators = 2;
+}
+
+enum Visibility {
+  VISIBILITY_UNSPECIFIED = 0;
+  VISIBILITY_PRIVATE = 1;
+  VISIBILITY_SHARED = 2;
+  VISIBILITY_PUBLIC = 3;
+}
+
+message Collaborator {
+  string user_id = 1;
+  CollaboratorRole role = 2;
+}
+
+enum CollaboratorRole {
+  COLLABORATOR_ROLE_UNSPECIFIED = 0;
+  COLLABORATOR_ROLE_VIEWER = 1;
+  COLLABORATOR_ROLE_EDITOR = 2;
+}
+
+// =============================================================================
+// Cell-as-API
+// =============================================================================
+
+message ApiConfig {
+  bool enabled = 1;
+  repeated string cell_ids = 2;
+  ApiAuth auth = 3;
+}
+
+message ApiAuth {
+  bool required = 1;
+  repeated string scopes = 2;
+  repeated string allowed_origins = 3;
+  RateLimit rate_limit = 4;
+}
+
+message RateLimit {
+  int32 requests_per_minute = 1;
+  bool per_caller = 2;
+}
+
+// =============================================================================
+// MCP server mode
+// =============================================================================
+
+message McpConfig {
+  bool enabled = 1;
+  string name = 2;
+  string description = 3;
+  McpAuth auth = 4;
+  repeated McpTool tools = 5;
+  repeated McpResource resources = 6;
+}
+
+message McpAuth {
+  bool public = 1;
+  string required_scope = 2;
+}
+
+message McpTool {
+  string cell_id = 1;
+  string name = 2;
+  string description = 3;
+  // JSON Schema for the tool's input — kept as Struct for flexibility.
+  google.protobuf.Struct input_schema = 4;
+}
+
+message McpResource {
+  string table = 1;
+  string uri = 2;
+  string description = 3;
+  bool public = 4;
+}
+
+// =============================================================================
+// Provenance + lockfile
+// =============================================================================
+
+message Provenance {
+  string generated_by = 1;
+  string session_id = 2;
+  string agent_model_id = 3;
+  string prompt_hash = 4; // sha256:<hex>
+  string signature = 5; // Ed25519 signature over canonical manifest JSON
+  // Cross-workbook dependency lockfile (npm-style pinning).
+  map<string, Dependency> dependencies = 6;
+  // For migrated artifacts, where they came from.
+  MigratedFrom migrated_from = 7;
+}
+
+message Dependency {
+  string run_id = 1;
+  google.protobuf.Timestamp resolved_at = 2;
+  string schema_hash = 3; // sha256:<hex>
+  PinKind pin = 4;
+}
+
+enum PinKind {
+  PIN_KIND_UNSPECIFIED = 0;
+  PIN_KIND_EXACT = 1;
+  PIN_KIND_LATEST = 2;
+}
+
+message MigratedFrom {
+  string source_id = 1; // Original artifact ID
+  string source_kind = 2; // e.g. "composition" for R2 migrations
+  google.protobuf.Timestamp migrated_at = 3;
+}
+
+// =============================================================================
+// Embedded agent
+// =============================================================================
+
+message AgentConfig {
+  bool enabled = 1;
+  // Bundle reference, e.g. "@signal/workbook-agent-wasm@1.0".
+  string bundle = 2;
+  string system_prompt = 3;
+  AgentModel model = 4;
+  AgentTools tools = 5;
+  TrustPolicyKind trust_policy = 6;
+  repeated AgentExtension extensions = 7;
+  AgentSession session = 8;
+}
+
+message AgentModel {
+  string provider = 1; // anthropic | openai | gemini | local | ...
+  string name = 2; // e.g. "claude-sonnet-4-6"
+  CredentialMode credential_mode = 3;
+}
+
+enum CredentialMode {
+  CREDENTIAL_MODE_UNSPECIFIED = 0;
+  // Browser-local, never leaves device.
+  CREDENTIAL_MODE_USER_KEY = 1;
+  // User key stored in host credential vault, calls go through host proxy.
+  CREDENTIAL_MODE_HOST_PROXY = 2;
+  // Host-managed key, metered against user's plan.
+  CREDENTIAL_MODE_HOST_PROVIDED = 3;
+  // Local LLM endpoint (e.g. Ollama at localhost:11434).
+  CREDENTIAL_MODE_LOCAL_LLM = 4;
+}
+
+message AgentTools {
+  repeated string enabled = 1;
+  repeated string disabled = 2;
+}
+
+enum TrustPolicyKind {
+  TRUST_POLICY_KIND_UNSPECIFIED = 0;
+  TRUST_POLICY_KIND_SAFE = 1;
+  TRUST_POLICY_KIND_BALANCED = 2;
+  TRUST_POLICY_KIND_PERMISSIVE = 3;
+  TRUST_POLICY_KIND_CUSTOM = 4;
+}
+
+message AgentExtension {
+  string name = 1;
+  string url = 2;
+  ExtensionTrust trust = 3;
+}
+
+enum ExtensionTrust {
+  EXTENSION_TRUST_UNSPECIFIED = 0;
+  EXTENSION_TRUST_USER_APPROVED = 1;
+  EXTENSION_TRUST_SIGNED = 2;
+  EXTENSION_TRUST_REJECTED = 3;
+}
+
+message AgentSession {
+  bool persist = 1;
+  bool sync_to_convex = 2;
+}
+
+// =============================================================================
+// Blocks — the document content
+// =============================================================================
+
+message Block {
+  string id = 1;
+  int32 position = 2;
+
+  // One of the kind-specific bodies below.
+  oneof body {
+    Heading heading = 10;
+    Paragraph paragraph = 11;
+    MarkdownBlock markdown = 12;
+    Callout callout = 13;
+    Divider divider = 14;
+    ImageBlock image = 15;
+    VideoBlock video = 16;
+    TableBlock table = 17;
+    ChartBlock chart = 18;
+    Metric metric = 19;
+    MetricsGrid metrics = 20;
+    Diagram diagram = 21;
+    CodeBlock code = 22; // display-only; use Cell for execution
+
+    // Execution blocks
+    Cell cell = 30;
+    Input input = 31;
+    CellRef cell_ref = 32;
+    Step step = 33;
+    Machine machine = 34;
+    Loop loop = 35;
+    Widget widget = 36;
+  }
+}
+
+// --- Display blocks ---
+
+message Heading {
+  string text = 1;
+  int32 level = 2; // 1-4
+}
+
+message Paragraph {
+  string text = 1;
+}
+
+message MarkdownBlock {
+  string content = 1;
+}
+
+message Callout {
+  CalloutVariant variant = 1;
+  string content = 2;
+}
+
+enum CalloutVariant {
+  CALLOUT_VARIANT_UNSPECIFIED = 0;
+  CALLOUT_VARIANT_INFO = 1;
+  CALLOUT_VARIANT_WARNING = 2;
+  CALLOUT_VARIANT_ERROR = 3;
+  CALLOUT_VARIANT_SUCCESS = 4;
+}
+
+message Divider {}
+
+message ImageBlock {
+  string url = 1;
+  string alt = 2;
+  string caption = 3;
+}
+
+message VideoBlock {
+  string url = 1;
+  string caption = 2;
+}
+
+message TableBlock {
+  string sql_table = 1; // References data layer by name
+}
+
+message ChartBlock {
+  string type = 1; // bar | line | scatter | area | pie | ...
+  string sql_table = 2;
+  string x_field = 3;
+  string y_field = 4;
+  google.protobuf.Struct config = 5;
+}
+
+message Metric {
+  string label = 1;
+  google.protobuf.Value value = 2;
+  string unit = 3;
+  string trend = 4; // up | down | flat
+  google.protobuf.Value trend_value = 5;
+}
+
+message MetricsGrid {
+  repeated Metric items = 1;
+}
+
+message Diagram {
+  DiagramSyntax syntax = 1;
+  string source = 2;
+  string prerendered_svg = 3;
+}
+
+enum DiagramSyntax {
+  DIAGRAM_SYNTAX_UNSPECIFIED = 0;
+  DIAGRAM_SYNTAX_MERMAID = 1;
+  DIAGRAM_SYNTAX_GRAPHVIZ = 2;
+}
+
+message CodeBlock {
+  string language = 1;
+  string source = 2;
+}
+
+// --- Execution blocks ---
+
+message Cell {
+  CellLanguage language = 1;
+  CellRuntime runtime = 2;
+  string source = 3;
+  // Language-specific structured spec (parsed/validated by runtime).
+  google.protobuf.Struct spec = 4;
+  repeated string provides = 5; // populated by static analyzer
+  repeated string reads = 6; // populated by static analyzer
+  repeated string depends_on = 7; // derived from provides/reads
+  CellStatus status = 8;
+  repeated CellOutput outputs = 9;
+  bool streaming = 10;
+}
+
+enum CellLanguage {
+  CELL_LANGUAGE_UNSPECIFIED = 0;
+  CELL_LANGUAGE_SQL = 1;
+  CELL_LANGUAGE_POLARS = 2;
+  CELL_LANGUAGE_RHAI = 3;
+  CELL_LANGUAGE_CANDLE_INFERENCE = 4;
+  CELL_LANGUAGE_LINFA_TRAIN = 5;
+  CELL_LANGUAGE_CHART = 6;
+  CELL_LANGUAGE_WASM_FN = 7;
+}
+
+enum CellRuntime {
+  CELL_RUNTIME_UNSPECIFIED = 0;
+  CELL_RUNTIME_WASM = 1; // Tier 1 default
+  CELL_RUNTIME_HOST = 2; // Tier 3 — explicit need for hosted
+}
+
+enum CellStatus {
+  CELL_STATUS_UNSPECIFIED = 0;
+  CELL_STATUS_PENDING = 1;
+  CELL_STATUS_RUNNING = 2;
+  CELL_STATUS_OK = 3;
+  CELL_STATUS_ERROR = 4;
+  CELL_STATUS_STALE = 5;
+}
+
+message CellOutput {
+  CellOutputKind kind = 1;
+  // Content varies by kind:
+  //   text: utf-8 string
+  //   image: base64 PNG/SVG
+  //   table: { sql_table: <name> } reference
+  //   error: traceback
+  //   stream: incremental update; replaced by final on completion
+  google.protobuf.Value content = 2;
+  string mime_type = 3;
+  google.protobuf.Timestamp executed_at = 4;
+}
+
+enum CellOutputKind {
+  CELL_OUTPUT_KIND_UNSPECIFIED = 0;
+  CELL_OUTPUT_KIND_TEXT = 1;
+  CELL_OUTPUT_KIND_IMAGE = 2;
+  CELL_OUTPUT_KIND_TABLE = 3;
+  CELL_OUTPUT_KIND_ERROR = 4;
+  CELL_OUTPUT_KIND_STREAM = 5;
+}
+
+message Input {
+  string name = 1;
+  string label = 2;
+  InputType input_type = 3;
+  google.protobuf.Value default = 4;
+  repeated string options = 5;
+  string description = 6;
+}
+
+enum InputType {
+  INPUT_TYPE_UNSPECIFIED = 0;
+  INPUT_TYPE_TEXT = 1;
+  INPUT_TYPE_NUMBER = 2;
+  INPUT_TYPE_SELECT = 3;
+  INPUT_TYPE_DATE = 4;
+  INPUT_TYPE_SLIDER = 5;
+  INPUT_TYPE_TOGGLE = 6;
+}
+
+message CellRef {
+  string cell_id = 1;
+  int32 output_index = 2;
+}
+
+message Step {
+  string name = 1;
+  string description = 2;
+  repeated string cell_ids = 3;
+  bool autorun = 4;
+  StepStatus status = 5;
+  google.protobuf.Timestamp last_run_at = 6;
+}
+
+enum StepStatus {
+  STEP_STATUS_UNSPECIFIED = 0;
+  STEP_STATUS_PENDING = 1;
+  STEP_STATUS_RUNNING = 2;
+  STEP_STATUS_OK = 3;
+  STEP_STATUS_ERROR = 4;
+}
+
+message Machine {
+  string model_kind = 1;
+  google.protobuf.Struct config = 2;
+  TrainingDataRef training_data = 3;
+  repeated MachineVersion versions = 4;
+  string cell_id = 5;
+}
+
+message TrainingDataRef {
+  string sql_table = 1;
+  string query = 2;
+  int64 row_count = 3;
+  string hash = 4; // sha256:<hex>
+}
+
+message MachineVersion {
+  google.protobuf.Timestamp trained_at = 1;
+  ModelArtifactSigned artifact = 2;
+  google.protobuf.Struct metrics = 3;
+  string run_id = 4;
+}
+
+message ModelArtifactSigned {
+  string url = 1;
+  google.protobuf.Timestamp signed_url_expires_at = 2;
+  int64 size = 3;
+  ModelFormat format = 4;
+}
+
+message Loop {
+  LoopOver over = 1;
+  repeated string cell_ids = 2;
+  int32 parallelism = 3;
+  LoopErrorPolicy error_policy = 4;
+  string output_table = 5;
+  LoopStatus status = 6;
+}
+
+message LoopOver {
+  LoopOverKind kind = 1;
+  string value = 2; // input-name | table-name | json array string
+}
+
+enum LoopOverKind {
+  LOOP_OVER_KIND_UNSPECIFIED = 0;
+  LOOP_OVER_KIND_INPUT = 1;
+  LOOP_OVER_KIND_TABLE = 2;
+  LOOP_OVER_KIND_LITERAL = 3;
+}
+
+enum LoopErrorPolicy {
+  LOOP_ERROR_POLICY_UNSPECIFIED = 0;
+  LOOP_ERROR_POLICY_CONTINUE = 1;
+  LOOP_ERROR_POLICY_HALT = 2;
+}
+
+enum LoopStatus {
+  LOOP_STATUS_UNSPECIFIED = 0;
+  LOOP_STATUS_PENDING = 1;
+  LOOP_STATUS_RUNNING = 2;
+  LOOP_STATUS_OK = 3;
+  LOOP_STATUS_PARTIAL = 4;
+  LOOP_STATUS_ERROR = 5;
+}
+
+message Widget {
+  string library = 1; // e.g. "@signal/widgets"
+  string component = 2;
+  string version = 3; // semver range: "^2.0", "~1.5", "1.5.0"
+  google.protobuf.Struct props = 4;
+  repeated string depends_on = 5;
+}

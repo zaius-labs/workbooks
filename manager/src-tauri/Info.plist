@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Custom Info.plist additions merged into Tauri's generated bundle.
+    As of 0.3.1, the architecture stopped depending on a custom UTI:
+    workbook files are just plain .html, recognized by content
+    (`<meta name="wb-permissions">` / `<script id="wb-meta">`), and
+    routed via the per-file `com.apple.LaunchServices.OpenWith`
+    extended attribute (stamped by the daemon on every /open + /save).
+    The xattr overrides the system default for public.html on a
+    per-file basis, which Apple still allows in Sequoia even though
+    they've locked programmatic browser-default changes.
+
+    All Workbooks needs from Info.plist now is to be a registered
+    handler candidate for public.html, so that:
+      1. Finder's right-click "Open With" menu lists Workbooks for
+         any HTML file (the user-driven first-open path)
+      2. macOS will launch the bundle when LaunchServices reads our
+         OpenWith xattr on a workbook file (system finds the bundle
+         by identifier; the rank-based selection only matters when
+         no per-file xattr is set)
+  -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>HTML Document</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array><string>public.html</string></array>
+    </dict>
+  </array>
+</dict>
+</plist>

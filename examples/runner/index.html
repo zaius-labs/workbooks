@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>workbook/runtime — runner</title>
+  <link rel="stylesheet" href="../_shared/design.css" />
+  <style>
+    .drop {
+      border: 1.5px dashed var(--line);
+      border-radius: var(--radius-lg);
+      padding: var(--s-9) var(--s-6);
+      text-align: center;
+      transition: border-color var(--t-mid) var(--ease-out),
+                  background var(--t-mid) var(--ease-out);
+      cursor: pointer;
+    }
+    .drop:hover, .drop.drag {
+      border-color: var(--ink-2);
+      background: var(--bg-soft);
+    }
+    .drop .glyph { font-size: 32px; color: var(--ink-4); margin-bottom: var(--s-3); }
+    .drop p { margin: 0; color: var(--ink-3); }
+    .drop input[type=file] { display: none; }
+    .drop .small { font-size: var(--t-xs); color: var(--ink-4); margin-top: var(--s-2); }
+
+    .cell {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: var(--s-4) var(--s-5);
+      background: var(--bg);
+      transition: border-color var(--t-mid) var(--ease-out),
+                  opacity var(--t-mid) var(--ease-out);
+    }
+    .cell + .cell { margin-top: var(--s-3); }
+    .cell.running { border-color: var(--run); }
+    .cell.ok { border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); }
+    .cell.error { border-color: color-mix(in srgb, var(--err) 35%, var(--line)); }
+    .cell.stale { opacity: 0.55; }
+
+    .cell-head {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-family: var(--font-mono); font-size: var(--t-xs);
+      color: var(--ink-3); margin-bottom: var(--s-2);
+      letter-spacing: 0.02em;
+    }
+    .cell-head .id { color: var(--ink); font-weight: 500; }
+    .cell-head .lang { text-transform: uppercase; font-size: 11px; }
+
+    .cell-source {
+      font-family: var(--font-mono); font-size: var(--t-sm);
+      background: var(--bg-soft); padding: var(--s-2) var(--s-3);
+      border-radius: 3px; color: var(--ink-2); margin: var(--s-2) 0;
+      white-space: pre-wrap;
+    }
+    .cell-out {
+      font-family: var(--font-mono); font-size: var(--t-sm);
+      color: var(--ink); margin-top: var(--s-2); white-space: pre-wrap;
+    }
+    .cell.error .cell-out { color: var(--err); }
+    .cell-img svg { max-width: 100%; height: auto; display: block; }
+    .cell-table { margin-top: var(--s-2); }
+
+    .input-row {
+      display: flex; align-items: baseline; gap: var(--s-3);
+      padding: var(--s-2) 0;
+    }
+    .input-row label { font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-3); min-width: 6rem; }
+  </style>
+</head>
+<body>
+  <main class="wb-page">
+    <header class="wb-hero">
+      <div class="eyebrow">runner · open .workbook</div>
+      <h1>Run any workbook file.</h1>
+      <p>
+        Drop a <code>.workbook</code> file (downloaded from any demo) and
+        the runner mounts it: cells render, inputs become controls, the
+        reactive executor runs the DAG. The runtime, format, and viewer
+        are all the same code as the rest of the tour.
+      </p>
+    </header>
+
+    <section class="wb-section" id="dropSection">
+      <div class="drop" id="drop">
+        <div class="glyph">↓</div>
+        <p><strong>Drop a .workbook file</strong> or click to choose</p>
+        <p class="small">also try one of the bundled samples below</p>
+        <input id="file" type="file" accept=".workbook,application/json" />
+      </div>
+      <div class="wb-tag-row" style="justify-content: center; margin-top: var(--s-4);">
+        <button class="wb-btn ghost sample" data-sample="reactive">sample · reactive cells</button>
+        <button class="wb-btn ghost sample" data-sample="hello">sample · hello rhai</button>
+        <button class="wb-btn ghost sample" data-sample="csv">sample · csv → sql</button>
+      </div>
+    </section>
+
+    <section class="wb-section" id="manifestSection" style="display:none;">
+      <h2 class="wb-section-title">Manifest</h2>
+      <div class="wb-card compact" id="manifest"></div>
+    </section>
+
+    <section class="wb-section" id="inputsSection" style="display:none;">
+      <h2 class="wb-section-title">Inputs</h2>
+      <div class="wb-card" id="inputs"></div>
+    </section>
+
+    <section class="wb-section" id="cellsSection" style="display:none;">
+      <h2 class="wb-section-title">Cells</h2>
+      <div id="cells"></div>
+    </section>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Build info</h2>
+      <div id="info"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import init, * as wasm from "../../pkg/workbook_runtime.js";
+    import { createRuntimeClient, analyzeCell, ReactiveExecutor } from "../reactive-cells/runtime.bundle.js";
+    import { mountChrome, renderBuildInfo } from "../_shared/chrome.js";
+
+    mountChrome({ slug: "runner" });
+
+    const t0 = performance.now();
+    await init();
+    const coldStartMs = Math.round(performance.now() - t0);
+    renderBuildInfo("info", wasm.build_info(), coldStartMs);
+
+    const client = createRuntimeClient({ loadWasm: async () => wasm });
+
+    const drop = document.getElementById("drop");
+    const fileInput = document.getElementById("file");
+    drop.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", (e) => {
+      const f = e.target.files?.[0];
+      if (f) loadFromFile(f);
+    });
+    drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("drag"); });
+    drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
+    drop.addEventListener("drop", (e) => {
+      e.preventDefault();
+      drop.classList.remove("drag");
+      const f = e.dataTransfer.files?.[0];
+      if (f) loadFromFile(f);
+    });
+
+    document.querySelectorAll(".sample").forEach((btn) => {
+      btn.addEventListener("click", () => loadSample(btn.dataset.sample));
+    });
+
+    async function loadFromFile(file) {
+      const text = await file.text();
+      let spec;
+      try { spec = JSON.parse(text); }
+      catch (e) { alert(`Not a valid workbook JSON: ${e.message}`); return; }
+      mountWorkbook(spec);
+    }
+
+    function loadSample(kind) {
+      const spec = SAMPLES[kind];
+      if (spec) mountWorkbook(spec);
+    }
+
+    let executor = null;
+    const cellEls = new Map();
+
+    async function mountWorkbook(spec) {
+      // Reset.
+      if (executor) { executor.destroy(); executor = null; }
+      cellEls.clear();
+      document.getElementById("cells").innerHTML = "";
+      document.getElementById("inputs").innerHTML = "";
+
+      // Manifest.
+      const m = spec.manifest ?? {};
+      document.getElementById("manifest").innerHTML = `
+        <div class="wb-card-header">
+          <span class="wb-card-title">${m.name ?? m.slug ?? "(unnamed)"}</span>
+          <span class="wb-card-meta">
+            ${m.version ? `<span>v${m.version}</span>` : ""}
+            <span>${(spec.cells ?? []).length} cells</span>
+          </span>
+        </div>
+      `;
+      document.getElementById("manifestSection").style.display = "block";
+
+      // Inputs (rendered as form controls).
+      const inputs = { ...(spec.inputs ?? {}) };
+      const inputsEl = document.getElementById("inputs");
+      const inputNames = Object.keys(inputs);
+      if (inputNames.length === 0) {
+        inputsEl.innerHTML = `<span class="wb-muted wb-mono" style="font-size: var(--t-sm);">no declared inputs</span>`;
+      } else {
+        inputsEl.innerHTML = inputNames
+          .map((name) => {
+            const val = inputs[name];
+            const type = typeof val === "number" ? "number" : "text";
+            return `
+              <div class="input-row">
+                <label>${name}</label>
+                <input class="wb-input ${type === "number" ? "num" : "text"}" type="${type}" value="${val}" data-input="${name}" />
+              </div>
+            `;
+          })
+          .join("");
+      }
+      document.getElementById("inputsSection").style.display = "block";
+
+      // Cells.
+      const cellsRoot = document.getElementById("cells");
+      for (const cell of (spec.cells ?? [])) {
+        const a = analyzeCell(cell);
+        const el = document.createElement("div");
+        el.className = "cell stale";
+        el.innerHTML = `
+          <div class="cell-head">
+            <span><span class="wb-dot idle"></span><span class="id">${cell.id}</span></span>
+            <span class="lang">${cell.language ?? "?"}</span>
+          </div>
+          <div class="cell-source">${cell.source ?? "(no source)"}</div>
+          <div class="cell-out wb-muted">—</div>
+        `;
+        cellsRoot.appendChild(el);
+        cellEls.set(cell.id, el);
+      }
+      document.getElementById("cellsSection").style.display = "block";
+
+      // Hide drop area now that we have a workbook open.
+      document.getElementById("dropSection").style.display = "none";
+
+      // Build executor.
+      executor = new ReactiveExecutor({
+        client,
+        cells: spec.cells ?? [],
+        inputs,
+        workbookSlug: m.slug ?? "imported",
+        debounceMs: 200,
+        onCellState: (state) => updateCellState(state),
+      });
+
+      // Wire input changes.
+      inputsEl.querySelectorAll("input[data-input]").forEach((el) => {
+        el.addEventListener("input", () => {
+          const name = el.dataset.input;
+          const raw = el.value;
+          const v = el.type === "number" ? Number(raw) : raw;
+          executor.setInput(name, v);
+        });
+      });
+
+      await executor.runAll();
+    }
+
+    function updateCellState(state) {
+      const el = cellEls.get(state.cellId);
+      if (!el) return;
+      el.className = `cell ${state.status}`;
+      el.querySelector(".wb-dot").className = `wb-dot ${state.status}`;
+      const out = el.querySelector(".cell-out");
+      if (state.status === "ok" && state.outputs?.length) {
+        out.classList.remove("wb-muted");
+        out.innerHTML = "";
+        for (const o of state.outputs) {
+          out.appendChild(renderOutput(o));
+        }
+      } else if (state.status === "error") {
+        out.textContent = state.error ?? "(error)";
+      } else if (state.status === "running") {
+        out.classList.add("wb-muted");
+        out.textContent = "running…";
+      }
+    }
+
+    function renderOutput(o) {
+      if (o.kind === "image" && o.mime_type === "image/svg+xml") {
+        const div = document.createElement("div");
+        div.className = "cell-img";
+        div.innerHTML = o.content;
+        return div;
+      }
+      if (o.kind === "text" && o.mime_type === "text/csv") {
+        return csvToTable(o.content);
+      }
+      const div = document.createElement("div");
+      if (o.kind === "text") div.textContent = o.content;
+      else if (o.kind === "error") div.textContent = `ERROR: ${o.message}`;
+      else div.textContent = JSON.stringify(o);
+      return div;
+    }
+
+    function csvToTable(csv) {
+      const rows = csv.trim().split("\n").map((r) => parseCsvRow(r));
+      const table = document.createElement("table");
+      table.className = "wb-table cell-table";
+      const thead = document.createElement("thead");
+      const tr = document.createElement("tr");
+      for (const cell of rows[0]) {
+        const th = document.createElement("th");
+        th.textContent = cell;
+        tr.appendChild(th);
+      }
+      thead.appendChild(tr);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      for (let i = 1; i < rows.length; i++) {
+        const r = document.createElement("tr");
+        for (const cell of rows[i]) {
+          const td = document.createElement("td");
+          td.textContent = cell;
+          if (!isNaN(Number(cell)) && cell !== "") td.className = "num";
+          r.appendChild(td);
+        }
+        tbody.appendChild(r);
+      }
+      table.appendChild(tbody);
+      return table;
+    }
+
+    function parseCsvRow(row) {
+      const out = []; let cur = ""; let inQ = false;
+      for (let i = 0; i < row.length; i++) {
+        const ch = row[i];
+        if (ch === '"') { inQ = !inQ; continue; }
+        if (ch === "," && !inQ) { out.push(cur); cur = ""; continue; }
+        cur += ch;
+      }
+      out.push(cur);
+      return out;
+    }
+
+    // ----- Bundled samples (visible without downloading first) -----
+    const SAMPLES = {
+      reactive: {
+        manifest: { name: "reactive cells", slug: "reactive-cells", version: "0.1" },
+        inputs: { n: 40 },
+        cells: [
+          { id: "doubled",     language: "rhai", source: "n * 2",                provides: ["doubled"],     dependsOn: ["n"] },
+          { id: "incremented", language: "rhai", source: "n + 1",                provides: ["incremented"], dependsOn: ["n"] },
+          { id: "summary",     language: "rhai", source: "doubled + incremented", provides: ["summary"],     dependsOn: ["doubled", "incremented"] },
+        ],
+      },
+      hello: {
+        manifest: { name: "hello rhai", slug: "hello", version: "0.1" },
+        inputs: {},
+        cells: [
+          { id: "result", language: "rhai", source: "let n = 40;\nn + 2", provides: ["result"] },
+        ],
+      },
+      csv: {
+        manifest: { name: "csv → sql", slug: "csv-explore-min", version: "0.1" },
+        inputs: {
+          csv: "name,region,revenue,churn\nacme,us,12000,0.04\nbeta,us,8400,0.11\ncontoso,eu,15600,0.02\ndelta,eu,3200,0.18",
+          sql: "SELECT region, COUNT(*) AS n, SUM(revenue) AS rev FROM data GROUP BY region ORDER BY rev DESC",
+        },
+        cells: [
+          { id: "result", language: "polars", source: "{{sql}}", dependsOn: ["sql", "csv"], provides: ["result"] },
+        ],
+      },
+    };
+  </script>
+</body>
+</html>

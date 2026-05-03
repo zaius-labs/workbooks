@@ -1,0 +1,145 @@
+/* Strict monochrome inspect page. Same palette as the home page —
+ * no borders chrome, type + spacing carry the page. */
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 2rem;
+  font-size: 0.9rem;
+  color: var(--fg-muted);
+  text-decoration: none;
+}
+.back-link:hover { color: var(--fg); }
+
+/* Drop target — soft shaded panel, no dashed border. The shade
+ * tint is the affordance; hover deepens it. */
+.dropzone {
+  background: var(--code-bg);
+  border-radius: 12px;
+  padding: 3.5rem 1.5rem;
+  text-align: center;
+  margin: 2rem 0 3rem;
+  transition: opacity 120ms;
+  cursor: pointer;
+}
+.dropzone:hover,
+.dropzone.drag-over { opacity: 0.7; }
+
+.dropzone-inner { display: flex; flex-direction: column; gap: 0.5rem; align-items: center; }
+.dropzone-icon { font-size: 2rem; color: var(--fg-muted); }
+.dropzone-label { font-size: 1rem; font-weight: 500; }
+.dropzone-hint { font-size: 0.85rem; color: var(--fg-muted); }
+
+.link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+}
+
+.report-section h2 {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+  margin: 0 0 1rem;
+}
+
+/* Identity grid — no borders, just label/value rhythm. */
+.kv {
+  display: grid;
+  grid-template-columns: 11rem 1fr;
+  gap: 0.5rem 1rem;
+  margin: 0;
+  font-size: 0.92rem;
+}
+.kv dt { color: var(--fg-muted); margin: 0; }
+.kv dd { margin: 0; word-break: break-all; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.88em; }
+
+.report-meta {
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  margin: 0 0 1rem;
+}
+
+/* Timeline — flat rows separated by hairline only between rows.
+ * Each row reads as a line of monospace, agent tag is just a
+ * label. No card chrome. */
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.timeline-row {
+  display: grid;
+  grid-template-columns: 9rem 5rem 1fr auto;
+  gap: 1rem;
+  align-items: baseline;
+  padding: 0.55rem 0;
+  border-top: 1px solid var(--line);
+  font-size: 0.88rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.timeline-row:first-child { border-top: 0; }
+/* Fork points: rows whose ts matches another row's ts but with
+ * a divergent sha. Marked with a left-edge bar so the eye can
+ * skim for branches without reading every row's source list. */
+.timeline-row.timeline-fork {
+  position: relative;
+  padding-left: 0.85rem;
+}
+.timeline-row.timeline-fork::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0.55rem; bottom: 0.55rem;
+  width: 2px;
+  background: var(--fg);
+  opacity: 0.55;
+}
+.timeline-source {
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  margin-top: 0.1rem;
+}
+
+.agent-tag {
+  font-size: 0.72rem;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  color: var(--fg-muted);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+/* Agent attribution: rather than colored chips, the active agent
+ * row uses fg color to mean "real attribution"; unknown stays muted. */
+.agent-tag.agent-claude,
+.agent-tag.agent-codex,
+.agent-tag.agent-native,
+.agent-tag.agent-human { color: var(--fg); }
+
+.timeline-sha  { color: var(--fg-muted); }
+.timeline-size { color: var(--fg-muted); text-align: right; }
+
+.empty-state {
+  font-size: 0.9rem;
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.parse-error {
+  background: var(--code-bg);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  font-size: 0.88rem;
+  color: var(--fg);
+  margin-bottom: 1.5rem;
+}

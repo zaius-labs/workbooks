@@ -1,0 +1,13 @@
+{
+  "name": "@workbooks/site",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Marketing + install landing page for workbooks.sh",
+  "scripts": {
+    "build": "rm -rf dist && mkdir -p dist && cp -R src/. dist/ && cp ../packages/workbooksd/install/install.sh dist/install",
+    "dev": "bun run build && python3 -m http.server --directory dist 5175",
+    "preview": "python3 -m http.server --directory dist 5175",
+    "deploy": "bun run build && wrangler pages deploy dist --project-name workbooks-shell --branch main --commit-dirty=true"
+  }
+}

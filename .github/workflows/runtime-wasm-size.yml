@@ -1,0 +1,81 @@
+name: runtime-wasm size
+
+# Build the workbook-runtime WASM crate, measure compressed payload, and fail
+# if the brotli size grows past the budget. The format/runtime is meant to
+# stay well under Pyodide's ~30 MB envelope; this gate catches accidental
+# regressions when feature flags or dep versions change.
+
+on:
+  pull_request:
+    paths:
+      - "packages/runtime-wasm/**"
+      - ".github/workflows/runtime-wasm-size.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/runtime-wasm/**"
+      - ".github/workflows/runtime-wasm-size.yml"
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/runtime-wasm
+    env:
+      # Brotli budget for the default feature set (charts + rhai + polars).
+      # Bump deliberately when adding new defaults; don't paper over silent
+      # regressions.
+      MAX_BROTLI_KB: 2500
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin Rust toolchain
+        run: rustup show
+
+      - name: Add wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: |
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Install brotli
+        run: sudo apt-get update && sudo apt-get install -y brotli
+
+      - name: Build (default features)
+        run: wasm-pack build --target web --release
+
+      - name: Measure
+        id: measure
+        run: |
+          WASM=pkg/workbook_runtime_bg.wasm
+          RAW_BYTES=$(wc -c < "$WASM")
+          GZIP_BYTES=$(gzip -kc "$WASM" | wc -c)
+          BROTLI_BYTES=$(brotli --best -kc "$WASM" | wc -c)
+          RAW_KB=$((RAW_BYTES / 1024))
+          GZIP_KB=$((GZIP_BYTES / 1024))
+          BROTLI_KB=$((BROTLI_BYTES / 1024))
+          echo "raw=$RAW_KB" >> "$GITHUB_OUTPUT"
+          echo "gzip=$GZIP_KB" >> "$GITHUB_OUTPUT"
+          echo "brotli=$BROTLI_KB" >> "$GITHUB_OUTPUT"
+          {
+            echo "## workbook-runtime bundle size"
+            echo
+            echo "| Encoding | Size |"
+            echo "|---|---:|"
+            echo "| raw    | ${RAW_KB} KB |"
+            echo "| gzip   | ${GZIP_KB} KB |"
+            echo "| brotli | **${BROTLI_KB} KB** |"
+            echo
+            echo "Budget: ${MAX_BROTLI_KB} KB brotli."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce budget
+        run: |
+          BROTLI_KB=${{ steps.measure.outputs.brotli }}
+          if [ "$BROTLI_KB" -gt "$MAX_BROTLI_KB" ]; then
+            echo "::error title=workbook-runtime exceeds size budget::brotli=${BROTLI_KB} KB > budget=${MAX_BROTLI_KB} KB"
+            exit 1
+          fi
+          echo "OK: ${BROTLI_KB} KB ≤ ${MAX_BROTLI_KB} KB"

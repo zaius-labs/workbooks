@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+/* Theme tokens — Tailwind v4 auto-generates utility classes from
+   every --color-* declared in @theme. Same pattern Signal uses. */
+@theme {
+  --color-page:    #fafafa;
+  --color-surface: #ffffff;
+  --color-fg:      #0a0a0a;
+  --color-fg-muted:#525252;
+  --color-fg-faint:#a3a3a3;
+  --color-border:  #e5e5e5;
+  --color-accent:  #84cc16;        /* lime — same as the workbook glyph */
+  --color-accent-fg: #1a2e05;
+
+  --font-sans: "Inter", -apple-system, "SF Pro Text", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, "Menlo", monospace;
+}

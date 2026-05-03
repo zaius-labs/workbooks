@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>workbook/runtime — reactive cells</title>
+  <link rel="stylesheet" href="../_shared/design.css" />
+  <style>
+    .cell {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: var(--s-4) var(--s-5);
+      background: var(--bg);
+      transition: border-color var(--t-mid) var(--ease-out),
+                  opacity var(--t-mid) var(--ease-out);
+    }
+    .cell + .cell { margin-top: var(--s-3); }
+    .cell.running { border-color: var(--run); }
+    .cell.ok { border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); }
+    .cell.error { border-color: color-mix(in srgb, var(--err) 35%, var(--line)); }
+    .cell.stale { opacity: 0.55; }
+
+    .cell-head {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-family: var(--font-mono); font-size: var(--t-xs);
+      color: var(--ink-3); margin-bottom: var(--s-2);
+      letter-spacing: 0.02em;
+    }
+    .cell-head .id { color: var(--ink); font-weight: 500; }
+    .cell-head .lang { text-transform: uppercase; font-size: 11px; }
+    .cell-head .timing { color: var(--ink-4); font-feature-settings: "tnum"; }
+
+    .cell-source {
+      font-family: var(--font-mono); font-size: var(--t-sm);
+      background: var(--bg-soft); padding: var(--s-2) var(--s-3);
+      border-radius: 3px; color: var(--ink-2); margin: var(--s-2) 0;
+      white-space: pre-wrap;
+    }
+    .cell-out {
+      font-family: var(--font-mono); font-size: var(--t-sm);
+      color: var(--ink); margin-top: var(--s-2);
+    }
+    .cell.error .cell-out { color: var(--err); }
+    .cell-deps {
+      font-family: var(--font-mono); font-size: var(--t-xs);
+      color: var(--ink-4); margin-top: var(--s-3);
+      letter-spacing: 0.02em;
+    }
+  </style>
+</head>
+<body>
+  <main class="wb-page">
+    <header class="wb-hero">
+      <div class="eyebrow">P3.4 + P3.7 · reactivity</div>
+      <h1>The cell graph re-executes itself.</h1>
+      <p>
+        Three Rhai cells form a tiny DAG: <code>doubled</code> and
+        <code>incremented</code> both read <code>n</code>;
+        <code>summary</code> sums them. Drag <code>n</code> — only
+        downstream cells re-run, debounced 200 ms. The static analyzer
+        builds the graph; the executor walks it in topological order.
+      </p>
+    </header>
+
+    <section class="wb-section">
+      <div class="wb-controls">
+        <span class="wb-field">
+          <label>n</label>
+          <input id="n" class="wb-input num" type="number" value="40" min="0" max="1000" step="1" />
+        </span>
+        <span class="wb-muted wb-mono" style="font-size: var(--t-sm);">
+          → <span class="wb-kbd">setInput("n", value)</span>
+        </span>
+      </div>
+    </section>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Cells</h2>
+      <div id="cells"></div>
+    </section>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Build info</h2>
+      <div id="info"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import init, * as wasm from "../../pkg/workbook_runtime.js";
+    import { createRuntimeClient, analyzeCell, ReactiveExecutor } from "./runtime.bundle.js";
+    import { mountChrome, renderBuildInfo, setWorkbookExport } from "../_shared/chrome.js";
+
+    mountChrome({ slug: "reactive-cells" });
+
+    const t0 = performance.now();
+    await init();
+    const coldStartMs = Math.round(performance.now() - t0);
+    renderBuildInfo("info", wasm.build_info(), coldStartMs);
+
+    const client = createRuntimeClient({ loadWasm: async () => wasm });
+
+    const cells = [
+      { id: "doubled",     language: "rhai", source: "n * 2",                    provides: ["doubled"],     dependsOn: ["n"] },
+      { id: "incremented", language: "rhai", source: "n + 1",                    provides: ["incremented"], dependsOn: ["n"] },
+      { id: "summary",     language: "rhai", source: "doubled + incremented",    provides: ["summary"],     dependsOn: ["doubled", "incremented"] },
+    ];
+
+    const cellsRoot = document.getElementById("cells");
+    const cellEls = new Map();
+    for (const cell of cells) {
+      const a = analyzeCell(cell);
+      const el = document.createElement("div");
+      el.className = "cell stale";
+      el.innerHTML = `
+        <div class="cell-head">
+          <span><span class="wb-dot idle"></span><span class="id">${cell.id}</span></span>
+          <span class="lang">${cell.language}</span>
+        </div>
+        <div class="cell-source">${cell.source}</div>
+        <div class="cell-out wb-muted">—</div>
+        <div class="cell-deps">reads = [${a.reads.join(", ")}] · provides = [${a.provides.join(", ")}]</div>
+      `;
+      cellsRoot.appendChild(el);
+      cellEls.set(cell.id, el);
+    }
+
+    const executor = new ReactiveExecutor({
+      client,
+      cells,
+      inputs: { n: 40 },
+      workbookSlug: "reactive-cells-demo",
+      debounceMs: 200,
+      onCellState: (state) => {
+        const el = cellEls.get(state.cellId);
+        if (!el) return;
+        el.className = `cell ${state.status}`;
+        const dotEl = el.querySelector(".wb-dot");
+        dotEl.className = `wb-dot ${state.status}`;
+        const head = el.querySelector(".cell-head");
+        // Refresh the right-side meta with timing badge.
+        let timing = el.querySelector(".timing");
+        if (!timing) {
+          timing = document.createElement("span");
+          timing.className = "timing";
+          head.querySelector(".lang").after(document.createTextNode(" · "));
+          head.querySelector(".lang").parentElement.insertBefore(timing, head.lastElementChild);
+        }
+        const out = el.querySelector(".cell-out");
+        if (state.status === "ok" && state.outputs?.length) {
+          out.classList.remove("wb-muted");
+          out.textContent = state.outputs.map((o) => o.kind === "text" ? o.content : JSON.stringify(o)).join("\n");
+        } else if (state.status === "error") {
+          out.textContent = state.error ?? "(error)";
+        } else if (state.status === "running") {
+          out.classList.add("wb-muted");
+          out.textContent = "running…";
+        }
+        // (We leave previous output visible during stale.)
+      },
+    });
+
+    await executor.runAll();
+
+    document.getElementById("n").addEventListener("input", (e) => {
+      executor.setInput("n", Number(e.target.value));
+    });
+
+    // Expose this demo's current workbook to the nav-bar download button.
+    setWorkbookExport(() => ({
+      manifest: {
+        name: "reactive cells",
+        slug: "reactive-cells",
+        version: "0.1",
+        runtime_features: ["rhai"],
+      },
+      inputs: { n: Number(document.getElementById("n").value) },
+      cells,
+    }));
+  </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# Audio assets are regenerable from scripts/ + .env (OpenRouter + fal.ai).
+# Don't commit them — they're heavy (27 MB combined) and re-deterministic
+# enough that anyone with the keys can reproduce.
+audio/
+
+# Render output — final MP4 lives at ../../assets/readme-banner.mp4
+renders/
+
+# Local secrets
+.env

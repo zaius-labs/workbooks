@@ -1,0 +1,197 @@
+[package]
+name = "workbook-runtime"
+version = "0.1.0"
+edition = "2021"
+description = "Workbook execution runtime — Rust crates compiled to WASM for client-side execution of SQL, Polars, Rhai, Candle inference, Linfa training, and Plotters charts."
+license = "Apache-2.0"
+repository = "https://github.com/zaius-labs/workbooks"
+homepage = "https://github.com/zaius-labs/workbooks"
+keywords = ["workbook", "wasm", "polars", "sqlite", "notebook"]
+categories = ["wasm", "science"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[features]
+# Tree-shakeable feature slices. The agent declares which slices a workbook
+# needs in `manifest.environment.runtimeFeatures`; the bundle is built once
+# but cells only load the slices their workbook references.
+#
+# Default targets ~2-3 MB brotli. Polars covers OLAP via lazy LazyFrame +
+# SQL frontend; plotters covers charts; rhai covers scripting. SQLite is
+# the JS-side sidecar (`@sqlite.org/sqlite-wasm`), lazy-loaded from the
+# JS bridge when a workbook declares language: "sqlite". This avoids the
+# wasi-sdk dependency Rust-bundled SQLite would require.
+#
+# DuckDB-WASM was previously listed here as an alternative SQL engine;
+# removed in core-0id.7 (no examples used it; supply-chain risk via
+# the JsDelivr CDN default). Polars-SQL covers analytical workloads; the
+# SQLite sidecar is the non-Polars roadmap.
+#
+# Polars carries a wasm32-friendly feature subset (no parquet/dtype-full,
+# which need lz4-sys / zstd-sys C deps that themselves need a wasi sysroot).
+# Add `polars-parquet` later once we ship a wasi-sdk story.
+default = ["polars-frames", "charts", "rhai-glue", "crypto", "arrow", "cell-outputs", "history-prolly"]
+
+# Phase 3 (core-0or.3) — opt-out features for code that used to be
+# always-on. App-shape workbooks (color.wave) compile with these
+# disabled to drop crypto / arrow / cell-output / history weight.
+crypto = ["dep:age"]
+# `arrow` here gates ONLY the local arrow_json.rs module; the arrow
+# crate itself stays in the dependency tree because polars-frames pulls
+# it transitively. So this saves the wrapper code but not the arrow
+# crate's bytes — material only when polars-frames is also off.
+arrow = []
+cell-outputs = []
+# Prolly Tree primitive for <wb-history>. Color.wave uses it for the
+# composition edit chain; data-app-shape workbooks may not.
+history-prolly = []
+
+# Data layer (Rust-bundled — currently only Polars). SQLite is JS-side
+# via @sqlite.org/sqlite-wasm, wired through the runtime bridge, not
+# this crate.
+polars-frames = ["dep:polars", "cell-outputs"]
+
+# Visualization
+charts = ["dep:plotters", "cell-outputs"]
+
+# Scripting glue
+rhai-glue = ["dep:rhai", "cell-outputs"]
+
+# ML inference (Hugging Face's Rust ML framework)
+candle = ["dep:candle-core", "dep:candle-nn", "cell-outputs"]
+
+# Pre-built model architectures (BERT, DistilBERT, etc.) + tokenizer.
+# Enables real model inference on top of the bare candle feature.
+embeddings = ["candle", "dep:candle-transformers", "dep:tokenizers"]
+
+# Generic ONNX model runner via Candle's onnx feature. Lets the JS side
+# load any ONNX model (depth estimation, detection, segmentation, CLIP)
+# and run inference through Candle instead of bringing in a separate
+# ort-web runtime. Pulls in candle-onnx + image preprocessing.
+onnx = ["candle", "dep:candle-onnx", "dep:image", "dep:prost"]
+
+# Classical ML (sklearn equivalent)
+linfa = ["dep:linfa", "dep:linfa-trees", "dep:linfa-clustering", "dep:linfa-linear", "cell-outputs"]
+
+# Training with WebGPU backend (moderate models only)
+burn = ["dep:burn"]
+
+# Stats (scipy.stats equivalent)
+stats = ["dep:statrs"]
+
+# Vector ops
+vectors = ["dep:instant-distance"]
+
+# NLP tokenizers (Hugging Face)
+tokenizers = ["dep:tokenizers"]
+
+# Image processing (Pillow equivalent)
+image-ops = ["dep:image"]
+
+# Everything — convenience for development
+all = [
+  "polars-frames", "charts", "rhai-glue",
+  "candle", "embeddings", "onnx", "linfa", "burn", "stats", "vectors",
+  "tokenizers", "image-ops",
+]
+
+[dependencies]
+# WASM bindings
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["console", "Performance", "Window"] }
+console_error_panic_hook = "0.1"
+
+# Serialization (for cell input/output across the JS bridge)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde-wasm-bindgen = "0.6"
+
+# Arrow IPC for the data plane. We use arrow-rs directly for
+# appendArrowIpc (schema-checked stream concat) — Polars's own ipc
+# now handles cell-side reading (homebrew-clang wasm32 routing
+# unblocks the zstd-sys / lz4-sys C deps; see .cargo/config.toml).
+arrow = { version = "53", default-features = false, features = ["ipc"] }
+
+# Optional feature crates (gated above)
+polars = { version = "0.45", optional = true, default-features = false, features = [
+  # Conservative wasm32-friendly set: lazy + CSV + JSON + strings/temporal +
+  # SQL frontend. Parquet and dtype-full pull in lz4-sys / zstd-sys C deps
+  # that need a wasm32 C toolchain — opt those in via a separate feature
+  # once we have wasm32 cc set up.
+  "lazy", "csv", "json", "strings", "temporal", "sql", "ipc", "ipc_streaming",
+] }
+plotters = { version = "0.3", optional = true, default-features = false, features = [
+  "svg_backend", "line_series", "histogram", "area_series",
+] }
+rhai = { version = "1", optional = true, features = ["sync", "no_optimize"] }
+candle-core = { version = "0.10", optional = true }
+candle-nn = { version = "0.10", optional = true }
+linfa = { version = "0.7", optional = true }
+linfa-trees = { version = "0.7", optional = true }
+linfa-clustering = { version = "0.7", optional = true }
+linfa-linear = { version = "0.7", optional = true }
+burn = { version = "0.15", optional = true, default-features = false, features = ["wgpu"] }
+statrs = { version = "0.18", optional = true }
+instant-distance = { version = "0.6", optional = true }
+tokenizers = { version = "0.20", optional = true, default-features = false, features = ["unstable_wasm"] }
+image = { version = "0.25", optional = true, default-features = false, features = [
+  "png", "jpeg", "webp",
+] }
+# getrandom 0.3 has the wasm_js backend gated by both a feature flag
+# (in deps) and a build-time cfg (in .cargo/config.toml). Pinning the
+# direct dep here ensures any transitive uses of 0.3 see the feature.
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+# getrandom 0.2 (transitively via ahash → arrow-array) needs the `js`
+# feature on wasm32 — without it the build errors with
+# "the wasm*-unknown-unknown targets are not supported by default".
+# Pin here so any 0.2 user picks up the feature.
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
+ndarray = { version = "0.15", default-features = false }
+candle-transformers = { version = "0.10.2", default-features = false, optional = true }
+candle-onnx = { version = "0.10", default-features = false, optional = true }
+# prost is candle-onnx's protobuf runtime; we re-decode model bytes
+# directly so we need it as a direct dep.
+prost = { version = "0.14", optional = true }
+# Content-addressed hashing for the Prolly Tree primitive (<wb-history>).
+sha2 = { version = "0.10", default-features = false }
+age = { version = "0.11.3", default-features = false, optional = true }
+
+[profile.release]
+# Optimize for size first, speed second — bundle size is critical for browser load.
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.release-fast]
+# Alternative profile when bundle size isn't the bottleneck (e.g. Tier 3 hosted).
+inherits = "release"
+opt-level = 3
+
+[patch.crates-io]
+# Vendored fork of candle-onnx — patches the Resize op handler to
+# support linear + cubic interpolation modes (upstream 0.10.2 only
+# supports `nearest`, which blocks Depth Anything, SegFormer, and
+# most modern vision models). See vendor/candle-onnx/src/eval.rs
+# for the diff. Drop this patch when upstream candle-onnx merges
+# bilinear/bicubic resize support.
+candle-onnx = { path = "vendor/candle-onnx" }
+
+[package.metadata.wasm-pack.profile.release]
+# Modern Rust emits trunc_sat_f64 instructions; wasm-opt needs the
+# nontrapping-float-to-int feature flag to validate them. Candle (and
+# matrixmultiply) emit SIMD when targeting wasm32 — enable for validation.
+# Mutable globals + reference-types appear in modern Rust output too.
+wasm-opt = [
+    "-Oz",
+    "--enable-bulk-memory",
+    "--enable-nontrapping-float-to-int",
+    "--enable-simd",
+    "--enable-mutable-globals",
+    "--enable-reference-types",
+]

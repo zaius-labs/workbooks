@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>workbook/runtime — csv to sql</title>
+  <link rel="stylesheet" href="../_shared/design.css" />
+  <style>
+    .csv-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--s-4);
+    }
+    @media (max-width: 720px) {
+      .csv-grid { grid-template-columns: 1fr; }
+    }
+    .chart-wrap svg { max-width: 100%; height: auto; display: block; }
+  </style>
+</head>
+<body>
+  <main class="wb-page">
+    <header class="wb-hero">
+      <div class="eyebrow">P2.5 · polars</div>
+      <h1>CSV → SQL → chart, in the browser.</h1>
+      <p>
+        Polars's lazy frame engine + SQL frontend, compiled to WebAssembly.
+        Same column store, vectorized execution, and query planner as DuckDB —
+        ~1.75 MB compressed instead of ~7. The chart auto-renders from the
+        first text column ↦ second numeric column via Plotters.
+      </p>
+    </header>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Inputs</h2>
+      <div class="csv-grid">
+        <div>
+          <div class="wb-mono wb-muted" style="font-size: var(--t-xs); margin-bottom: 4px;">csv · table = data</div>
+          <textarea id="csv" class="wb-textarea" rows="8">name,region,revenue,churn
+acme,us,12000,0.04
+beta,us,8400,0.11
+contoso,eu,15600,0.02
+delta,eu,3200,0.18
+echo,us,9800,0.07
+foxtrot,apac,21000,0.05
+golf,apac,4400,0.22</textarea>
+        </div>
+        <div>
+          <div class="wb-mono wb-muted" style="font-size: var(--t-xs); margin-bottom: 4px;">sql · polars frontend</div>
+          <textarea id="sql" class="wb-textarea" rows="8">SELECT
+  region,
+  COUNT(*) AS customers,
+  SUM(revenue) AS total_revenue,
+  AVG(churn) AS avg_churn
+FROM data
+GROUP BY region
+ORDER BY total_revenue DESC</textarea>
+        </div>
+      </div>
+      <div class="wb-controls">
+        <button id="run" class="wb-btn run">Run query</button>
+        <span id="timing" class="wb-muted wb-mono" style="font-size: var(--t-sm);"></span>
+      </div>
+    </section>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Result</h2>
+      <div id="out" class="wb-out empty">(not yet run)</div>
+    </section>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Build info</h2>
+      <div id="info"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import init, { runPolarsSql, runChart, build_info } from "../../pkg/workbook_runtime.js";
+    import { mountChrome, renderBuildInfo, setWorkbookExport } from "../_shared/chrome.js";
+
+    mountChrome({ slug: "csv-explore" });
+
+    setWorkbookExport(() => ({
+      manifest: {
+        name: "csv → sql",
+        slug: "csv-explore",
+        version: "0.1",
+        runtime_features: ["polars"],
+      },
+      inputs: {
+        csv: document.getElementById("csv").value,
+        sql: document.getElementById("sql").value,
+      },
+      cells: [
+        {
+          id: "result",
+          language: "polars",
+          source: document.getElementById("sql").value,
+          provides: ["result"],
+          dependsOn: ["csv", "sql"],
+        },
+      ],
+    }));
+
+    const t0 = performance.now();
+    await init();
+    const coldStartMs = Math.round(performance.now() - t0);
+    renderBuildInfo("info", build_info(), coldStartMs);
+
+    const out = document.getElementById("out");
+    const timing = document.getElementById("timing");
+    const button = document.getElementById("run");
+
+    button.addEventListener("click", () => {
+      const sql = document.getElementById("sql").value;
+      const csv = document.getElementById("csv").value;
+      button.disabled = true;
+      timing.textContent = "running…";
+      try {
+        const start = performance.now();
+        const outputs = runPolarsSql(sql, csv);
+        const ms = (performance.now() - start).toFixed(2);
+        timing.textContent = `${ms} ms`;
+        renderOutputs(outputs);
+      } catch (e) {
+        out.classList.remove("empty");
+        out.classList.add("error");
+        out.textContent = String(e);
+        timing.textContent = "(failed)";
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    function renderOutputs(outputs) {
+      out.classList.remove("empty", "error");
+      out.innerHTML = "";
+      for (const output of outputs) {
+        if (output.kind === "text" && output.mime_type === "text/csv") {
+          const rows = parseCsvRows(output.content);
+          out.appendChild(buildTable(rows));
+          const chartSvg = autoChart(rows);
+          if (chartSvg) {
+            const wrap = document.createElement("div");
+            wrap.className = "chart-wrap";
+            wrap.style.marginTop = "var(--s-5)";
+            wrap.innerHTML = chartSvg;
+            out.appendChild(wrap);
+          }
+        } else if (output.kind === "image" && output.mime_type === "image/svg+xml") {
+          const wrap = document.createElement("div");
+          wrap.className = "chart-wrap";
+          wrap.innerHTML = output.content;
+          out.appendChild(wrap);
+        } else if (output.kind === "error") {
+          const div = document.createElement("div");
+          div.className = "wb-out error";
+          div.textContent = output.message + (output.traceback ? "\n\n" + output.traceback : "");
+          out.appendChild(div);
+        } else {
+          const pre = document.createElement("pre");
+          pre.className = "wb-code";
+          pre.textContent = JSON.stringify(output, null, 2);
+          out.appendChild(pre);
+        }
+      }
+    }
+
+    function parseCsvRows(csv) {
+      return csv.trim().split("\n").map(parseCsvRow);
+    }
+
+    function buildTable(rows) {
+      const table = document.createElement("table");
+      table.className = "wb-table";
+      const thead = document.createElement("thead");
+      const headerRow = document.createElement("tr");
+      for (const cell of rows[0]) {
+        const th = document.createElement("th");
+        th.textContent = cell;
+        headerRow.appendChild(th);
+      }
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      for (let i = 1; i < rows.length; i++) {
+        const tr = document.createElement("tr");
+        for (let c = 0; c < rows[i].length; c++) {
+          const td = document.createElement("td");
+          td.textContent = rows[i][c];
+          // Numeric columns get tabular-figure styling.
+          if (!isNaN(Number(rows[i][c])) && rows[i][c] !== "") {
+            td.classList.add("num");
+          }
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      return table;
+    }
+
+    function autoChart(rows) {
+      if (rows.length < 2) return null;
+      const headers = rows[0];
+      if (headers.length < 2) return null;
+      const categories = rows.slice(1).map((r) => r[0]);
+      const values = rows.slice(1).map((r) => Number(r[1]));
+      if (values.some((v) => !Number.isFinite(v))) return null;
+      const spec = {
+        kind: "bar",
+        title: `${headers[1]} by ${headers[0]}`,
+        x_label: headers[0],
+        y_label: headers[1],
+        categories,
+        values,
+      };
+      try {
+        const outputs = runChart(JSON.stringify(spec));
+        const img = outputs.find((o) => o.kind === "image" && o.mime_type === "image/svg+xml");
+        return img?.content ?? null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function parseCsvRow(row) {
+      const out = [];
+      let cur = "";
+      let inQ = false;
+      for (let i = 0; i < row.length; i++) {
+        const ch = row[i];
+        if (ch === '"') { inQ = !inQ; continue; }
+        if (ch === "," && !inQ) { out.push(cur); cur = ""; continue; }
+        cur += ch;
+      }
+      out.push(cur);
+      return out;
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Inspect a workbook · workbooks.sh</title>
+<meta name="description" content="Drop a .workbook.html on this page to see who edited it, when, and with which agent. Everything is parsed locally — nothing leaves your browser." />
+<link rel="icon" href="/logo-black.svg" />
+<link rel="stylesheet" href="/styles.css" />
+<link rel="stylesheet" href="inspect.css" />
+<!-- Match the home page: opt out of Dark Reader's automatic
+     palette rewrite. Our monochrome theme already handles
+     prefers-color-scheme natively. -->
+<meta name="darkreader-lock">
+</head>
+<body>
+<main>
+  <a href="/" class="back-link">← workbooks.sh</a>
+
+  <h1>Inspect a workbook</h1>
+  <p class="lede">
+    Drop a <code style="font-size:0.85em">.workbook.html</code> file
+    here. Everything is parsed in your browser — your file never
+    leaves the page. If a <code>.c2pa</code> sidecar is alongside,
+    drop it too and the viewer will show the signature.
+  </p>
+
+  <div class="dropzone" id="dropzone">
+    <div class="dropzone-inner">
+      <div class="dropzone-icon" aria-hidden="true">⇢</div>
+      <div class="dropzone-label">Drop a workbook here</div>
+      <div class="dropzone-hint">…or <button type="button" class="link-btn" id="browse-btn">choose a file</button></div>
+      <input type="file" id="file-input" accept=".html,.htm,.c2pa" multiple hidden />
+    </div>
+  </div>
+
+  <div id="report" class="report" hidden>
+    <section class="report-section" id="identity-section">
+      <h2>Identity</h2>
+      <dl class="kv">
+        <dt>workbook_id</dt><dd><code id="kv-id">—</code></dd>
+        <dt>file</dt><dd id="kv-file">—</dd>
+        <dt>size on disk</dt><dd id="kv-size">—</dd>
+        <dt>content sha256</dt><dd><code id="kv-sha">—</code></dd>
+      </dl>
+    </section>
+
+    <section class="report-section" id="log-section">
+      <h2>Edit log</h2>
+      <p class="report-meta" id="log-meta">—</p>
+      <ol class="timeline" id="timeline"></ol>
+    </section>
+
+    <section class="report-section" id="c2pa-section">
+      <h2>C2PA sidecar</h2>
+      <p class="report-meta" id="c2pa-meta">No <code>.c2pa</code> dropped — drop one alongside the workbook to see the signature.</p>
+      <div id="c2pa-detail" hidden>
+        <dl class="kv">
+          <dt>sidecar size</dt><dd id="c2pa-size">—</dd>
+          <dt>JUMBF magic</dt><dd id="c2pa-magic">—</dd>
+          <dt>signing alg (best-guess)</dt><dd id="c2pa-alg">—</dd>
+          <dt>workbooks signer</dt><dd id="c2pa-signer">—</dd>
+        </dl>
+        <p class="report-meta">
+          Full claim/assertion validation needs the C2PA SDK; this
+          page surfaces the manifest's structural markers and the
+          embedded signer info. The portal viewer's deeper validation
+          is rolling out alongside the daemon's signing endpoint.
+        </p>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script type="module" src="inspect.js"></script>
+</body>
+</html>

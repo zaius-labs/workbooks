@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>workbook/runtime — sentence search</title>
+  <link rel="stylesheet" href="../_shared/design.css" />
+</head>
+<body>
+  <main class="wb-page">
+    <header class="wb-hero">
+      <div class="eyebrow">T1.3 · embeddings</div>
+      <h1>Sentence search via Candle BERT.</h1>
+      <p>
+        Loads <code>sentence-transformers/all-MiniLM-L6-v2</code> — a 6-layer
+        BERT — into the browser via Candle, embeds a corpus of 12 sentences,
+        builds an HNSW index over the 384-dim vectors, and queries by cosine
+        similarity. ~90 MB on first fetch, then cached.
+      </p>
+    </header>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Model</h2>
+      <div class="wb-card">
+        <div class="wb-card-header">
+          <span class="wb-card-title">all-MiniLM-L6-v2</span>
+          <span class="wb-card-meta">
+            <span><span id="status-dot" class="wb-dot idle"></span><span id="status-text">idle</span></span>
+          </span>
+        </div>
+        <div class="wb-flex wb-gap-4" style="align-items:center; flex-wrap:wrap;">
+          <button id="load" class="wb-btn run">Load model</button>
+          <span id="progress" class="wb-muted wb-mono" style="font-size: var(--t-sm);">
+            ~90 MB safetensors + ~700 KB tokenizer · click to begin
+          </span>
+        </div>
+        <div id="stats" class="wb-tag-row" style="margin-top: var(--s-4); display:none;"></div>
+      </div>
+    </section>
+
+    <section class="wb-section" id="searchSection" style="display:none;">
+      <h2 class="wb-section-title">Query</h2>
+      <div class="wb-card">
+        <div class="wb-flex wb-gap-3" style="align-items:center; flex-wrap:wrap;">
+          <input id="query" class="wb-input text" type="text"
+                 placeholder="how do I run a SQL query on a CSV file?"
+                 value="how do I run a SQL query on a CSV file?" />
+          <button id="run" class="wb-btn run">Search</button>
+        </div>
+        <div id="results" style="margin-top: var(--s-4);"></div>
+      </div>
+    </section>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Build info</h2>
+      <div id="info"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import init, {
+      loadBertEmbedder, embedTextFlat, embedBatchFlat,
+      buildVectorIndexFlat, queryVectorIndexFlat,
+      build_info,
+    } from "../../pkg/workbook_runtime.js";
+    import { mountChrome, renderBuildInfo } from "../_shared/chrome.js";
+
+    mountChrome({ slug: "sentence-search" });
+
+    const t0 = performance.now();
+    await init();
+    const coldStartMs = Math.round(performance.now() - t0);
+    renderBuildInfo("info", build_info(), coldStartMs);
+
+    const CORPUS = [
+      "How do I run a SQL query on a CSV file?",
+      "Polars supports lazy execution and a SQL frontend.",
+      "DuckDB is an in-process OLAP database with great SQL support.",
+      "Cosine similarity is the dot product of unit-length vectors.",
+      "HNSW is an approximate nearest-neighbor index based on hierarchical small-world graphs.",
+      "Compiling Rust to WebAssembly produces small, fast modules that run in any browser.",
+      "BERT is a transformer encoder pre-trained on masked-language modeling.",
+      "Sentence-transformers fine-tune BERT for semantic similarity tasks.",
+      "Candle is a minimalist ML framework for Rust with first-class WASM support.",
+      "Reactive cell graphs re-execute downstream cells when an upstream input changes.",
+      "Workbooks are portable executable artifacts — format and runtime in one file.",
+      "Polars is faster than pandas because it's lazy, parallel, and column-oriented.",
+    ];
+
+    const HF_BASE = "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main";
+
+    const loadBtn = document.getElementById("load");
+    const progress = document.getElementById("progress");
+    const statsEl = document.getElementById("stats");
+    const dot = document.getElementById("status-dot");
+    const statusText = document.getElementById("status-text");
+    const searchSection = document.getElementById("searchSection");
+    const queryInput = document.getElementById("query");
+    const runBtn = document.getElementById("run");
+    const resultsEl = document.getElementById("results");
+
+    let embedderHandle = null;
+    let indexHandle = null;
+
+    function setStatus(state, text) {
+      dot.className = `wb-dot ${state}`;
+      statusText.textContent = text;
+    }
+
+    loadBtn.addEventListener("click", async () => {
+      loadBtn.disabled = true;
+      setStatus("running", "loading…");
+      try {
+        await loadModel();
+        setStatus("ok", "ready");
+        searchSection.style.display = "block";
+      } catch (e) {
+        setStatus("error", "failed");
+        progress.innerHTML = `<span style="color:var(--err)">${String(e)}</span>`;
+        loadBtn.disabled = false;
+      }
+    });
+
+    async function loadModel() {
+      const log = (s) => { progress.textContent = s; };
+
+      log("fetching tokenizer.json…");
+      const tokenizerJson = await fetchText(`${HF_BASE}/tokenizer.json`);
+
+      log("fetching config.json…");
+      const configJson = await fetchText(`${HF_BASE}/config.json`);
+
+      log("fetching model.safetensors (~90 MB)…");
+      const modelBytes = await fetchBytes(`${HF_BASE}/model.safetensors`, (loaded, total) => {
+        const pct = total ? `${(loaded * 100 / total).toFixed(0)}%` : `${(loaded / 1e6).toFixed(0)} MB`;
+        log(`fetching model.safetensors · ${pct}`);
+      });
+
+      log("loading into Candle…");
+      const t0 = performance.now();
+      embedderHandle = loadBertEmbedder(modelBytes, tokenizerJson, configJson);
+      const loadMs = Math.round(performance.now() - t0);
+
+      log(`embedding ${CORPUS.length} corpus sentences…`);
+      const t1 = performance.now();
+      const flat = embedBatchFlat(embedderHandle, JSON.stringify(CORPUS));
+      const embedMs = Math.round(performance.now() - t1);
+
+      const dim = flat.length / CORPUS.length;
+
+      log(`building HNSW index (${CORPUS.length} × ${dim})…`);
+      const t2 = performance.now();
+      const ids = CORPUS.map((_, i) => `s${i}`);
+      const buildResult = buildVectorIndexFlat(ids, flat, dim, { ef_construction: 40 });
+      indexHandle = buildResult.handle;
+      const buildMs = Math.round(performance.now() - t2);
+
+      progress.textContent = "";
+      statsEl.style.display = "flex";
+      statsEl.innerHTML = `
+        <span class="wb-tag"><span>load</span><strong>${loadMs} ms</strong></span>
+        <span class="wb-tag"><span>embed corpus</span><strong>${embedMs} ms</strong></span>
+        <span class="wb-tag"><span>index</span><strong>${buildMs} ms</strong></span>
+        <span class="wb-tag"><span>dim</span><strong>${dim}</strong></span>
+      `;
+    }
+
+    async function fetchText(url) {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`${url} → ${r.status}`);
+      return r.text();
+    }
+
+    async function fetchBytes(url, onProgress) {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`${url} → ${r.status}`);
+      const total = Number(r.headers.get("content-length")) || 0;
+      const reader = r.body.getReader();
+      const chunks = [];
+      let loaded = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        loaded += value.length;
+        if (onProgress) onProgress(loaded, total);
+      }
+      const merged = new Uint8Array(loaded);
+      let off = 0;
+      for (const c of chunks) { merged.set(c, off); off += c.length; }
+      return merged;
+    }
+
+    runBtn.addEventListener("click", search);
+    queryInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") search();
+    });
+
+    function search() {
+      const q = queryInput.value.trim();
+      if (!q || embedderHandle == null || indexHandle == null) return;
+      runBtn.disabled = true;
+      try {
+        const t0 = performance.now();
+        const qVec = embedTextFlat(embedderHandle, q);
+        const embedMs = (performance.now() - t0).toFixed(2);
+
+        const t1 = performance.now();
+        const result = queryVectorIndexFlat(indexHandle, qVec, 5);
+        const queryMs = (performance.now() - t1).toFixed(2);
+
+        renderResults(result, embedMs, queryMs);
+      } catch (e) {
+        resultsEl.innerHTML = `<div class="wb-out error">${String(e)}</div>`;
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    function renderResults(result, embedMs, queryMs) {
+      const rows = result.neighbors
+        .map((n, i) => {
+          const idx = parseInt(n.id.slice(1), 10);
+          const sentence = CORPUS[idx] ?? "(unknown)";
+          return `
+            <tr>
+              <td class="wb-mono wb-muted" style="width: 2rem;">${i + 1}</td>
+              <td>${sentence}</td>
+              <td class="dist">${n.distance.toFixed(4)}</td>
+            </tr>
+          `;
+        })
+        .join("");
+      resultsEl.innerHTML = `
+        <div class="wb-tag-row" style="margin-bottom: var(--s-3);">
+          <span class="wb-tag"><span>embed</span><strong>${embedMs} ms</strong></span>
+          <span class="wb-tag"><span>knn</span><strong>${queryMs} ms</strong></span>
+        </div>
+        <table class="wb-table">
+          <thead><tr><th>#</th><th>sentence</th><th class="dist">cosine</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    }
+  </script>
+</body>
+</html>

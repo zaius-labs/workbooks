@@ -1,0 +1,142 @@
+#!/bin/sh
+# Postinstall — runs as ROOT after the .pkg lays down:
+#
+#   /Applications/Workbooks.app   (Tauri Manager UI + odoc handler)
+#   /usr/local/bin/workbooksd     (the daemon binary)
+#
+# Five responsibilities:
+#
+#   1. Bootstrap the user-scoped LaunchAgent so the daemon runs at
+#      login + restarts on crash. The user never has to open the UI
+#      for the daemon to be available.
+#
+#   2. Wipe stale runtime.json so the new daemon writes its port
+#      cleanly without racing a previous reader.
+#
+#   3. Refresh Launch Services so /Applications/Workbooks.app's UTI
+#      declarations land without a logout.
+#
+#   4. CAPTURE the user's existing default for public.html (i.e. the
+#      browser they actually use) into Application Support. Workbooks
+#      reads this at runtime and forwards plain-HTML opens to that
+#      browser. Done BEFORE we overwrite the default in step 5; if
+#      we already are the default (re-install), preserve whatever
+#      we captured the first time.
+#
+#   5. SET Workbooks as the user's default handler for public.html so
+#      every .html double-click routes through Workbooks first.
+#      Workbooks content-sniffs the file: workbook → daemon, plain
+#      HTML → the captured fallback browser. Net effect: workbook
+#      files open in the daemon, everything else keeps opening in
+#      the browser the user always used.
+#
+# Idempotent — safe to re-run on upgrade.
+
+set -e
+
+CONSOLE_UID=$(stat -f%u /dev/console)
+CONSOLE_USER=$(id -un "$CONSOLE_UID" 2>/dev/null || echo root)
+CONSOLE_HOME=$(dscl . -read /Users/"$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
+[ -z "$CONSOLE_HOME" ] && CONSOLE_HOME="/Users/$CONSOLE_USER"
+
+BIN="/usr/local/bin/workbooksd"
+PLIST_DIR="$CONSOLE_HOME/Library/LaunchAgents"
+PLIST="$PLIST_DIR/sh.workbooks.workbooksd.plist"
+LOG_DIR="$CONSOLE_HOME/Library/Logs"
+LOG_FILE="$LOG_DIR/workbooksd.log"
+APP_SUPPORT="$CONSOLE_HOME/Library/Application Support/sh.workbooks.workbooksd"
+RUNTIME_JSON="$APP_SUPPORT/runtime.json"
+FALLBACK_FILE="$APP_SUPPORT/fallback-browser.txt"
+
+# 1. LaunchAgent setup.
+sudo -u "$CONSOLE_USER" /bin/sh -c "mkdir -p '$PLIST_DIR' '$LOG_DIR' '$APP_SUPPORT'"
+
+sudo -u "$CONSOLE_USER" /bin/sh -c "cat > '$PLIST'" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>sh.workbooks.workbooksd</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$BIN</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$LOG_FILE</string>
+  <key>StandardErrorPath</key><string>$LOG_FILE</string>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>
+EOF
+
+# 2. Wipe stale runtime.json.
+rm -f "$RUNTIME_JSON" || true
+
+# Bootstrap (preinstall booted out the old one).
+launchctl bootstrap "gui/$CONSOLE_UID" "$PLIST" >/dev/null 2>&1 || {
+  echo "[postinstall] launchctl bootstrap failed; user may need to log out/in" >&2
+}
+
+# 3. Launch Services refresh for the bundle's UTI declarations.
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
+[ -x "$LSREGISTER" ] && "$LSREGISTER" -f /Applications/Workbooks.app >/dev/null 2>&1 || true
+
+# 4. Capture the user's CURRENT default for public.html into the
+# fallback-browser file — but only if we haven't captured it before
+# (so re-installs don't overwrite it with "ourselves").
+if [ ! -s "$FALLBACK_FILE" ]; then
+  CURRENT_DEFAULT=$(sudo -u "$CONSOLE_USER" /usr/bin/python3 - <<'PY' 2>/dev/null
+import subprocess
+try:
+    from CoreServices import LSCopyDefaultRoleHandlerForContentType, kLSRolesAll
+    bid = LSCopyDefaultRoleHandlerForContentType("public.html", kLSRolesAll)
+    if bid:
+        print(bid)
+except Exception:
+    pass
+PY
+)
+  # If pyobjc isn't installed (clean Mac), fall back to parsing
+  # `lsregister -dump` for the "all roles:" line under the
+  # public.html handler-pref entry.
+  if [ -z "$CURRENT_DEFAULT" ] && [ -x "$LSREGISTER" ]; then
+    CURRENT_DEFAULT=$(sudo -u "$CONSOLE_USER" "$LSREGISTER" -dump 2>/dev/null \
+      | awk '/^handlerpref id:.*public.html/{f=1; next} f && /all roles:/{print $3; exit}')
+  fi
+  # Filter out us — if Workbooks is somehow already the default
+  # (testing artifact, prior failed install), use Safari.
+  case "$CURRENT_DEFAULT" in
+    sh.workbooks.*|"") CURRENT_DEFAULT="com.apple.Safari" ;;
+  esac
+  sudo -u "$CONSOLE_USER" /bin/sh -c "printf '%s' '$CURRENT_DEFAULT' > '$FALLBACK_FILE'"
+  echo "[postinstall] captured fallback browser: $CURRENT_DEFAULT" >&2
+fi
+
+# 5. Routing for existing workbook files happens LAZILY:
+#
+#   - daemon's /open + /save handlers write the
+#     com.apple.LaunchServices.OpenWith xattr on every file they
+#     touch (see xattr_openwith.rs)
+#   - macOS Sequoia honours that per-file xattr above the system
+#     default for public.html (which Apple's browser-default
+#     protection won't let us claim programmatically anyway)
+#   - so the FIRST time a user opens a given workbook through
+#     Workbooks (right-click → Open With → Workbooks, or via the
+#     manager UI), the file gets stamped — every double-click of
+#     that same file thereafter routes automatically
+#
+# We deliberately do NOT walk the user's filesystem to pre-stamp
+# existing files. Hardcoded paths (Downloads/Desktop/Documents) are
+# brittle and miss workbooks in project trees; full-disk walks are
+# slow and overstep. Lazy stamping costs the user one right-click
+# per file, which is the same first-time friction they'd have today.
+# Power users who want bulk-stamp can run
+# `workbooksd stamp-if-workbook <path>` against any folder — the
+# subcommand exists and is documented in the README.
+#
+# Reload LaunchServices DB so the bundle's UTI claims (registered
+# above by lsregister -f) are visible in Open-With menus right away.
+[ -x "$LSREGISTER" ] && "$LSREGISTER" -kill -r -domain user >/dev/null 2>&1 || true
+
+exit 0

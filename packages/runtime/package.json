@@ -1,0 +1,251 @@
+{
+  "name": "@work.books/runtime",
+  "version": "0.6.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "Workbook UI runtime — Svelte 5 components that render the workbook block tree. Used in live applications and embedded in portable .workbook files.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zaius-labs/workbooks.git",
+    "directory": "packages/runtime"
+  },
+  "homepage": "https://github.com/zaius-labs/workbooks",
+  "keywords": [
+    "workbook",
+    "svelte",
+    "notebook",
+    "document-format",
+    "block-editor"
+  ],
+  "exports": {
+    ".": {
+      "svelte": "./src/index.ts",
+      "types": "./src/index.ts"
+    },
+    "./Workbook.svelte": {
+      "svelte": "./src/Workbook.svelte"
+    },
+    "./WorkbookBlock.svelte": {
+      "svelte": "./src/WorkbookBlock.svelte"
+    },
+    "./CitationReport.svelte": {
+      "svelte": "./src/CitationReport.svelte"
+    },
+    "./notebook": {
+      "svelte": "./src/notebook/index.ts",
+      "types": "./src/notebook/index.ts"
+    },
+    "./blockRegistry": {
+      "svelte": "./src/blockRegistry.ts",
+      "types": "./src/blockRegistry.ts"
+    },
+    "./install-prompt": {
+      "svelte": "./src/install-prompt/index.ts",
+      "types": "./src/install-prompt/index.ts",
+      "default": "./src/install-prompt/index.ts"
+    },
+    "./types": {
+      "types": "./src/types.ts",
+      "default": "./src/types.ts"
+    },
+    "./wasmBridge": {
+      "types": "./src/wasmBridge.ts",
+      "default": "./src/wasmBridge.ts"
+    },
+    "./cellAnalyzer": {
+      "types": "./src/cellAnalyzer.ts",
+      "default": "./src/cellAnalyzer.ts"
+    },
+    "./reactiveExecutor": {
+      "types": "./src/reactiveExecutor.ts",
+      "default": "./src/reactiveExecutor.ts"
+    },
+    "./llmClient": {
+      "types": "./src/llmClient.ts",
+      "default": "./src/llmClient.ts"
+    },
+    "./agentLoop": {
+      "types": "./src/agentLoop.ts",
+      "default": "./src/agentLoop.ts"
+    },
+    "./htmlBindings": {
+      "types": "./src/htmlBindings.ts",
+      "default": "./src/htmlBindings.ts"
+    },
+    "./urlParamBinding": {
+      "types": "./src/urlParamBinding.ts",
+      "default": "./src/urlParamBinding.ts"
+    },
+    "./modelArtifactResolver": {
+      "types": "./src/modelArtifactResolver.ts",
+      "default": "./src/modelArtifactResolver.ts"
+    },
+    "./workbookDataResolver": {
+      "types": "./src/workbookDataResolver.ts",
+      "default": "./src/workbookDataResolver.ts"
+    },
+    "./encryption": {
+      "types": "./src/encryption.ts",
+      "default": "./src/encryption.ts"
+    },
+    "./signature": {
+      "types": "./src/signature.ts",
+      "default": "./src/signature.ts"
+    },
+    "./workbookMemoryResolver": {
+      "types": "./src/workbookMemoryResolver.ts",
+      "default": "./src/workbookMemoryResolver.ts"
+    },
+    "./workbookDocResolver": {
+      "types": "./src/workbookDocResolver.ts",
+      "default": "./src/workbookDocResolver.ts"
+    },
+    "./yjsSidecar": {
+      "types": "./src/yjsSidecar.ts",
+      "default": "./src/yjsSidecar.ts"
+    },
+    "./storage": {
+      "types": "./src/storage/index.ts",
+      "default": "./src/storage/index.ts"
+    },
+    "./agent-acp": {
+      "types": "./src/agent-acp/index.ts",
+      "default": "./src/agent-acp/index.ts"
+    },
+    "./svelte": {
+      "svelte": "./src/svelte/index.ts",
+      "types": "./src/svelte/index.ts"
+    },
+    "./workbookHistoryResolver": {
+      "types": "./src/workbookHistoryResolver.ts",
+      "default": "./src/workbookHistoryResolver.ts"
+    },
+    "./autosave": {
+      "types": "./src/autosave.ts",
+      "default": "./src/autosave.ts"
+    },
+    "./packageWorkbook": {
+      "types": "./src/packageWorkbook.ts",
+      "default": "./src/packageWorkbook.ts"
+    },
+    "./sqliteSidecar": {
+      "types": "./src/sqliteSidecar.ts",
+      "default": "./src/sqliteSidecar.ts"
+    },
+    "./loopBlock": {
+      "types": "./src/loopBlock.ts",
+      "default": "./src/loopBlock.ts"
+    },
+    "./crossWorkbookLoader": {
+      "types": "./src/crossWorkbookLoader.ts",
+      "default": "./src/crossWorkbookLoader.ts"
+    },
+    "./runtimeWorker": {
+      "types": "./src/runtimeWorker.ts",
+      "default": "./src/runtimeWorker.ts"
+    },
+    "./runtimeWorkerEntry": {
+      "types": "./src/runtimeWorkerEntry.ts",
+      "default": "./src/runtimeWorkerEntry.ts"
+    },
+    "./runDiff": {
+      "types": "./src/runDiff.ts",
+      "default": "./src/runDiff.ts"
+    },
+    "./blocks/*": {
+      "svelte": "./src/blocks/*"
+    },
+    "./workbookContext": {
+      "svelte": "./src/workbookContext.ts",
+      "types": "./src/workbookContext.ts"
+    }
+  },
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json",
+    "dev": "vite build --watch"
+  },
+  "peerDependencies": {
+    "svelte": "^5.0.0",
+    "convex-svelte": "*",
+    "@deck.gl/aggregation-layers": "^9.0.0",
+    "@deck.gl/core": "^9.0.0",
+    "@deck.gl/layers": "^9.0.0",
+    "@observablehq/plot": "^0.6.0",
+    "cytoscape": "^3.0.0",
+    "cytoscape-dagre": "^2.0.0",
+    "echarts": "^5.0.0 || ^6.0.0",
+    "maplibre-gl": "^4.0.0 || ^5.0.0",
+    "mermaid": "^11.0.0",
+    "plotly.js-dist-min": "^2.0.0 || ^3.0.0",
+    "three": "^0.160.0 || ^0.170.0 || ^0.180.0",
+    "@sqlite.org/sqlite-wasm": "^3.45.0",
+    "age-encryption": "^0.2.0"
+  },
+  "peerDependenciesMeta": {
+    "convex-svelte": {
+      "optional": true
+    },
+    "@deck.gl/aggregation-layers": {
+      "optional": true
+    },
+    "@deck.gl/core": {
+      "optional": true
+    },
+    "@deck.gl/layers": {
+      "optional": true
+    },
+    "@observablehq/plot": {
+      "optional": true
+    },
+    "cytoscape": {
+      "optional": true
+    },
+    "cytoscape-dagre": {
+      "optional": true
+    },
+    "echarts": {
+      "optional": true
+    },
+    "maplibre-gl": {
+      "optional": true
+    },
+    "mermaid": {
+      "optional": true
+    },
+    "plotly.js-dist-min": {
+      "optional": true
+    },
+    "three": {
+      "optional": true
+    },
+    "@sqlite.org/sqlite-wasm": {
+      "optional": true
+    },
+    "age-encryption": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "svelte": "^5.0.0",
+    "svelte-check": "^4.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^6.0.0"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^0.21.0",
+    "@noble/ed25519": "^3",
+    "@noble/hashes": "^2",
+    "@syncedstore/core": "^0.6.0",
+    "@toon-format/toon": "^2.1.0",
+    "devalue": "^5.8.0",
+    "dompurify": "^3.2.0",
+    "fflate": "^0.8.0",
+    "y-indexeddb": "^9.0.0",
+    "yjs": "^13.6.0"
+  }
+}

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>workbook/runtime — tensor ops</title>
+  <link rel="stylesheet" href="../_shared/design.css" />
+</head>
+<body>
+  <main class="wb-page">
+    <header class="wb-hero">
+      <div class="eyebrow">T1.1 · tensors</div>
+      <h1>Real ML compute, browser-side.</h1>
+      <p>
+        <code>matmul</code> · <code>softmax</code> · <code>conv2d</code> through
+        Candle, timed against a naive JavaScript baseline. The wasm path
+        wins decisively at scale where SIMD pays for itself.
+      </p>
+    </header>
+
+    <section class="wb-section">
+      <div class="wb-controls">
+        <span class="wb-field">
+          <label>matmul N</label>
+          <input id="n" class="wb-input num" type="number" value="256" min="32" max="1024" step="32" />
+        </span>
+        <button id="run" class="wb-btn run">Run ops</button>
+        <span id="status" class="wb-muted wb-mono" style="font-size: var(--t-sm);"></span>
+      </div>
+    </section>
+
+    <section class="wb-section">
+      <div id="results"></div>
+    </section>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Build info</h2>
+      <div id="info"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import init, { runCandleOps, build_info } from "../../pkg/workbook_runtime.js";
+    import { mountChrome, renderBuildInfo } from "../_shared/chrome.js";
+
+    mountChrome({ slug: "candle-ops" });
+
+    const t0 = performance.now();
+    await init();
+    const coldStartMs = Math.round(performance.now() - t0);
+    renderBuildInfo("info", build_info(), coldStartMs);
+
+    const button = document.getElementById("run");
+    const status = document.getElementById("status");
+    const results = document.getElementById("results");
+
+    button.addEventListener("click", async () => {
+      const n = Number(document.getElementById("n").value);
+      button.disabled = true;
+      status.textContent = "running…";
+      try {
+        const jsRef = runJsReference(n);
+
+        const start = performance.now();
+        const wasm = runCandleOps(n);
+        const totalMs = (performance.now() - start).toFixed(2);
+        status.textContent = `${totalMs} ms`;
+
+        renderResults(wasm, jsRef);
+      } catch (e) {
+        status.textContent = "(failed)";
+        results.innerHTML = `<div class="wb-out error">${String(e)}</div>`;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    function runJsReference(n) {
+      const a = new Float32Array(n * n);
+      const b = new Float32Array(n * n);
+      for (let i = 0; i < n * n; i++) {
+        a[i] = (i % 17) * 0.05 - 0.4;
+        b[i] = ((i * 3) % 13) * 0.1 - 0.6;
+      }
+      const cMat = new Float32Array(n * n);
+      const t0 = performance.now();
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          let s = 0;
+          for (let k = 0; k < n; k++) s += a[i * n + k] * b[k * n + j];
+          cMat[i * n + j] = s;
+        }
+      }
+      const matmulMs = performance.now() - t0;
+
+      const v = new Float32Array(1024);
+      for (let i = 0; i < 1024; i++) v[i] = Math.sin(i * 0.01);
+      const t1 = performance.now();
+      let max = -Infinity;
+      for (let i = 0; i < v.length; i++) if (v[i] > max) max = v[i];
+      let sum = 0;
+      const sm = new Float32Array(1024);
+      for (let i = 0; i < v.length; i++) { sm[i] = Math.exp(v[i] - max); sum += sm[i]; }
+      for (let i = 0; i < v.length; i++) sm[i] /= sum;
+      const softmaxMs = performance.now() - t1;
+
+      const inH = 32, inW = 32, inC = 3;
+      const kH = 3, kW = 3, outC = 8;
+      const outH = inH - kH + 1, outW = inW - kW + 1;
+      const inp = new Float32Array(inC * inH * inW);
+      const wt = new Float32Array(outC * inC * kH * kW);
+      for (let i = 0; i < inp.length; i++) inp[i] = (i % 7) * 0.1;
+      for (let i = 0; i < wt.length; i++) wt[i] = (i % 11) * 0.05 - 0.25;
+      const out = new Float32Array(outC * outH * outW);
+      const t2 = performance.now();
+      for (let oc = 0; oc < outC; oc++) {
+        for (let oy = 0; oy < outH; oy++) {
+          for (let ox = 0; ox < outW; ox++) {
+            let s = 0;
+            for (let ic = 0; ic < inC; ic++) {
+              for (let ky = 0; ky < kH; ky++) {
+                for (let kx = 0; kx < kW; kx++) {
+                  const iy = oy + ky, ix = ox + kx;
+                  s += inp[(ic * inH + iy) * inW + ix] *
+                       wt[((oc * inC + ic) * kH + ky) * kW + kx];
+                }
+              }
+            }
+            out[(oc * outH + oy) * outW + ox] = s;
+          }
+        }
+      }
+      const convMs = performance.now() - t2;
+
+      return {
+        matmul: { ms: matmulMs, sample: Array.from(cMat.slice(0, 4)) },
+        softmax: { ms: softmaxMs, sample: Array.from(sm.slice(0, 4)) },
+        conv2d: { ms: convMs, sample: Array.from(out.slice(0, 4)) },
+      };
+    }
+
+    function renderResults(wasm, js) {
+      results.innerHTML = "";
+      for (const [op, label] of [
+        ["matmul", `matmul ${wasm.matmul.shape[0]} × ${wasm.matmul.shape[1]}`],
+        ["softmax", `softmax 1024`],
+        ["conv2d", `conv2d 1×3×32×32 → 1×8×30×30`],
+      ]) {
+        const w = wasm[op];
+        const j = js[op];
+        const wMs = w.ms.toFixed(2);
+        const jMs = j.ms.toFixed(2);
+        const ratio = j.ms / w.ms;
+        const fast = ratio >= 1;
+        const ratioStr = fast
+          ? `${ratio.toFixed(1)}× faster`
+          : `${(1 / ratio).toFixed(1)}× slower`;
+        const ratioColor = fast ? "var(--ok)" : "var(--err)";
+        const card = document.createElement("div");
+        card.className = "wb-card";
+        card.innerHTML = `
+          <div class="wb-card-header">
+            <span class="wb-card-title">${label}</span>
+            <span class="wb-mono" style="color: ${ratioColor}; font-size: var(--t-sm);">${ratioStr}</span>
+          </div>
+          <div class="wb-tag-row">
+            <span class="wb-tag"><span>wasm</span><strong>${wMs} ms</strong></span>
+            <span class="wb-tag"><span>js</span><strong>${jMs} ms</strong></span>
+          </div>
+          <div style="margin-top: var(--s-3); font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-3);">
+            <div>wasm[0..4] = [${w.sample.map((x) => x.toFixed(4)).join(", ")}]</div>
+            <div>js[0..4]   = [${j.sample.map((x) => x.toFixed(4)).join(", ")}]</div>
+          </div>
+        `;
+        results.appendChild(card);
+      }
+    }
+  </script>
+</body>
+</html>

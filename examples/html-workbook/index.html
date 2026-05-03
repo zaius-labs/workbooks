@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>workbook/runtime — html workbook</title>
+  <link rel="stylesheet" href="../_shared/design.css" />
+  <style>
+    /* Layout: cells flow as a vertical stack.  Each <wb-cell> renders
+       its source as a small monospace block; <wb-output> renders below
+       its target cell. */
+    wb-cell, wb-input, wb-output, wb-agent { display: block; }
+    wb-input {
+      margin: var(--s-3) 0;
+    }
+    wb-input::before {
+      content: "input · " attr(name);
+      display: block;
+      font-family: var(--font-mono);
+      font-size: var(--t-xs);
+      color: var(--ink-3);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    wb-cell::before {
+      content: attr(language) " · " attr(id);
+      display: block;
+      font-family: var(--font-mono);
+      font-size: var(--t-xs);
+      color: var(--ink-3);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin: var(--s-5) 0 4px;
+    }
+    wb-cell {
+      font-family: var(--font-mono);
+      font-size: var(--t-sm);
+      background: var(--bg-soft);
+      padding: var(--s-3) var(--s-4);
+      border-radius: var(--radius);
+      color: var(--ink-2);
+      white-space: pre-wrap;
+      border: 1px solid var(--line);
+    }
+    wb-output {
+      margin: var(--s-3) 0 var(--s-5);
+      min-height: 2rem;
+    }
+    wb-output[data-status="ok"] {
+      padding-top: var(--s-2);
+    }
+  </style>
+</head>
+<body>
+  <main class="wb-page">
+    <header class="wb-hero">
+      <div class="eyebrow">T-HTML.1 · custom elements</div>
+      <h1>The workbook is the HTML.</h1>
+      <p>
+        This page declares a workbook entirely with custom HTML elements
+        — no JSON, no build step, no framework. View Source on this page
+        to see the workbook spec; edit any cell's source between the
+        tags and reload to re-run.
+      </p>
+    </header>
+
+    <wb-workbook name="html-demo">
+      <wb-input name="n" type="number" default="40"></wb-input>
+
+      <wb-cell id="doubled" language="rhai" reads="n">n * 2</wb-cell>
+      <wb-output for="doubled"></wb-output>
+
+      <wb-cell id="incremented" language="rhai" reads="n">n + 1</wb-cell>
+      <wb-output for="incremented"></wb-output>
+
+      <wb-cell id="summary" language="rhai" reads="doubled,incremented">doubled + incremented</wb-cell>
+      <wb-output for="summary"></wb-output>
+
+      <wb-input name="csv" type="csv" default="region,revenue
+us,12000
+us,8400
+eu,15600
+eu,3200
+apac,21000
+apac,4400"></wb-input>
+
+      <wb-cell id="region_revenue" language="polars" reads="csv">
+SELECT region, SUM(revenue) AS total
+FROM data
+GROUP BY region
+ORDER BY total DESC
+      </wb-cell>
+      <wb-output for="region_revenue"></wb-output>
+    </wb-workbook>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Build info</h2>
+      <div id="info"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import init, * as wasm from "../../pkg/workbook_runtime.js";
+    import { mountHtmlWorkbook } from "../reactive-cells/runtime.bundle.js";
+    import { mountChrome, renderBuildInfo } from "../_shared/chrome.js";
+
+    mountChrome({ slug: "html-workbook" });
+    const t0 = performance.now();
+    await init();
+    renderBuildInfo("info", wasm.build_info(), Math.round(performance.now() - t0));
+
+    await mountHtmlWorkbook({
+      loadWasm: async () => wasm,
+    });
+  </script>
+</body>
+</html>

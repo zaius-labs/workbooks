@@ -1,0 +1,7 @@
+dist/
+node_modules/
+
+# Daemon binaries — single source of truth is GitHub Releases.
+# /dl/* requests redirect there via _redirects. Don't commit binaries here.
+src/dl/workbooksd-*
+src/dl/sha256.txt

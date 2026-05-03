@@ -1,0 +1,41 @@
+#!/bin/sh
+# Preinstall — runs as ROOT before the .pkg payload extracts.
+#
+# Job: nuke any existing /Applications/Workbooks.app and the
+# accidentally-renamed /Applications/Workbooks Manager.app so the
+# new bundle lands at the canonical path. PackageKit's bundle-update
+# logic refuses to overwrite an existing .app whose CFBundleIdentifier
+# differs from the incoming one — when we shipped 0.2.0/0.2.1 with
+# identifier sh.workbooks.manager but users had the legacy
+# sh.workbooks.launcher bundle in place, PackageKit silently renamed
+# the new install to "Workbooks Manager.app" instead of overwriting.
+# 0.2.2 onwards uses sh.workbooks.launcher to match the legacy ID,
+# but this preinstall scrubs the dual-bundle state for users who
+# already hit the rename.
+#
+# Also stops any running daemon — pkgbuild can't atomically replace
+# /usr/local/bin/workbooksd while it's running (the file is held
+# open by launchd), so we bootout the LaunchAgent first. The
+# postinstall re-bootstraps it on the new binary.
+#
+# Best-effort throughout; never fails an install.
+
+set -e
+
+CONSOLE_UID=$(stat -f%u /dev/console)
+
+# Stop the LaunchAgent so /usr/local/bin/workbooksd isn't held open.
+launchctl bootout "gui/$CONSOLE_UID/sh.workbooks.workbooksd" >/dev/null 2>&1 || true
+
+# Remove any stragglers (e.g. an embedded sidecar that detached and
+# is now running as ppid=1, untracked by launchd).
+pkill -f /usr/local/bin/workbooksd >/dev/null 2>&1 || true
+
+# Clear both bundle paths so the payload extracts cleanly.
+# /Applications/Workbooks Manager.app: created by PackageKit's
+# auto-rename when 0.2.0/0.2.1 collided with the legacy bundle.
+# /Applications/Workbooks.app: legacy shell-script bundle from 0.1.x.
+rm -rf "/Applications/Workbooks Manager.app" || true
+rm -rf "/Applications/Workbooks.app" || true
+
+exit 0

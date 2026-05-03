@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>workbook/runtime — vector knn</title>
+  <link rel="stylesheet" href="../_shared/design.css" />
+</head>
+<body>
+  <main class="wb-page">
+    <header class="wb-hero">
+      <div class="eyebrow">T1.2 · vectors</div>
+      <h1>HNSW nearest-neighbor search.</h1>
+      <p>
+        <code>instant-distance</code> builds a hierarchical small-world graph
+        over a corpus of unit vectors, then queries by cosine in
+        sub-millisecond time. Pair with embeddings for full semantic search.
+      </p>
+    </header>
+
+    <section class="wb-section">
+      <div class="wb-controls">
+        <span class="wb-field"><label>n</label>
+          <input id="n" class="wb-input num" type="number" value="2000" min="100" max="100000" step="100" />
+        </span>
+        <span class="wb-field"><label>dim</label>
+          <input id="d" class="wb-input num" type="number" value="128" min="8" max="2048" step="8" />
+        </span>
+        <span class="wb-field"><label>k</label>
+          <input id="k" class="wb-input num" type="number" value="5" min="1" max="50" step="1" />
+        </span>
+        <span class="wb-field"><label>ef</label>
+          <input id="ef" class="wb-input num" type="number" value="40" min="10" max="200" step="10"
+            title="ef_construction — build-quality knob. Lower = faster build, lower recall." />
+        </span>
+        <button id="run" class="wb-btn run">Build + query</button>
+      </div>
+    </section>
+
+    <section class="wb-section">
+      <div id="results"></div>
+    </section>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Build info</h2>
+      <div id="info"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import init, {
+      buildVectorIndexFlat, queryVectorIndexFlat, dropVectorIndex,
+      build_info,
+    } from "../../pkg/workbook_runtime.js";
+    import { mountChrome, renderBuildInfo } from "../_shared/chrome.js";
+
+    mountChrome({ slug: "vector-knn" });
+
+    const t0 = performance.now();
+    await init();
+    const coldStartMs = Math.round(performance.now() - t0);
+    renderBuildInfo("info", build_info(), coldStartMs);
+
+    const button = document.getElementById("run");
+    const results = document.getElementById("results");
+    let currentHandle = null;
+
+    button.addEventListener("click", async () => {
+      const N = Number(document.getElementById("n").value);
+      const D = Number(document.getElementById("d").value);
+      const K = Number(document.getElementById("k").value);
+      const EF = Number(document.getElementById("ef").value);
+      button.disabled = true;
+      results.innerHTML = `<div class="wb-out empty">generating ${N.toLocaleString()} × ${D}-dim corpus…</div>`;
+
+      try {
+        const ids = new Array(N);
+        const flat = new Float32Array(N * D);
+        for (let i = 0; i < N; i++) {
+          ids[i] = `item-${i}`;
+          for (let j = 0; j < D; j++) {
+            flat[i * D + j] = Math.random() * 2 - 1;
+          }
+        }
+
+        results.innerHTML = `<div class="wb-out empty">building HNSW…</div>`;
+
+        if (currentHandle !== null) {
+          dropVectorIndex(currentHandle);
+          currentHandle = null;
+        }
+
+        const buildResult = buildVectorIndexFlat(ids, flat, D, { ef_construction: EF });
+        currentHandle = buildResult.handle;
+
+        const randomQuery = new Float32Array(D);
+        for (let j = 0; j < D; j++) randomQuery[j] = Math.random() * 2 - 1;
+        const randomResult = queryVectorIndexFlat(currentHandle, randomQuery, K);
+
+        const midIdx = Math.floor(N / 2);
+        const knownQuery = flat.slice(midIdx * D, (midIdx + 1) * D);
+        const knownResult = queryVectorIndexFlat(currentHandle, knownQuery, K);
+
+        renderResults(buildResult, randomResult, knownResult, N, D, K);
+      } catch (e) {
+        results.innerHTML = `<div class="wb-out error">${String(e)}</div>`;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    function renderResults(build, randomQ, knownQ, N, D, K) {
+      const buildCard = `
+        <div class="wb-card compact">
+          <div class="wb-card-header">
+            <span class="wb-card-title">index</span>
+            <span class="wb-card-meta">
+              <span><strong>${N.toLocaleString()}</strong> × ${D}-dim</span>
+              <span>cosine</span>
+            </span>
+          </div>
+          <div class="wb-tag-row">
+            <span class="wb-tag"><span>build</span><strong>${build.build_ms.toFixed(0)} ms</strong></span>
+          </div>
+        </div>
+      `;
+      results.innerHTML = buildCard +
+        renderQueryCard("query · random", randomQ, K) +
+        renderQueryCard("query · known corpus item (item-" + Math.floor(N/2) + ")", knownQ, K);
+    }
+
+    function renderQueryCard(title, q, k) {
+      const rows = q.neighbors
+        .map((n, i) => `
+          <tr>
+            <td class="wb-mono wb-muted" style="width:2rem;">${i + 1}</td>
+            <td class="wb-mono">${n.id}</td>
+            <td class="dist">${n.distance.toFixed(6)}</td>
+          </tr>
+        `)
+        .join("");
+      return `
+        <div class="wb-card">
+          <div class="wb-card-header">
+            <span class="wb-card-title">${title}</span>
+            <span class="wb-tag"><span>query</span><strong>${q.query_ms.toFixed(2)} ms</strong></span>
+          </div>
+          <table class="wb-table">
+            <thead><tr><th>#</th><th>id</th><th class="dist">cosine</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+    }
+  </script>
+</body>
+</html>

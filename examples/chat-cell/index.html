@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>workbook/runtime — chat cell</title>
+  <link rel="stylesheet" href="../_shared/design.css" />
+  <style>
+    .chat-stream {
+      font-family: var(--font-sans);
+      font-size: var(--t-base);
+      line-height: 1.6;
+      white-space: pre-wrap;
+      color: var(--ink);
+      min-height: 4rem;
+    }
+    .chat-stream.streaming::after {
+      content: "▍";
+      color: var(--accent);
+      animation: wb-pulse 0.9s var(--ease-out) infinite;
+      margin-left: 1px;
+    }
+    .chat-stream.empty { color: var(--ink-4); font-style: italic; }
+    .chat-stream.error { color: var(--err); }
+    .key-row { display: flex; gap: var(--s-3); align-items: center; flex-wrap: wrap; }
+    .key-status {
+      font-family: var(--font-mono);
+      font-size: var(--t-xs);
+      color: var(--ink-3);
+    }
+    .key-status.ok { color: var(--ok); }
+    details summary {
+      font-family: var(--font-mono);
+      font-size: var(--t-xs);
+      color: var(--ink-3);
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    details summary:hover { color: var(--ink); }
+    details[open] summary { color: var(--ink); }
+  </style>
+</head>
+<body>
+  <main class="wb-page">
+    <header class="wb-hero">
+      <div class="eyebrow">T-LLM.1 · chat cells</div>
+      <h1>Typed LLM calls, in the workbook.</h1>
+      <p>
+        A <code>chat</code> cell wraps the
+        <a href="https://github.com/zaius-labs/workbooks/blob/main/proto/workbook/llm/v1/llm.proto" target="_blank">LlmService</a>
+        proto contract. Tier 1 (here): direct fetch to OpenRouter, key
+        from your local input. Tier 2 (CF Worker): same surface, gateway
+        underneath. Same caller code on both.
+      </p>
+    </header>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Provider</h2>
+      <div class="wb-card">
+        <div class="key-row">
+          <input id="key" class="wb-input text" type="password"
+                 placeholder="OpenRouter API key (sk-or-…) — stored in localStorage" />
+          <span id="keyStatus" class="key-status">no key</span>
+        </div>
+        <div class="wb-controls" style="padding-top: var(--s-3);">
+          <span class="wb-field">
+            <label>model</label>
+            <input id="model" class="wb-input" type="text" value="openai/gpt-4o-mini"
+                   style="font-family: var(--font-mono); width: 18rem;" />
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">System prompt (cell source)</h2>
+      <textarea id="system" class="wb-textarea" rows="3">You are a precise scientific writer. Reply in 2-3 sentences. No hedging.</textarea>
+    </section>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">User message</h2>
+      <textarea id="user" class="wb-textarea" rows="3">Why is Polars faster than pandas for analytical queries on a 10M-row table?</textarea>
+      <div class="wb-controls">
+        <button id="run" class="wb-btn run">Run cell</button>
+        <button id="cancel" class="wb-btn ghost" style="display:none;">Cancel</button>
+        <span id="timing" class="wb-muted wb-mono" style="font-size: var(--t-sm);"></span>
+      </div>
+    </section>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Response</h2>
+      <div class="wb-card">
+        <div id="stream" class="chat-stream empty">(awaiting run)</div>
+        <details style="margin-top: var(--s-4);">
+          <summary>raw stream events</summary>
+          <pre id="events" class="wb-out" style="margin-top: var(--s-3);"></pre>
+        </details>
+      </div>
+    </section>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Build info</h2>
+      <div id="info"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import init, * as wasm from "../../pkg/workbook_runtime.js";
+    import {
+      createRuntimeClient, createBrowserLlmClient,
+    } from "../reactive-cells/runtime.bundle.js";
+    import { mountChrome, renderBuildInfo } from "../_shared/chrome.js";
+
+    mountChrome({ slug: "chat-cell" });
+
+    const t0 = performance.now();
+    await init();
+    const coldStartMs = Math.round(performance.now() - t0);
+    renderBuildInfo("info", wasm.build_info(), coldStartMs);
+
+    const KEY_STORAGE = "workbook.openrouter.api_key";
+    const keyInput = document.getElementById("key");
+    const keyStatus = document.getElementById("keyStatus");
+    const stored = localStorage.getItem(KEY_STORAGE);
+    if (stored) {
+      keyInput.value = stored;
+      keyStatus.textContent = "key loaded";
+      keyStatus.classList.add("ok");
+    }
+    keyInput.addEventListener("change", () => {
+      const v = keyInput.value.trim();
+      if (v) {
+        localStorage.setItem(KEY_STORAGE, v);
+        keyStatus.textContent = "key saved";
+        keyStatus.classList.add("ok");
+      } else {
+        localStorage.removeItem(KEY_STORAGE);
+        keyStatus.textContent = "no key";
+        keyStatus.classList.remove("ok");
+      }
+    });
+
+    const stream = document.getElementById("stream");
+    const events = document.getElementById("events");
+    const timing = document.getElementById("timing");
+    const runBtn = document.getElementById("run");
+    const cancelBtn = document.getElementById("cancel");
+
+    let activeController = null;
+
+    runBtn.addEventListener("click", async () => {
+      const apiKey = keyInput.value.trim();
+      if (!apiKey) {
+        stream.textContent = "Enter an OpenRouter API key first.";
+        stream.className = "chat-stream error";
+        return;
+      }
+
+      // Cancel any in-flight stream.
+      if (activeController) activeController.abort();
+      activeController = new AbortController();
+
+      const llmClient = createBrowserLlmClient({ apiKey });
+      const client = createRuntimeClient({
+        loadWasm: async () => wasm,
+        llmClient,
+      });
+
+      const cell = {
+        id: "answer",
+        language: "chat",
+        source: document.getElementById("system").value,
+        provides: ["answer"],
+      };
+      const params = {
+        message: document.getElementById("user").value,
+        model: document.getElementById("model").value,
+      };
+
+      stream.textContent = "";
+      stream.className = "chat-stream streaming";
+      events.textContent = "";
+      runBtn.disabled = true;
+      cancelBtn.style.display = "";
+      timing.textContent = "streaming…";
+
+      const start = performance.now();
+      try {
+        // Direct path: bypass the wasm dispatcher and stream into the UI
+        // ourselves so the user sees tokens land. The wasmBridge chat
+        // path collapses into a single CellOutput; here we want the
+        // live token stream.
+        const it = llmClient.generateChat({
+          model: params.model,
+          messages: [
+            { role: "system", content: cell.source },
+            { role: "user", content: params.message },
+          ],
+          signal: activeController.signal,
+        });
+        for await (const ev of it) {
+          events.textContent += JSON.stringify(ev) + "\n";
+          if (ev.kind === "delta") {
+            stream.textContent += ev.text;
+          } else if (ev.kind === "done") {
+            timing.textContent = ev.errorMessage
+              ? `error · ${(ev.latencyMs ?? 0).toFixed(0)} ms`
+              : `done · ${(ev.latencyMs ?? 0).toFixed(0)} ms · ${ev.usage?.completionTokens ?? "?"} tokens`;
+            if (ev.errorMessage) {
+              stream.classList.add("error");
+              stream.textContent = ev.errorMessage;
+            }
+            stream.classList.remove("streaming");
+          }
+        }
+      } catch (e) {
+        if (e?.name === "AbortError") {
+          timing.textContent = `cancelled · ${(performance.now() - start).toFixed(0)} ms`;
+        } else {
+          stream.classList.add("error");
+          stream.classList.remove("streaming");
+          stream.textContent = String(e);
+          timing.textContent = "error";
+        }
+      } finally {
+        runBtn.disabled = false;
+        cancelBtn.style.display = "none";
+        activeController = null;
+      }
+    });
+
+    cancelBtn.addEventListener("click", () => {
+      if (activeController) activeController.abort();
+    });
+  </script>
+</body>
+</html>

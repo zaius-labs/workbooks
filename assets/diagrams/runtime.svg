@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" role="img" aria-labelledby="runtime-title runtime-desc">
+  <title id="runtime-title">How a workbook runs</title>
+  <desc id="runtime-desc">Double-click a .workbook.html file. The OS routes through Workbooks.app, which asks workbooksd (a small Rust daemon running as a launch agent) to mint a session token and open a localhost URL in your browser. The browser loads the workbook from the daemon, edits flow back as a Cmd+S that the daemon writes atomically to the original file path.</desc>
+  <defs>
+    <style>
+      .bg { fill: #0a0a0a; }
+      .label-sans { font: 500 14px Inter,system-ui,sans-serif; fill: #f5f5f5; }
+      .label-meta { font: 600 11px Inter,system-ui,sans-serif; fill: #6b7280; letter-spacing: 0.08em; text-transform: uppercase; }
+      .label-mono { font: 500 12px "JetBrains Mono","SF Mono",ui-monospace,monospace; fill: #a8a8a8; letter-spacing: 0.02em; }
+      .label-mono-bright { font: 500 12px "JetBrains Mono","SF Mono",ui-monospace,monospace; fill: #f5f5f5; letter-spacing: 0.02em; }
+      .node { fill: #111111; stroke: #27272a; stroke-width: 1; rx: 10; ry: 10; }
+      .accent { stroke: #34d399; }
+      .accent-fill { fill: #34d399; }
+      .arrow-line { stroke: #6b7280; stroke-width: 1.4; fill: none; }
+      .arrow-accent { stroke: #34d399; stroke-width: 1.6; fill: none; }
+      .step-circle { fill: #18181b; stroke: #27272a; stroke-width: 1; }
+      .step-num { font: 600 11px Inter,system-ui,sans-serif; fill: #f5f5f5; }
+    </style>
+    <marker id="arrow-tip-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6b7280"/>
+    </marker>
+    <marker id="arrow-tip-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#34d399"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1200" height="600"/>
+
+  <!-- Top labels -->
+  <text x="100" y="60" class="label-meta">YOUR FILESYSTEM</text>
+  <text x="430" y="60" class="label-meta">DAEMON · WORKBOOKSD</text>
+  <text x="900" y="60" class="label-meta">YOUR BROWSER</text>
+
+  <!-- Filesystem node -->
+  <rect class="node" x="60" y="90" width="280" height="220"/>
+  <text x="80" y="124" class="label-sans">my-thing.workbook.html</text>
+  <text x="80" y="148" class="label-mono">~ 850 KB · self-decompressing</text>
+  <line x1="80" y1="164" x2="320" y2="164" stroke="#1f1f1f" stroke-width="1"/>
+  <text x="80" y="194" class="label-mono">runtime ▓▓▓▓</text>
+  <text x="80" y="216" class="label-mono">your code ▓▓</text>
+  <text x="80" y="238" class="label-mono">your state ▓▓▓▓▓</text>
+  <text x="80" y="276" class="label-mono" fill="#6b7280">also: any other .workbook.html on disk</text>
+
+  <!-- Daemon node -->
+  <rect class="node" x="400" y="90" width="380" height="420"/>
+  <text x="420" y="124" class="label-sans">workbooksd</text>
+  <text x="420" y="148" class="label-mono">Rust · ~1 MB · launchd / launchctl</text>
+  <line x1="420" y1="164" x2="760" y2="164" stroke="#1f1f1f" stroke-width="1"/>
+
+  <text x="420" y="196" class="label-meta">OPEN</text>
+  <text x="420" y="218" class="label-mono-bright">POST /open  →  {token, url}</text>
+  <text x="420" y="238" class="label-mono">binds path to a session token</text>
+
+  <text x="420" y="276" class="label-meta">SERVE</text>
+  <text x="420" y="298" class="label-mono-bright">GET /wb/&lt;token&gt;/</text>
+  <text x="420" y="318" class="label-mono">+ CSP, Origin, Referrer headers</text>
+
+  <text x="420" y="356" class="label-meta">SAVE</text>
+  <text x="420" y="378" class="label-mono-bright">PUT /wb/&lt;token&gt;/save</text>
+  <text x="420" y="398" class="label-mono">atomic rename · scan for leaks</text>
+
+  <text x="420" y="436" class="label-meta">SECRETS · OS KEYCHAIN</text>
+  <text x="420" y="458" class="label-mono-bright">POST /wb/&lt;token&gt;/proxy</text>
+  <text x="420" y="478" class="label-mono">domain allowlist enforced</text>
+
+  <!-- Browser node -->
+  <rect class="node" x="840" y="90" width="300" height="220"/>
+  <text x="860" y="124" class="label-sans">localhost:47119/wb/…</text>
+  <text x="860" y="148" class="label-mono">your default browser</text>
+  <line x1="860" y1="164" x2="1120" y2="164" stroke="#1f1f1f" stroke-width="1"/>
+  <text x="860" y="194" class="label-mono">runtime · UI · agent</text>
+  <text x="860" y="216" class="label-mono">edits live in memory</text>
+  <text x="860" y="238" class="label-mono">⌘S → daemon writes file</text>
+  <text x="860" y="276" class="label-mono" fill="#34d399">●  saved (in this file)</text>
+
+  <!-- Arrows: flow -->
+  <!-- 1: file → daemon (open) -->
+  <path class="arrow-line" d="M 340 200 C 370 200, 380 200, 400 200" marker-end="url(#arrow-tip-r)"/>
+  <circle class="step-circle" cx="370" cy="178" r="10"/>
+  <text x="370" y="182" class="step-num" text-anchor="middle">1</text>
+
+  <!-- 2: daemon → browser (mint URL) -->
+  <path class="arrow-line" d="M 780 200 C 810 200, 820 200, 840 200" marker-end="url(#arrow-tip-r)"/>
+  <circle class="step-circle" cx="810" cy="178" r="10"/>
+  <text x="810" y="182" class="step-num" text-anchor="middle">2</text>
+
+  <!-- 3: browser → daemon (Cmd+S) -->
+  <path class="arrow-accent" d="M 840 250 C 810 250, 800 250, 780 380" marker-end="url(#arrow-tip-accent)"/>
+  <circle class="step-circle" cx="810" cy="320" r="10" stroke="#34d399"/>
+  <text x="810" y="324" class="step-num" text-anchor="middle">3</text>
+
+  <!-- 4: daemon → file (atomic write) -->
+  <path class="arrow-accent" d="M 400 380 C 370 380, 360 380, 340 250" marker-end="url(#arrow-tip-accent)"/>
+  <circle class="step-circle" cx="370" cy="318" r="10" stroke="#34d399"/>
+  <text x="370" y="322" class="step-num" text-anchor="middle">4</text>
+
+  <!-- Legend strip below -->
+  <line x1="60" y1="540" x2="1140" y2="540" stroke="#1f1f1f" stroke-width="1"/>
+  <text x="60" y="572" class="label-meta">FLOW</text>
+  <g transform="translate(140,562)">
+    <text x="0" y="10" class="label-mono">1  open file</text>
+  </g>
+  <g transform="translate(290,562)">
+    <text x="0" y="10" class="label-mono">2  daemon mints token + opens browser tab</text>
+  </g>
+  <g transform="translate(700,562)">
+    <text x="0" y="10" class="label-mono" fill="#34d399">3  ⌘S sends new bytes to daemon</text>
+  </g>
+  <g transform="translate(990,562)">
+    <text x="0" y="10" class="label-mono" fill="#34d399">4  atomic file rewrite</text>
+  </g>
+</svg>

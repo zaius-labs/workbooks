@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stocks — compare ten tickers</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<main class="nb">
+  <header class="hero">
+    <p class="kicker">Workbook · notebook · client-side ML</p>
+    <h1>Compare any coins</h1>
+    <p class="lede">
+      Search <a href="https://www.coingecko.com/" target="_blank" rel="noreferrer">CoinGecko</a>
+      for any cryptocurrency — Bitcoin, Solana, that micro-cap your
+      friend won't shut up about. Each pick fetches a year of daily
+      prices live and joins the universe below. The "cells" run
+      Polars SQL right in the browser — edit a query, hit
+      <kbd>⌘↵</kbd>, the engine returns rows in milliseconds. The
+      last cell clusters your basket by return profile with K-means.
+      No server, no API key, no install. Just CORS-friendly public
+      data and a WebAssembly Polars runtime.
+    </p>
+    <p class="meta" id="meta">…</p>
+  </header>
+
+  <section class="picker">
+    <div class="picker-head">
+      <span class="picker-label">Tickers</span>
+      <button class="link-btn" data-action="all">all</button>
+      <button class="link-btn" data-action="none">none</button>
+      <button class="link-btn" data-action="clear">clear all</button>
+      <span class="picker-count" id="picker-count"></span>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="search-wrap">
+      <input
+        id="ticker-search"
+        class="search-input"
+        type="text"
+        placeholder="Search CoinGecko — e.g. bitcoin, solana, dogecoin"
+        autocomplete="off"
+        spellcheck="false">
+      <div class="search-dropdown" id="search-dropdown" hidden></div>
+    </div>
+    <p class="picker-hint">
+      Click a chip to toggle. Type above to search CoinGecko —
+      pick a result to fetch 1y of daily prices and append it to
+      the dataset. Every cell re-runs against the new universe.
+    </p>
+    <div data-settings-banner></div>
+  </section>
+
+  <section class="cell">
+    <div class="cell-head">
+      <span class="cell-num">1</span>
+      <span class="cell-lang">polars · sql</span>
+      <span class="cell-title">Per-ticker summary</span>
+      <button class="run-btn" data-run="cell-load">Run</button>
+    </div>
+    <p class="cell-prose">
+      One row per selected ticker — date range, row count, lowest /
+      highest close, and the period-over-period change. Edit the SQL
+      to drill into individual rows; e.g.
+      <code>SELECT * FROM prices ORDER BY date DESC LIMIT 20</code>.
+    </p>
+    <textarea class="cell-src" id="src-load" rows="9" spellcheck="false">
+SELECT ticker,
+       COUNT(*) AS rows,
+       MIN(date) AS first_date,
+       MAX(date) AS last_date,
+       MIN(close) AS low,
+       MAX(close) AS high
+FROM prices
+GROUP BY ticker
+ORDER BY ticker
+</textarea>
+    <div class="cell-out" id="out-load"></div>
+  </section>
+
+  <section class="cell">
+    <div class="cell-head">
+      <span class="cell-num">2</span>
+      <span class="cell-lang">polars · sql</span>
+      <span class="cell-title">Annualized return, volatility, Sharpe</span>
+      <button class="run-btn" data-run="cell-stats">Run</button>
+    </div>
+    <p class="cell-prose">
+      Crypto markets trade 24/7, so we annualize by <strong>365</strong>
+      (not 252 like stocks). The <em>Sharpe ratio</em> is excess return
+      per unit of volatility — assuming a 0% risk-free rate (a fair
+      simplification for crypto where stablecoin yields are noisy).
+      <code>daily_return</code> is precomputed at load time and the first
+      row of each coin (no prior close) is omitted from the dataset, so
+      there's no NaN to filter here.
+    </p>
+    <textarea class="cell-src" id="src-stats" rows="11" spellcheck="false">
+SELECT ticker,
+       COUNT(*) AS days,
+       AVG(daily_return) * 365 AS ann_return,
+       STDDEV(daily_return) * SQRT(365) AS ann_vol,
+       (AVG(daily_return) * 365)
+         / NULLIF(STDDEV(daily_return) * SQRT(365), 0) AS sharpe
+FROM prices
+GROUP BY ticker
+ORDER BY sharpe DESC
+</textarea>
+    <div class="cell-out" id="out-stats"></div>
+  </section>
+
+  <section class="cell">
+    <div class="cell-head">
+      <span class="cell-num">3</span>
+      <span class="cell-lang">js · drawdown</span>
+      <span class="cell-title">Max drawdown &amp; days underwater</span>
+      <button class="run-btn" data-run="cell-drawdown">Run</button>
+    </div>
+    <p class="cell-prose">
+      The deepest peak-to-trough loss in the period, plus how long the
+      coin has been "underwater" (days since its all-time high). Polars-
+      wasm doesn't support window functions yet, so we compute the
+      running max + drawdown in JS, then surface the result as a cell
+      output. This is the metric that actually decides whether a coin
+      is investable for most allocators.
+    </p>
+    <div class="cell-out" id="out-drawdown"></div>
+  </section>
+
+  <section class="cell">
+    <div class="cell-head">
+      <span class="cell-num">4</span>
+      <span class="cell-lang">js · correlation</span>
+      <span class="cell-title">Pairwise correlation matrix</span>
+      <button class="run-btn" data-run="cell-corr">Run</button>
+    </div>
+    <p class="cell-prose">
+      Crypto correlations are notoriously high — most alts move with
+      Bitcoin most of the time. The heatmap below is Pearson correlation
+      of daily returns; cool colors = decoupled, warm = co-moving.
+      Diversification is whatever is closest to zero with everyone else.
+    </p>
+    <div class="cell-out chart-out" id="out-corr"></div>
+  </section>
+
+  <section class="cell">
+    <div class="cell-head">
+      <span class="cell-num">5</span>
+      <span class="cell-lang">js · k-means</span>
+      <span class="cell-title">Cluster by [return, vol, Sharpe, max_dd]</span>
+      <button class="run-btn" data-run="cell-cluster">Run</button>
+    </div>
+    <p class="cell-prose">
+      Four-feature K-means (k=3) over standardized
+      [<em>annualized return</em>, <em>volatility</em>, <em>Sharpe</em>,
+      <em>max drawdown</em>]. Labels <em>Aggressive</em> /
+      <em>Balanced</em> / <em>Defensive</em> are sorted by mean Sharpe
+      descending so they're stable across re-runs.
+    </p>
+    <div class="cell-out" id="out-cluster"></div>
+  </section>
+
+  <section class="cell">
+    <div class="cell-head">
+      <span class="cell-num">6</span>
+      <span class="cell-lang">d3 · scatter</span>
+      <span class="cell-title">Risk vs return, colored by cluster</span>
+      <button class="run-btn" data-run="cell-chart">Run</button>
+    </div>
+    <div class="cell-out chart-out" id="out-chart"></div>
+  </section>
+
+  <section class="cell">
+    <div class="cell-head">
+      <span class="cell-num">7</span>
+      <span class="cell-lang">d3 · equity curves</span>
+      <span class="cell-title">Cumulative return — $1 invested over the period</span>
+      <button class="run-btn" data-run="cell-equity">Run</button>
+    </div>
+    <p class="cell-prose">
+      Each line is what $1 invested at day 0 would be worth on each
+      subsequent day, log-scaled so a 10× and a 100× both render. Hover
+      to see the underlying coin and the exact multiple.
+    </p>
+    <div class="cell-out chart-out" id="out-equity"></div>
+  </section>
+
+  <footer>
+    <p class="footer-note">
+      Data: <a href="https://www.coingecko.com/" target="_blank" rel="noreferrer">CoinGecko</a>
+      public API — no key, full CORS support, ~30 req/min free.
+      The ⚙ settings panel is wired up but empty for this notebook;
+      it's the same drop-in you can use in workbooks that DO need
+      keys (HuggingFace tokens, OpenAI keys, etc.). Computation:
+      <code>@work.books/runtime-wasm</code>'s Polars SQL engine via
+      <code>runPolarsSqlIpc</code>. Clustering: vanilla JS Lloyd's
+      algorithm. Visualization: D3.
+    </p>
+  </footer>
+</main>
+
+
+<script type="module" src="./main.js"></script>
+</body>
+</html>

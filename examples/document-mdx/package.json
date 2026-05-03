@@ -1,0 +1,19 @@
+{
+  "name": "@work.books/example-document-mdx",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "workbook dev",
+    "build": "workbook build"
+  },
+  "dependencies": {
+    "svelte": "^5.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@work.books/cli": "*",
+    "mdsvex": "^0.12.0",
+    "vite": "^6.0.0"
+  }
+}

@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>workbook/runtime — html agent + chat</title>
+  <link rel="stylesheet" href="../_shared/design.css" />
+  <style>
+    wb-cell, wb-input, wb-output, wb-agent, wb-chat { display: block; }
+    wb-cell::before {
+      content: attr(language) " · " attr(id);
+      display: block;
+      font-family: var(--font-mono);
+      font-size: var(--t-xs);
+      color: var(--ink-3);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin: var(--s-5) 0 4px;
+    }
+    wb-cell {
+      font-family: var(--font-mono);
+      font-size: var(--t-sm);
+      background: var(--bg-soft);
+      padding: var(--s-3) var(--s-4);
+      border-radius: var(--radius);
+      color: var(--ink-2);
+      white-space: pre-wrap;
+      border: 1px solid var(--line);
+    }
+    wb-input {
+      margin: var(--s-3) 0;
+    }
+    wb-input::before {
+      content: "input · " attr(name);
+      display: block;
+      font-family: var(--font-mono);
+      font-size: var(--t-xs);
+      color: var(--ink-3);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    wb-output {
+      margin: var(--s-3) 0 var(--s-5);
+    }
+    wb-agent::before {
+      content: "agent · " attr(id) " · " attr(model);
+      display: block;
+      font-family: var(--font-mono);
+      font-size: var(--t-xs);
+      color: var(--accent);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin: var(--s-5) 0 4px;
+    }
+    wb-system {
+      display: block;
+      font-family: var(--font-serif);
+      font-size: var(--t-base);
+      color: var(--ink-2);
+      padding: var(--s-3) var(--s-4);
+      border-left: 2px solid var(--accent);
+      background: var(--bg-soft);
+      margin: 0;
+    }
+    .key-row { display: flex; gap: var(--s-3); align-items: center; flex-wrap: wrap; margin-bottom: var(--s-4); }
+    .key-status { font-family: var(--font-mono); font-size: var(--t-xs); color: var(--ink-3); }
+    .key-status.ok { color: var(--ok); }
+  </style>
+</head>
+<body>
+  <main class="wb-page">
+    <header class="wb-hero">
+      <div class="eyebrow">T-HTML.2 · agents + chat</div>
+      <h1>An agent inside a workbook.</h1>
+      <p>
+        The Polars cell below computes regional revenue. The
+        <code>&lt;wb-agent&gt;</code> reads that cell as context and the
+        <code>&lt;wb-chat&gt;</code> below it gives you a typed
+        conversation. Same proto-typed <code>LlmClient</code>, same
+        cell DAG, all declared in plain HTML.
+      </p>
+    </header>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Provider</h2>
+      <div class="wb-card">
+        <div class="key-row">
+          <input id="key" class="wb-input text" type="password"
+                 placeholder="OpenRouter API key (sk-or-…)" style="flex:1; min-width: 16rem;" />
+          <span id="keyStatus" class="key-status">no key</span>
+          <button id="boot" class="wb-btn run">Mount workbook</button>
+        </div>
+      </div>
+    </section>
+
+    <wb-workbook name="html-agent" id="root" hidden>
+      <wb-input name="csv" type="csv" default="region,revenue,churn
+us,12000,0.04
+us,8400,0.11
+eu,15600,0.02
+eu,3200,0.18
+apac,21000,0.05
+apac,4400,0.22"></wb-input>
+
+      <wb-cell id="region_summary" language="polars" reads="csv">
+SELECT
+  region,
+  COUNT(*) AS customers,
+  SUM(revenue) AS total_revenue,
+  AVG(churn) AS avg_churn
+FROM data
+GROUP BY region
+ORDER BY total_revenue DESC
+      </wb-cell>
+      <wb-output for="region_summary"></wb-output>
+
+      <wb-agent id="analyst" model="openai/gpt-4o-mini" reads="region_summary">
+        <wb-system>You are a precise data analyst. Reply in 2-4 sentences. Always cite numbers from the data. Never hedge.</wb-system>
+      </wb-agent>
+
+      <wb-chat for="analyst"></wb-chat>
+    </wb-workbook>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Build info</h2>
+      <div id="info"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import init, * as wasm from "../../pkg/workbook_runtime.js";
+    import {
+      mountHtmlWorkbook, createBrowserLlmClient,
+    } from "../reactive-cells/runtime.bundle.js";
+    import { mountChrome, renderBuildInfo } from "../_shared/chrome.js";
+
+    mountChrome({ slug: "html-agent" });
+    const t0 = performance.now();
+    await init();
+    renderBuildInfo("info", wasm.build_info(), Math.round(performance.now() - t0));
+
+    const KEY_STORAGE = "workbook.openrouter.api_key";
+    const keyInput = document.getElementById("key");
+    const keyStatus = document.getElementById("keyStatus");
+    const stored = localStorage.getItem(KEY_STORAGE);
+    if (stored) {
+      keyInput.value = stored;
+      keyStatus.textContent = "key loaded";
+      keyStatus.classList.add("ok");
+    }
+
+    document.getElementById("boot").addEventListener("click", async () => {
+      const apiKey = keyInput.value.trim();
+      if (!apiKey) {
+        keyStatus.textContent = "missing key";
+        return;
+      }
+      localStorage.setItem(KEY_STORAGE, apiKey);
+      keyStatus.textContent = "mounted";
+      keyStatus.classList.add("ok");
+
+      document.getElementById("root").hidden = false;
+
+      const llmClient = createBrowserLlmClient({ apiKey });
+      await mountHtmlWorkbook({
+        loadWasm: async () => wasm,
+        llmClient,
+        // Chat-only demo — the agent's job is to summarize cell
+        // outputs, not run shell scripts. Opt out of the framework
+        // default `bash` tool (core-547) so we don't pull just-bash
+        // into a static HTML page that has no bundler. Workbooks
+        // bundled with workbook-cli get bash by default; HTML-only
+        // workbooks that want it need an importmap pointing at a
+        // CDN build of just-bash.
+        disableDefaultBashTool: true,
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+/**
+ * URL safety helpers - closes core-0id.1.
+ *
+ * encodeURI() is a percent-encoder; it does NOT block dangerous URL
+ * schemes. encodeURI("javascript:alert(1)") returns the same string
+ * unchanged. Anywhere we interpolate a workbook-controlled URL into an
+ * HTML href / src attribute, we have to validate the scheme before
+ * trusting it.
+ *
+ * Allowed:
+ *   - http://, https://      - external links (default trust)
+ *   - mailto:                - typed email addresses
+ *   - root-relative /path    - same-origin pointers
+ *   - fragment #anchor       - in-document
+ *
+ * Allowed in src= for images only:
+ *   - the above, plus data:image/<png|jpeg|gif|webp|svg+xml>;...
+ *
+ * Everything else (javascript:, vbscript:, file:, data: of other types,
+ * blob: from untrusted origins, custom schemes) gets rejected. Callers
+ * fall back to a known-safe value or omit the attribute.
+ *
+ * Whitespace + case insensitive - the parser strips control bytes and
+ * normalizes the leading scheme before checking. This catches obvious
+ * obfuscation like "\tjavascript:..." and "JaVaScRiPt:".
+ *
+ * IMPORTANT: regex source uses explicit \\uXXXX escapes rather than
+ * literal control bytes. V8 accepts the literal form, but some non-V8
+ * regex parsers report "Range out of order in character class" when
+ * the source contains raw 0x00-0x1F bytes - and the bundled runtime
+ * ships through those engines. Keeping the source ASCII-printable is
+ * the safest cross-engine encoding for the same semantics.
+ */
+
+// Strip leading whitespace + control bytes that browsers ignore but
+// which an attacker can use to slip past a naive prefix check.
+//
+// \u0000-\u001F covers all C0 control bytes (TAB, NUL, etc.);
+// is non-breaking space; \s catches the remaining Unicode whitespace
+// classes a regex engine recognizes (LS, PS, etc.).
+function normalize(raw: string): string {
+  return String(raw ?? "")
+    .replace(/^[\u0000-\u001F\u00A0\s]+/, "")
+    .replace(/[\u0000-\u001F\u00A0]/g, "");
+}
+
+const SAFE_HREF = /^(?:https?:\/\/|mailto:|\/[^/]|#)/i;
+const SAFE_IMG_SRC =
+  /^(?:https?:\/\/|\/[^/]|data:image\/(?:png|jpe?g|gif|webp|svg\+xml);)/i;
+
+/**
+ * Validate a URL for use in an HTML `href` attribute. Returns the
+ * normalized URL on success, or `null` if the scheme is not in the
+ * safe set. Callers pass `null` as a sentinel - typically resulting
+ * in the link being rendered as plain text.
+ */
+export function safeHref(raw: string | null | undefined): string | null {
+  const s = normalize(raw ?? "");
+  if (!s) return null;
+  return SAFE_HREF.test(s) ? s : null;
+}
+
+/**
+ * Validate a URL for use in an `<img src>` attribute. Adds
+ * `data:image/*` to the safe set. Returns the normalized URL on
+ * success, or `null`.
+ */
+export function safeImgSrc(raw: string | null | undefined): string | null {
+  const s = normalize(raw ?? "");
+  if (!s) return null;
+  return SAFE_IMG_SRC.test(s) ? s : null;
+}

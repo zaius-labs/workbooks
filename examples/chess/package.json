@@ -1,0 +1,20 @@
+{
+  "name": "@work.books/example-chess",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "workbook dev",
+    "build": "workbook build"
+  },
+  "dependencies": {
+    "@work.books/runtime-wasm": "workspace:*",
+    "chess.js": "^1.0.0",
+    "chessground": "^9.1.0",
+    "peerjs": "^1.5.4"
+  },
+  "devDependencies": {
+    "@work.books/cli": "*",
+    "vite": "^6.0.0"
+  }
+}

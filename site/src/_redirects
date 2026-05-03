@@ -1,0 +1,12 @@
+# Cloudflare Pages redirects.
+#
+# /dl/* — single source of truth is the latest GitHub Release on
+# shinyobjectz-sh/workbooks. The release pipeline at
+# packages/workbooksd/release/release.sh creates the release; this file
+# just points downloads at it. Everything in /dl/ is a redirect, no
+# binaries are stored here or in git.
+#
+# Format: <source-path>  <destination-url>  <status-code>
+# :splat captures the wildcard.
+
+/dl/*  https://github.com/shinyobjectz-sh/workbooks/releases/latest/download/:splat  302

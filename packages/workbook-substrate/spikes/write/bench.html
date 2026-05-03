@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Substrate write benchmark</title>
+<style>
+  body { font: 13px ui-monospace, monospace; padding: 16px; max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 14px; margin: 0 0 12px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+  td, th { padding: 4px 8px; border-bottom: 1px solid #ddd; text-align: left; }
+  th { background: #f4f4f5; }
+  .info { color: #71717a; }
+</style>
+</head>
+<body>
+<h1>Substrate write semantics — OPFS-as-FSA-proxy benchmark</h1>
+<p class="info">Measures the cost of full-file rewrite vs. notional append
+through the File System Access API surface, using OPFS as the proxy
+(same createWritable() / write() / close() semantics in Chromium —
+OPFS-backed handles are not user-visible but the write code path is the
+same one user-visible FSA uses).</p>
+<p class="info">Snapshot sizes × op-append cadences. Each cell measures
+the time to commit one op against the given snapshot size, where commit
+= "rewrite the entire snapshot+wal blob" (the FSA-mandated behavior).</p>
+<table id="results">
+<thead><tr><th>snapshot size</th><th>op size</th><th>commit ms (median of 5)</th><th>writes/sec at this cadence</th></tr></thead>
+<tbody></tbody>
+</table>
+<div id="summary"></div>
+
+<script type="module">
+const tbody = document.querySelector("#results tbody");
+const summary = document.getElementById("summary");
+
+if (!navigator.storage?.getDirectory) {
+  document.body.innerHTML += "<p style='color:red'>OPFS unsupported in this browser; cannot run benchmark.</p>";
+  throw new Error("opfs-unsupported");
+}
+
+const opfs = await navigator.storage.getDirectory();
+
+async function ensureFile(name) {
+  return await opfs.getFileHandle(name, { create: true });
+}
+
+async function fullRewrite(handle, bytes) {
+  const w = await handle.createWritable();
+  await w.write(bytes);
+  await w.close();
+}
+
+async function clear(handle) {
+  const w = await handle.createWritable();
+  await w.write(new Uint8Array(0));
+  await w.close();
+}
+
+function median(arr) {
+  const s = [...arr].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+}
+
+const snapshotSizes = [
+  { label: "1 MB",   bytes: 1 * 1024 * 1024 },
+  { label: "10 MB",  bytes: 10 * 1024 * 1024 },
+  { label: "50 MB",  bytes: 50 * 1024 * 1024 },
+];
+const opSizes = [
+  { label: "100 B",   bytes: 100 },
+  { label: "10 KB",   bytes: 10 * 1024 },
+  { label: "1 MB",    bytes: 1 * 1024 * 1024 },
+];
+
+const results = [];
+
+for (const ss of snapshotSizes) {
+  // Build a synthetic full-file image of (snapshot + WAL containing one op).
+  // OPFS files are committed atomically per createWritable().close(), which
+  // matches FSA semantics. Rewrite cost = ~snapshot_size each commit.
+
+  const handle = await ensureFile("bench-" + ss.bytes + ".bin");
+  await clear(handle);
+
+  for (const op of opSizes) {
+    const totalSize = ss.bytes + op.bytes;
+    const buf = new Uint8Array(totalSize);
+    // Don't bother filling — uninitialized buffer is fine for IO timing.
+
+    const samples = [];
+    for (let i = 0; i < 5; i++) {
+      // Tweak last byte each iteration so the OS can't dedupe writes.
+      buf[totalSize - 1] = i;
+      const t0 = performance.now();
+      await fullRewrite(handle, buf);
+      const t1 = performance.now();
+      samples.push(t1 - t0);
+    }
+    const med = median(samples);
+    const wps = (1000 / med).toFixed(1);
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>\${ss.label}</td><td>\${op.label}</td><td>\${med.toFixed(0)}</td><td>\${wps}</td>`;
+    tbody.appendChild(tr);
+    results.push({ snapshot: ss.label, snapshotBytes: ss.bytes, op: op.label, opBytes: op.bytes, medianMs: med, writesPerSec: Number(wps), samples });
+  }
+
+  await clear(handle);
+}
+
+summary.innerHTML = `<p class="info">Done. \${results.length} cells. UA: \${navigator.userAgent}</p>`;
+console.log("RESULTS_JSON=" + JSON.stringify(results));
+</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+# Workbooks Manager — Tauri+Svelte build artifacts.
+#
+# Source-of-truth tree:
+#   src/                         Svelte UI
+#   src-tauri/src/               Rust shell (lib.rs, main.rs)
+#   src-tauri/Cargo.toml         deps
+#   src-tauri/Info.plist         custom Info.plist merged into bundle
+#   src-tauri/tauri.conf.json    Tauri build config
+#   src-tauri/build.rs, capabilities/, icons/
+
+# Frontend build output — produced by `bun run build` (Vite).
+dist/
+
+# Bun lock — Bun resolves consistently across machines from package.json
+# in this monorepo's setup; check this back in if reproducible installs
+# become a pain point across contributors.
+bun.lock
+node_modules/
+
+# Rust build artifacts.
+src-tauri/target/
+
+# Tauri codegen — recreated on each `tauri dev`/`tauri build`.
+src-tauri/gen/
+
+# Sidecar binaries — copies of workbooksd dropped here at release
+# build time by the release pipeline (see release.sh). Reproducible
+# from packages/workbooksd/, no need to track 14 MB of bytes.
+src-tauri/binaries/

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chess — two browsers, peer-to-peer</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<main class="app">
+  <header class="hero">
+    <p class="kicker">Workbook · SPA · WebRTC peer-to-peer</p>
+    <h1>Chess between two browsers</h1>
+    <p class="lede">
+      No server, no account, no copy-paste. The first browser to open
+      this file becomes the host, generates a peer ID, and turns the
+      URL into a join link. Open that link in another browser — same
+      machine, same network, anywhere on the internet — and the WebRTC
+      data channel forms in seconds. Move state syncs over the channel
+      directly; the public PeerJS broker only sees the SDP exchange.
+    </p>
+  </header>
+
+  <section class="game">
+    <div class="board-wrap">
+      <div id="board" class="board"></div>
+      <div class="board-status" id="board-status">Waiting…</div>
+    </div>
+
+    <aside class="sidebar">
+      <section class="panel">
+        <h2>Connection</h2>
+        <div class="kv">
+          <span>You play</span>
+          <strong id="role">—</strong>
+        </div>
+        <div class="kv">
+          <span>Status</span>
+          <strong id="conn-status">setting up…</strong>
+        </div>
+        <div class="invite" id="invite-block" hidden>
+          <p>Send this link to your opponent:</p>
+          <div class="invite-row">
+            <input type="text" id="invite-link" readonly>
+            <button id="copy-invite" class="btn">Copy</button>
+          </div>
+          <p class="invite-hint">Or paste into another browser tab on this same machine to play yourself.</p>
+        </div>
+        <div class="manual" id="manual-block" hidden>
+          <p>Or join an existing game:</p>
+          <div class="invite-row">
+            <input type="text" id="manual-id" placeholder="paste peer ID">
+            <button id="manual-join" class="btn">Join</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Moves</h2>
+        <ol id="move-list" class="move-list"></ol>
+      </section>
+
+      <section class="panel">
+        <button id="reset" class="btn ghost">Resign &amp; reset</button>
+      </section>
+    </aside>
+  </section>
+
+  <footer class="footer">
+    <p>
+      Game logic: <a href="https://github.com/jhlywa/chess.js" target="_blank" rel="noreferrer">chess.js</a> ·
+      board UI: <a href="https://github.com/lichess-org/chessground" target="_blank" rel="noreferrer">chessground</a> ·
+      networking: <a href="https://peerjs.com/" target="_blank" rel="noreferrer">PeerJS</a> over WebRTC.
+      The PeerJS public broker handles only the SDP handshake; once the
+      data channel forms, every move travels directly between your two
+      browsers.
+    </p>
+  </footer>
+</main>
+
+<script type="module" src="./main.js"></script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "name": "@work.books/substrate",
+  "version": "0.1.0",
+  "description": "Workbook substrate v0 — file-as-database persistence (parser, hydrator, integrity guard)",
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src",
+    "docs",
+    "README.md"
+  ],
+  "scripts": {
+    "spike:parser:generate": "node spikes/parser/generate-test-file.mjs",
+    "spike:parser:extract": "node spikes/parser/test-extract-node.mjs",
+    "test:smoke": "node test/smoke.mjs"
+  }
+}

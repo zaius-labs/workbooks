@@ -1,0 +1,135 @@
+[package]
+name = "workbooksd"
+version = "0.3.4"
+edition = "2021"
+description = "Background daemon that serves and saves .html files for the local browser"
+license = "MIT"
+
+[[bin]]
+name = "workbooksd"
+path = "src/main.rs"
+
+# cargo-wix config — used by the workbooksd-release workflow on the
+# Windows runner to package the signed workbooksd.exe into Workbooks.msi.
+# See packages/workbooksd/wix/main.wxs for the manifest itself. The
+# upgrade-guid here MUST match Wix/Product/UpgradeCode in main.wxs;
+# changing it would break the upgrade chain for already-installed users.
+[package.metadata.wix]
+name = "Workbooks"
+upgrade-guid = "C1F4D9A8-2B7E-4E68-9B2A-7B0E6A2C51F1"
+path-guid = "5A91F742-3D6B-4A7E-9F2D-8C1E5F4A0E62"
+
+[dependencies]
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "signal", "process", "io-util"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# File watcher for the ACP scratch dir. macFSEvents on macOS, inotify
+# on Linux, ReadDirectoryChangesW on Windows. We use the simple
+# `RecommendedWatcher` shape — the workbook scratch is small and
+# workbooks-scale change rates are nowhere near needing the
+# `PollWatcher` fallback.
+notify = "6"
+tower-http = { version = "0.5", features = ["cors"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+getrandom = "0.2"
+# Secrets storage — OS keychain across macOS / Linux / Windows. Backs
+# the /wb/<token>/secret/* endpoints so API keys never enter the
+# browser's localStorage (where any other workbook on the same daemon
+# origin could read them).
+keyring = { version = "3", default-features = false, features = ["apple-native", "linux-native-sync-persistent", "windows-native"] }
+# Outbound HTTPS for /wb/<token>/proxy — the daemon makes the call,
+# splices in the keychain-stored Authorization header, returns the
+# response without ever revealing the secret to the page. rustls
+# keeps us off OpenSSL system libs.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "multipart", "json"] }
+# Type-safe secret handling — SecretString doesn't impl Debug/Display
+# (so format! prints "[REDACTED]") and Drop zeroizes the buffer.
+# Defense against secrets leaking via panic backtraces or eprintln!.
+secrecy = "0.10"
+zeroize = "1"
+# AES-256-GCM for studio-v1 envelope decryption (C1.8). Pure Rust;
+# matches the WebCrypto AES-GCM used on the author side in
+# packages/workbook-cli/src/encrypt/wrapStudio.mjs.
+aes-gcm = "0.10"
+# base64 + base64url codecs for envelope payload + DEK transport.
+base64 = "0.22"
+# HPKE (RFC 9180) for sealed-box DEK transport from broker (C9.1).
+# Suite: DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, ChaCha20-Poly1305.
+# Same suite used by @hpke/core on the broker side. We feed 32 bytes
+# from `getrandom` into HPKE's `derive_keypair` rather than wiring an
+# RNG trait through — sidesteps the rand_core 0.6/0.9 split between
+# hpke 0.13 and the rest of the daemon's tree.
+hpke = "0.13"
+# SHA-256 for the ledger's content fingerprints. Pure Rust, no
+# system OpenSSL.
+sha2 = "0.10"
+hex = "0.4"
+# C2PA / Content Authenticity Initiative — produces a sidecar
+# `.html.c2pa` manifest signed by a per-machine ed25519
+# keypair. rust_native_crypto avoids OpenSSL; file_io lets the
+# Builder write sidecars directly. Crate is large (~250 transitive
+# crates) but feature-gated below the line via the daemon's c2pa
+# permission so it never runs unless the workbook opts in.
+c2pa = { version = "0.72", default-features = false, features = ["file_io", "rust_native_crypto"] }
+# Pure-Rust X.509 self-signed cert generation. The c2pa crate
+# requires a cert chain — we mint one on first use and persist it
+# in ~/Library/Application Support/sh.workbooks.workbooksd/signing/
+# so subsequent saves reuse the same identity.
+rcgen = { version = "0.13", default-features = false, features = ["pem", "crypto", "ring"] }
+# Dep already pulled in transitively by rcgen — listed explicitly
+# so the c2pa_sign module can name `time::OffsetDateTime` without
+# the indirect-import warning.
+time = "0.3"
+# Wildcard host matching for the per-secret domain allowlist.
+# (e.g. "*.fal.run" matches "queue.fal.run".)
+glob-match = "0.2"
+# Binary-plist serialization for the macOS LaunchServices.OpenWith
+# extended attribute. We stamp this xattr on every workbook file the
+# daemon serves or writes — macOS Sequoia honours per-file OpenWith
+# overrides above the system default for public.html (which is
+# locked to whatever browser the user picked), so this is how we
+# claim .html opens for Workbooks WITHOUT requiring the
+# user to do Get Info → Change All. See xattr_openwith.rs.
+plist = "1"
+# Ed25519 signing for the C8.7 author-claim path. Same per-machine key
+# as c2pa_sign, surfaced via raw seed extraction from the rcgen-emitted
+# PKCS#8. Pure Rust, no OpenSSL. The recipient's pre-auth shell verifies
+# claims in-browser via WebCrypto Ed25519 — same algorithm, byte-
+# compatible signatures.
+ed25519-dalek = "2"
+# OsRng for the claim-signing unit tests (generate ephemeral keypairs
+# without touching the on-disk per-machine identity).
+rand = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# macOS-only: CoreServices link for the `set-default-handler`
+# subcommand. We FFI to LSSetDefaultRoleHandlerForContentType so the
+# .pkg postinstall can flip a UTI's default handler without depending
+# on PyObjC (stripped from /usr/bin/python3 in macOS Sonoma+) or on
+# Xcode CLT (not present on clean Macs). core-foundation supplies
+# CFString. The link line lives in default_handler.rs.
+[target.'cfg(target_os = "macos")'.dependencies.core-foundation]
+version = "0.10"
+
+# C9.5 — local-credential gate before cached lease open.
+# macOS: LocalAuthentication framework via objc2 bindings. Touch ID /
+# Apple Watch / system password fallback handled by the framework
+# itself; we just call evaluatePolicy + wrap the async completion
+# handler. Defense against the "stolen unlocked laptop with cached
+# lease" threat (THREAT_MODEL §4.1 row 15). Linux + Windows currently
+# return Unsupported — proper impls (polkit, Win32 Hello/WebAuthn)
+# are follow-up work.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSError", "NSString"] }
+objc2-local-authentication = { version = "0.3", features = ["LAContext"] }
+block2 = "0.6"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

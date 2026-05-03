@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>workbook/runtime — hello</title>
+  <link rel="stylesheet" href="../_shared/design.css" />
+</head>
+<body>
+  <main class="wb-page">
+    <header class="wb-hero">
+      <div class="eyebrow">smoke test</div>
+      <h1>The simplest cell.</h1>
+      <p>
+        A Rhai expression evaluated by <code>workbook-runtime</code> over
+        the wasm-bindgen bridge. The shortest path that proves the runtime
+        is alive in your browser.
+      </p>
+    </header>
+
+    <section class="wb-section">
+      <div class="wb-mono wb-muted" style="font-size: var(--t-xs); margin-bottom: 4px;">rhai source</div>
+      <textarea id="src" class="wb-textarea" rows="3">let n = 40;
+n + 2</textarea>
+      <div class="wb-controls">
+        <button id="run" class="wb-btn run">Evaluate</button>
+        <span id="timing" class="wb-muted wb-mono" style="font-size: var(--t-sm);"></span>
+      </div>
+    </section>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Output</h2>
+      <pre id="out" class="wb-out empty">(not yet run)</pre>
+    </section>
+
+    <section class="wb-section">
+      <h2 class="wb-section-title">Build info</h2>
+      <div id="info"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import init, { runRhai, build_info } from "../../pkg/workbook_runtime.js";
+    import { mountChrome, renderBuildInfo, setWorkbookExport } from "../_shared/chrome.js";
+
+    mountChrome({ slug: "hello-cell" });
+
+    setWorkbookExport(() => ({
+      manifest: {
+        name: "hello rhai",
+        slug: "hello-cell",
+        version: "0.1",
+        runtime_features: ["rhai"],
+      },
+      cells: [
+        {
+          id: "result",
+          language: "rhai",
+          source: document.getElementById("src").value,
+          provides: ["result"],
+        },
+      ],
+    }));
+
+    const t0 = performance.now();
+    await init();
+    const coldStartMs = Math.round(performance.now() - t0);
+    renderBuildInfo("info", build_info(), coldStartMs);
+
+    const out = document.getElementById("out");
+    const timing = document.getElementById("timing");
+
+    document.getElementById("run").addEventListener("click", () => {
+      const src = document.getElementById("src").value;
+      try {
+        const start = performance.now();
+        const outputs = runRhai(src, {});
+        const ms = (performance.now() - start).toFixed(2);
+        timing.textContent = `${ms} ms`;
+        out.classList.remove("empty", "error");
+        out.textContent = outputs.map((o) => o.kind === "text" ? o.content : JSON.stringify(o)).join("\n");
+      } catch (e) {
+        timing.textContent = "(failed)";
+        out.classList.remove("empty");
+        out.classList.add("error");
+        out.textContent = String(e);
+      }
+    });
+  </script>
+</body>
+</html>

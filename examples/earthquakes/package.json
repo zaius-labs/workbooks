@@ -1,0 +1,21 @@
+{
+  "name": "@work.books/example-earthquakes",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "workbook dev",
+    "build": "workbook build"
+  },
+  "dependencies": {
+    "@work.books/runtime-wasm": "workspace:*",
+    "apache-arrow": "^21.1.0",
+    "d3": "^7.9.0",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2"
+  },
+  "devDependencies": {
+    "@work.books/cli": "*",
+    "vite": "^6.0.0"
+  }
+}

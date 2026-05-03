@@ -1,0 +1,132 @@
+<script>
+  import { Notebook, NotebookCell, NotebookToolbar } from "@work.books/runtime/notebook";
+</script>
+
+<Notebook>
+
+# Dependency chain — error propagation
+
+<div class="meta">edit any cell · break it · watch downstream cells go stale</div>
+
+<NotebookToolbar />
+
+This notebook demonstrates the cell DAG's error-handling behavior.
+Five cells form a small dependency chain. The executor runs them in
+topological order; if any cell errors, every cell that **depends on
+its output** transitions to `stale (upstream error)` rather than
+running with bad inputs.
+
+Try this:
+
+1. Click **Run All** to see the full chain compute.
+2. Edit cell `n` and replace `7` with `"broken"`. Click ▶ on `n`.
+3. `n` errors. `doubled`, `incremented`, and `summary` all go
+   *stale (upstream error)* — the executor refuses to run them
+   because their input is invalid.
+4. Restore `n` to a number, run again — everything recovers.
+
+## Source
+
+The cells below declare `dependsOn` (upstream cells) and `provides`
+(names downstream cells can read).
+
+```rhai id="n" provides="n"
+let n = 7;
+n
+```
+
+`n` is the root. It provides the value `n`. No dependencies.
+
+```rhai id="doubled" dependsOn="n" provides="doubled"
+n * 2
+```
+
+`doubled` reads `n` from the upstream cell's output. The executor
+binds the value into the Rhai params before calling `runRhai`.
+
+```rhai id="incremented" dependsOn="n" provides="incremented"
+n + 1
+```
+
+`incremented` is parallel to `doubled` — both depend on `n`, so a
+break in `n` cascades to both.
+
+```rhai id="summary" dependsOn="doubled,incremented" provides="summary"
+doubled + incremented
+```
+
+`summary` joins both chains. It runs only when **both** upstream
+cells succeed. If either errors, summary goes stale.
+
+```rhai id="formatted" dependsOn="summary" provides="formatted"
+"summary value: " + summary.to_string()
+```
+
+`formatted` is the leaf — purely consumes `summary`'s output.
+
+---
+
+### What you should see
+
+| State | Meaning |
+|---|---|
+| `pending` | not yet run |
+| `running…` | currently executing |
+| `ok` (with output) | ran successfully |
+| `error` | this cell threw |
+| `stale (upstream error)` | upstream cell errored; this cell did not run |
+
+Notes on the model:
+
+- **Errors don't poison the document.** Successful upstream cells
+  retain their last good output. Restoring the broken cell and
+  re-running cascades the recovery.
+- **Each cell is run in topological order**, even within a single
+  Run All. Parallel branches (like `doubled` + `incremented`) run
+  serially today; the runtime is single-threaded.
+- The **stale** indicator lets the reader distinguish "I haven't
+  run this yet" from "I tried but couldn't because something
+  upstream is broken."
+
+</Notebook>
+
+<style>
+  :global(html, body) {
+    margin: 0; background: #fff; color: #0a0a0a;
+    font-family: -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
+    line-height: 1.55; font-size: 15px;
+  }
+  :global(.workbook-notebook) {
+    max-width: 880px; margin: 0 auto;
+    padding: 32px 24px 80px; display: block;
+  }
+  :global(h1) { font-size: 24px; font-weight: 700; margin: 0 0 8px; }
+  :global(h2) {
+    font-size: 14px; font-weight: 600; color: #707070;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin: 28px 0 12px;
+  }
+  :global(h3) { font-size: 14px; font-weight: 600; margin: 20px 0 8px; }
+  :global(p) { margin: 0 0 12px; color: #0a0a0a; }
+  :global(strong) { font-weight: 600; }
+  :global(em) { font-style: italic; }
+  :global(.meta) {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12px; color: #707070;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin: -4px 0 16px;
+  }
+  :global(ul), :global(ol) { padding-left: 22px; }
+  :global(li) { margin: 3px 0; }
+  :global(code) {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.92em; background: #f5f5f5;
+    padding: 1px 5px; border: 1px solid #d6d6d6; border-radius: 3px;
+  }
+  :global(table) { border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+  :global(th), :global(td) {
+    border: 1px solid #d6d6d6; padding: 4px 10px; text-align: left;
+  }
+  :global(th) { background: #f5f5f5; font-weight: 600; font-size: 12px; }
+  :global(hr) { border: 0; border-top: 1px solid #d6d6d6; margin: 28px 0; }
+</style>

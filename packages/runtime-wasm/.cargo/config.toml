@@ -1,0 +1,27 @@
+# Explicit wasm32 build flags.
+#
+# getrandom 0.3+ requires --cfg getrandom_backend="wasm_js" for the
+# wasm32-unknown-unknown target since that target has no native randomness
+# source. We route through getrandom's wasm_js backend which calls into
+# crypto.getRandomValues in the browser.
+[target.wasm32-unknown-unknown]
+rustflags = [
+    '--cfg', 'getrandom_backend="wasm_js"',
+]
+
+# Apple's bundled clang doesn't ship the wasm32 backend, so any C-deps
+# (zstd-sys for polars-ipc, lz4-sys for parquet, rusqlite-bundled,
+# duckdb-bundled) fail with "No available targets are compatible with
+# triple wasm32-unknown-unknown". Route C compilation through Homebrew
+# LLVM, which DOES include wasm32.
+#
+# Defaults below assume the standard Apple-Silicon Homebrew prefix
+# (/opt/homebrew/opt/llvm). Override per-machine by exporting in your
+# shell — env vars take precedence over [env] entries here:
+#   export CC_wasm32_unknown_unknown=/path/to/llvm/bin/clang
+#   export CXX_wasm32_unknown_unknown=/path/to/llvm/bin/clang++
+#   export AR_wasm32_unknown_unknown=/path/to/llvm/bin/llvm-ar
+[env]
+CC_wasm32_unknown_unknown = { value = "/opt/homebrew/opt/llvm/bin/clang", force = false }
+CXX_wasm32_unknown_unknown = { value = "/opt/homebrew/opt/llvm/bin/clang++", force = false }
+AR_wasm32_unknown_unknown = { value = "/opt/homebrew/opt/llvm/bin/llvm-ar", force = false }

@@ -1,0 +1,14 @@
+{
+  "name": "%%SLUG%%",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "workbook dev",
+    "build": "workbook build",
+    "check": "workbook check"
+  },
+  "devDependencies": {
+    "@work.books/cli": "%%CLI_VERSION%%"
+  }
+}
