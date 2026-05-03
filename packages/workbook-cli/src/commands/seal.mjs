@@ -78,6 +78,7 @@ export async function runSeal(opts) {
       authorEmail: opts["author-email"] ?? opts.authorEmail,
       keyId: opts["key-id"] ?? opts.keyId,
       authorName: opts["author-name"] ?? opts.authorName,
+      brokerUrl: broker,
     });
     claim = signed.fetchedClaim;
     claimSig = signed.fetchedSig;
@@ -110,79 +111,78 @@ export async function runSeal(opts) {
 /** Talk to the local workbooksd daemon to produce a signed author
  *  claim. The daemon owns the per-machine ed25519 key; we never see it.
  *
- *  Failure modes are loud — the user explicitly opted into --sign, so
- *  any of (daemon down, bad identity tuple, signing error) should
- *  halt the seal rather than silently emit an unsigned envelope. The
- *  recipient's browser would render "unverified" in that case, which
- *  is worse than not claiming at all.
+ *  As of C8.7-B (2026-05-03) the daemon resolves identity from a
+ *  cached registration (~/.../signing/author_identity.json). The CLI
+ *  doesn't pass identity flags by default; if no cache exists, the
+ *  daemon returns 401 not_registered, the CLI auto-runs
+ *  /author/register (which opens a browser for the user to sign in),
+ *  then retries.
  *
- *  Iteration B will fold in broker auth + auto-registration so the
- *  caller no longer has to provide --author-sub / --author-email /
- *  --key-id manually. Until then the trade-off is: one curl to the
- *  broker first to register, paste the returned id into --key-id,
- *  then seal.
+ *  Manual override flags (--author-sub / --author-email / --key-id)
+ *  are still honored if the caller wants to sign as a specific
+ *  identity without touching the cache (e.g., tests, CI).
  */
-async function signClaimViaDaemon({ authorSub, authorEmail, keyId, authorName }) {
-  if (!authorSub) {
-    throw new Error("--sign requires --author-sub <workos|user_…>");
-  }
-  if (!authorEmail) {
-    throw new Error("--sign requires --author-email <addr>");
-  }
-  if (!keyId) {
-    throw new Error(
-      "--sign requires --key-id <broker-issued-key-id> (register your daemon's pubkey at the broker first; see `workbook author register` once C8.7-B lands).",
-    );
-  }
+async function signClaimViaDaemon({
+  authorSub,
+  authorEmail,
+  keyId,
+  authorName,
+  brokerUrl,
+}) {
   const port = await readDaemonPort();
   const daemonUrl = `http://127.0.0.1:${port}`;
 
-  // Sanity: confirm the daemon is the one we think and that the
-  // pubkey hasn't drifted from what the broker registered. We can't
-  // verify (id ↔ pubkey) without calling the broker; but we CAN
-  // surface the daemon's local key fingerprint so the user has a
-  // human handle that lines up with their broker dashboard.
-  const id = await daemonGet(daemonUrl, "/author/identity");
-  // Not strictly required for signing, but informative for stderr.
-  process.stderr.write(
-    `[seal] daemon pubkey fingerprint=${id.key_fingerprint}\n`,
-  );
-
+  // Pin one workbookId across the daemon-side claim signature AND
+  // the wrapStudio envelope — they MUST match or the recipient
+  // verifier reconstructs the wrong canonical bytes and rejects.
+  const workbookId = newWorkbookIdLocal();
   const ts = Math.floor(Date.now() / 1000);
 
-  // workbookId is decided downstream by wrapStudio; for the canonical-
-  // claim bytes we need the SAME id wrapStudio will use. We pin it
-  // here by passing a freshly minted id through both the claim AND
-  // wrapStudio.workbookId override. (Without the pin, wrapStudio
-  // would mint its own id and the claim signature would no longer
-  // bind to the workbook in the envelope.)
-  // — actually, wrapStudio already accepts `workbookId` as an option;
-  // we'll let it mint and pass that downstream. Easiest correct path:
-  // mint once locally here, pass to both.
-  const workbookId = newWorkbookIdLocal();
-
-  const sign = await daemonPost(daemonUrl, "/author/sign-claim", {
-    author_sub: authorSub,
-    author_email: authorEmail,
-    key_id: keyId,
+  const body = {
     workbook_id: workbookId,
     ts,
-  });
+  };
+  // Manual overrides — only included if explicitly passed.
+  if (authorSub) body.author_sub = authorSub;
+  if (authorEmail) body.author_email = authorEmail;
+  if (keyId) body.key_id = keyId;
 
+  let sign;
+  try {
+    sign = await daemonPost(daemonUrl, "/author/sign-claim", body);
+  } catch (e) {
+    // not_registered → kick off interactive registration, then retry.
+    if (String(e.message ?? "").includes('"not_registered"')) {
+      if (!brokerUrl) {
+        throw new Error(
+          "[seal] daemon not registered. Pass --broker so the daemon knows where to authenticate, or pre-register via POST /author/register.",
+        );
+      }
+      process.stderr.write(
+        `[seal] daemon not registered with broker. Running one-time registration — your browser will open for sign-in.\n`,
+      );
+      await daemonPost(daemonUrl, "/author/register", {
+        broker_url: brokerUrl,
+      });
+      // Retry with the same body. The daemon now has a cached
+      // identity; even if --author-* weren't passed, the cache fills
+      // in.
+      sign = await daemonPost(daemonUrl, "/author/sign-claim", body);
+    } else {
+      throw e;
+    }
+  }
+
+  // The daemon echoes back the resolved identity (cached or
+  // body-overridden) so we can build the claim object the same way
+  // wrapStudio expects.
   return {
     fetchedClaim: {
-      author_sub: authorSub,
-      author_email: authorEmail,
+      author_sub: sign.author_sub ?? authorSub,
+      author_email: sign.author_email ?? authorEmail,
       author_name: authorName,
-      key_id: keyId,
+      key_id: sign.key_id ?? keyId,
       ts,
-      // We have to thread the same workbookId into wrapStudio. The
-      // caller does this via opts.workbookId — but seal() doesn't
-      // currently expose workbookId; we pass it via the claim object
-      // and wrapStudio reads it back if absent. Wait — wrapStudio
-      // takes `workbookId` as a top-level arg, separately. So we
-      // need to communicate it back to runSeal. Simpler: signal here
-      // and let runSeal pass it through.
     },
     fetchedSig: sign.sig,
     workbookId,

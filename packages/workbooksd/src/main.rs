@@ -57,6 +57,7 @@ use axum::{
 };
 
 mod acp;
+mod author_identity;
 mod author_route;
 mod broker_client;
 mod c2pa_sign;
@@ -728,6 +729,8 @@ async fn daemon_main() {
         // envelope so recipients see a verified-by-author badge.
         .route("/author/identity", get(author_route::get_identity))
         .route("/author/sign-claim", post(author_route::sign_claim))
+        .route("/author/register", post(author_route::register))
+        .route("/author/registration", get(author_route::get_registration))
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)

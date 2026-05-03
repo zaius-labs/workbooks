@@ -211,6 +211,108 @@ pub async fn run_flow(
     })
 }
 
+/// Identity-only result from a broker auth flow — no per-workbook
+/// keys, just the bearer + claims. Used by the C8.7-B author flow,
+/// where we need to register the daemon's ed25519 pubkey under the
+/// authenticated WorkOS sub but DON'T need any sealed-workbook DEKs
+/// in this flow.
+pub struct AuthOnlySuccess {
+    pub bearer: SecretString,
+    pub sub: String,
+    pub email: String,
+}
+
+/// Run an interactive broker auth flow that ends at the bearer (no
+/// per-workbook key release). The browser opens, user signs in,
+/// callback delivers the broker_code, we exchange for a bearer.
+///
+/// Identical machinery to `run_flow` up through step 5; we just stop
+/// before requesting workbook keys. Used by /author/register
+/// (C8.7-B) so the daemon can authenticate the author once + cache
+/// the bearer + register the per-machine ed25519 pubkey under the
+/// resulting sub.
+pub async fn run_auth_only(
+    broker_url: &str,
+    open_browser: impl FnOnce(&str),
+) -> Result<AuthOnlySuccess, BrokerError> {
+    let broker_url = broker_url.trim_end_matches('/').to_string();
+
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .map_err(|e| BrokerError::BindFailed(e.to_string()))?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| BrokerError::BindFailed(e.to_string()))?
+        .port();
+
+    let return_to = format!("http://127.0.0.1:{port}/cb");
+    // No workbook_id — broker accepts the param as nullable. The
+    // resulting session has no workbook scoping; it's just an
+    // authenticated identity.
+    let start_url = format!(
+        "{broker_url}/v1/auth/start?return_to={}",
+        urlencode(&return_to),
+    );
+
+    open_browser(&start_url);
+
+    let code = tokio::time::timeout(AUTH_FLOW_TIMEOUT, accept_one_callback(listener))
+        .await
+        .map_err(|_| BrokerError::Timeout)??;
+
+    let exchange = exchange_code(&broker_url, &code).await?;
+
+    Ok(AuthOnlySuccess {
+        bearer: SecretString::from(exchange.bearer),
+        sub: exchange.sub,
+        email: exchange.email,
+    })
+}
+
+/// Register the daemon's ed25519 pubkey at the broker for the
+/// signed-in author. Idempotent — the broker upserts (sub, pubkey)
+/// pairs, so re-registering the same pubkey returns the same key_id.
+/// Returns the broker-issued `key_id` the daemon then uses in
+/// canonical-claim signatures.
+pub async fn register_author_key(
+    broker_url: &str,
+    bearer: &SecretString,
+    pubkey_b64u: &str,
+    label: &str,
+) -> Result<String, BrokerError> {
+    let res = http_client()
+        .post(format!(
+            "{}/v1/authors/me/keys",
+            broker_url.trim_end_matches('/'),
+        ))
+        .bearer_auth(bearer.expose_secret())
+        .json(&serde_json::json!({
+            "pubkey": pubkey_b64u,
+            "label": label,
+        }))
+        .send()
+        .await
+        .map_err(|e| BrokerError::HttpError(format!("register_author_key: {e}")))?;
+
+    if !res.status().is_success() {
+        let status = res.status();
+        let body = res.text().await.unwrap_or_default();
+        return Err(BrokerError::HttpError(format!(
+            "register_author_key {status}: {body}"
+        )));
+    }
+
+    #[derive(Deserialize)]
+    struct RegisterResponse {
+        id: String,
+    }
+    let r = res
+        .json::<RegisterResponse>()
+        .await
+        .map_err(|e| BrokerError::BadResponse(format!("register_author_key: {e}")))?;
+    Ok(r.id)
+}
+
 /// Accept one connection, read the request line, parse out the
 /// `broker_code` query param, write a small "you can close this tab"
 /// HTML response, drop the listener.
