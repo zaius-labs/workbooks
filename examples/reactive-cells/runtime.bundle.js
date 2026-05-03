@@ -1210,7 +1210,7 @@ ${stderr}`);
   };
 }
 
-// ../../../../node_modules/.bun/dompurify@3.4.2/node_modules/dompurify/dist/purify.es.mjs
+// ../../node_modules/.bun/dompurify@3.4.2/node_modules/dompurify/dist/purify.es.mjs
 var {
   entries,
   setPrototypeOf,
@@ -2377,7 +2377,7 @@ function looksLikeAgeEnvelope(bytes) {
   return true;
 }
 
-// ../../../../node_modules/.bun/@noble+ed25519@3.1.0/node_modules/@noble/ed25519/index.js
+// ../../node_modules/.bun/@noble+ed25519@3.1.0/node_modules/@noble/ed25519/index.js
 var ed25519_CURVE = Object.freeze({
   p: 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffedn,
   n: 0x1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3edn,
@@ -2849,7 +2849,7 @@ var wNAF = (n) => {
   return { p, f };
 };
 
-// ../../../../node_modules/.bun/@noble+hashes@2.2.0/node_modules/@noble/hashes/utils.js
+// ../../node_modules/.bun/@noble+hashes@2.2.0/node_modules/@noble/hashes/utils.js
 function isBytes2(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array" && "BYTES_PER_ELEMENT" in a && a.BYTES_PER_ELEMENT === 1;
 }
@@ -2905,7 +2905,7 @@ var oidNist = (suffix) => ({
   oid: Uint8Array.from([6, 9, 96, 134, 72, 1, 101, 3, 4, 2, suffix])
 });
 
-// ../../../../node_modules/.bun/@noble+hashes@2.2.0/node_modules/@noble/hashes/_md.js
+// ../../node_modules/.bun/@noble+hashes@2.2.0/node_modules/@noble/hashes/_md.js
 var HashMD = class {
   blockLen;
   outputLen;
@@ -3021,7 +3021,7 @@ var SHA512_IV = /* @__PURE__ */ Uint32Array.from([
   327033209
 ]);
 
-// ../../../../node_modules/.bun/@noble+hashes@2.2.0/node_modules/@noble/hashes/_u64.js
+// ../../node_modules/.bun/@noble+hashes@2.2.0/node_modules/@noble/hashes/_u64.js
 var U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
 var _32n = /* @__PURE__ */ BigInt(32);
 function fromBig(n, le = false) {
@@ -3056,7 +3056,7 @@ var add4H = (low, Ah, Bh, Ch, Dh) => Ah + Bh + Ch + Dh + (low / 2 ** 32 | 0) | 0
 var add5L = (Al, Bl, Cl, Dl, El) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0) + (El >>> 0);
 var add5H = (low, Ah, Bh, Ch, Dh, Eh) => Ah + Bh + Ch + Dh + Eh + (low / 2 ** 32 | 0) | 0;
 
-// ../../../../node_modules/.bun/@noble+hashes@2.2.0/node_modules/@noble/hashes/sha2.js
+// ../../node_modules/.bun/@noble+hashes@2.2.0/node_modules/@noble/hashes/sha2.js
 var K512 = /* @__PURE__ */ (() => split([
   "0x428a2f98d728ae22",
   "0x7137449123ef65cd",
@@ -3436,7 +3436,6 @@ function createWorkbookDataResolver(opts = {}) {
           ciphertext,
           opts.webauthnIdentity
         );
-        void plaintext;
         throw new Error(
           `workbook data ${block.id}: WebAuthn unlock under wasmIsolation is not yet supported. Drop wasmIsolation for blocks that need webauthnIdentity, or pre-decrypt to a server-side X25519 identity.`
         );
@@ -3765,25 +3764,58 @@ function createWorkbookMemoryResolver(opts = {}) {
 }
 
 // packages/runtime/src/yjsHost.ts
-var _Y = globalThis.__wb_yjs;
-if (!_Y) {
-  throw new Error(
-    "workbook runtime: globalThis.__wb_yjs is not set. The host app must assign `globalThis.__wb_yjs = await import('yjs')` BEFORE loading the workbook runtime bundle. See yjsHost.ts for context."
-  );
+function resolveY() {
+  const v = globalThis.__wb_yjs;
+  if (!v) {
+    throw new Error(
+      "workbook runtime: globalThis.__wb_yjs is not set. The host app must assign `globalThis.__wb_yjs = await import('yjs')` BEFORE the runtime calls into Y. See yjsHost.ts for context."
+    );
+  }
+  return v;
 }
-var Doc = _Y.Doc;
-var Map2 = _Y.Map;
-var Array2 = _Y.Array;
-var Text = _Y.Text;
-var XmlElement = _Y.XmlElement;
-var XmlFragment = _Y.XmlFragment;
-var XmlText = _Y.XmlText;
-var encodeStateAsUpdate = _Y.encodeStateAsUpdate;
-var applyUpdate = _Y.applyUpdate;
-var encodeStateVector = _Y.encodeStateVector;
-var mergeUpdates = _Y.mergeUpdates;
-var diffUpdate = _Y.diffUpdate;
-var transact = _Y.transact;
+function lazyClass(name) {
+  return new Proxy(function placeholder() {
+  }, {
+    construct(_t, args, newTarget) {
+      const Cls = resolveY()[name];
+      return Reflect.construct(Cls, args, newTarget);
+    },
+    get(_t, prop, receiver) {
+      const Cls = resolveY()[name];
+      return Reflect.get(Cls, prop, receiver);
+    },
+    has(_t, prop) {
+      return Reflect.has(resolveY()[name], prop);
+    },
+    apply(_t, thisArg, args) {
+      const Cls = resolveY()[name];
+      return Reflect.apply(Cls, thisArg, args);
+    },
+    getPrototypeOf() {
+      return Reflect.getPrototypeOf(resolveY()[name]);
+    }
+  });
+}
+function lazyFn(name) {
+  const fn = (...args) => {
+    const target = resolveY()[name];
+    return target(...args);
+  };
+  return fn;
+}
+var Doc = lazyClass("Doc");
+var Map2 = lazyClass("Map");
+var Array2 = lazyClass("Array");
+var Text = lazyClass("Text");
+var XmlElement = lazyClass("XmlElement");
+var XmlFragment = lazyClass("XmlFragment");
+var XmlText = lazyClass("XmlText");
+var encodeStateAsUpdate = lazyFn("encodeStateAsUpdate");
+var applyUpdate = lazyFn("applyUpdate");
+var encodeStateVector = lazyFn("encodeStateVector");
+var mergeUpdates = lazyFn("mergeUpdates");
+var diffUpdate = lazyFn("diffUpdate");
+var transact = lazyFn("transact");
 
 // packages/runtime/src/yjsSidecar.ts
 function walkPath(doc, path) {
