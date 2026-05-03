@@ -1,0 +1,30 @@
+{
+  "name": "@work.books/decrypt",
+  "version": "0.1.0",
+  "description": "Pure-browser decrypt primitives for sealed Workbooks envelopes (studio-v1 broker-released-DEK + age-v1 passphrase). One source of truth shared by the hosted viewer, daemon, and pre-auth shell.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zaius-labs/workbooks.git",
+    "directory": "packages/decrypt"
+  },
+  "homepage": "https://github.com/zaius-labs/workbooks",
+  "keywords": ["workbooks", "decrypt", "envelope", "age", "studio-v1"],
+  "exports": {
+    ".": {
+      "import": "./src/index.js",
+      "types": "./src/index.d.ts"
+    }
+  },
+  "files": ["src", "README.md"],
+  "dependencies": {
+    "age-encryption": "^0.2.4"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
