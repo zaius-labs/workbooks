@@ -76,11 +76,12 @@ export async function runBuild(opts = {}) {
     logLevel: "info",
   });
 
-  // Encryption stage. workbookInline already renamed the artifact to
-  // <slug>.workbook.html before we got here; we read it back, wrap it
-  // in a lock screen, and write it back to the same path.
+  // Encryption stage. workbookInline already wrote the artifact at
+  // <slug>.html (0.4.0+ — the .workbook.html infix is retired);
+  // we read it back, wrap it in a lock screen, and write it back
+  // to the same path.
   if (encryptRequest) {
-    const artifactPath = path.join(outDir, `${config.slug}.workbook.html`);
+    const artifactPath = path.join(outDir, `${config.slug}.html`);
     const plaintext = await fs.readFile(artifactPath, "utf8");
     const wrapped = await wrapEncrypted({
       html: plaintext,

@@ -516,17 +516,29 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
         if (compressEnabled) {
           finalSrc = await brotliWrapHtml(src, { format: compressFormat });
         }
-        // Rename <slug>.html → <slug>.workbook.html unless the user
-        // already used the .workbook.html extension.
+        // Rename Vite's `index.html` to `<slug>.html`. Workbook
+        // identity travels in the file content (`<meta name="wb-permissions">`
+        // / `<script id="wb-meta">`) and per-file OpenWith xattr,
+        // not in the filename — so we drop the legacy `.workbook.html`
+        // compound extension entirely as of 0.4.0. Files keep plain
+        // `.html` so they open natively in any browser without our
+        // app installed, and macOS Finder doesn't break them on
+        // duplicate ("foo.html (1)" survives; "foo.workbook (1).html"
+        // would have lost the recognized suffix). Files that come
+        // in already named `<slug>.html` or with a custom name pass
+        // through unchanged.
         const base = path.basename(file);
         const dir = path.dirname(file);
         let target;
         if (base === "index.html") {
-          target = path.join(dir, `${config.slug}.workbook.html`);
+          target = path.join(dir, `${config.slug}.html`);
         } else if (base.endsWith(".workbook.html")) {
-          target = file;
+          // Strip the legacy infix on rebuild so old projects
+          // migrate cleanly without manual rename.
+          target = file.replace(/\.workbook\.html$/, ".html");
         } else {
-          target = file.replace(/\.html$/, ".workbook.html");
+          // Custom filename (e.g. `foo.html`) — keep as-is.
+          target = file;
         }
         await fs.writeFile(target, finalSrc);
         if (target !== file) await fs.rm(file);

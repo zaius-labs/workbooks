@@ -116,7 +116,7 @@ export async function runInit(flags = {}) {
     `  cd ${name}`,
     "  npm install",
     "  npm run dev          # http://localhost:5173",
-    "  npm run build        # produces dist/" + slug + ".workbook.html",
+    "  npm run build        # produces dist/" + slug + ".html",
     "",
   ].join("\n"));
 }

@@ -84,7 +84,13 @@
     let diskPath;
     try { diskPath = decodeURIComponent(location.pathname); } catch { diskPath = location.pathname; }
     if (/^\/[A-Za-z]:\//.test(diskPath)) diskPath = diskPath.slice(1); // Windows
-    if (diskPath.endsWith(".workbook.html")) {
+    // Accept either the legacy `.workbook.html` compound extension
+    // or the new canon `.html` (workbook identity is content-based
+    // since 0.4.0 — the file's wb-meta / wb-permissions inside is
+    // what makes it a workbook, not the filename). Bare `.html`
+    // catches files emitted by `wb build` v0.4+ and any user-renamed
+    // workbooks; `.workbook.html` keeps old artifacts working.
+    if (diskPath.endsWith(".html") || diskPath.endsWith(".htm")) {
       // Don't await — show toast immediately as "trying"; redirect on success.
       (async () => {
         try {

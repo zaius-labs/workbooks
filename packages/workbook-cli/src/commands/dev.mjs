@@ -21,7 +21,7 @@ export async function runDev(opts = {}) {
       `[workbook dev] --encrypt requested, but dev mode serves source files ` +
       `(no artifact to wrap). To test the lock screen end-to-end:\n` +
       `  workbook build --encrypt\n` +
-      `  open dist/${config.slug}.workbook.html\n` +
+      `  open dist/${config.slug}.html\n` +
       `  passphrase = ${devPw === null ? "(unset — set encrypt.devPassword)" : `'${devPw}' (from encrypt.devPassword)`}\n\n`,
     );
   }
