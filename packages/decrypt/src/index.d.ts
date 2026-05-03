@@ -39,3 +39,18 @@ export function decryptAgeV1(args: {
   envelope: Extract<Envelope, { kind: "age-v1" }>;
   passphrase: string;
 }): Promise<Uint8Array>;
+
+/** Generate a per-flow X25519 keypair for sealed-DEK transport. */
+export function generateTransportKeypair(): Promise<{
+  privateKey: CryptoKey;
+  pubkeyB64u: string;
+}>;
+
+/** HPKE-unseal a DEK the broker returned. */
+export function unsealDek(args: {
+  sealedDekB64u: string;
+  privateKey: CryptoKey;
+  workbookId: string;
+  viewId: string;
+  policyHash: string;
+}): Promise<Uint8Array>;

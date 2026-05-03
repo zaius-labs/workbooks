@@ -20,6 +20,9 @@
 // node-only deps.
 
 import * as ageEncryption from "age-encryption";
+import { CipherSuite, HkdfSha256 } from "@hpke/core";
+import { DhkemX25519HkdfSha256 } from "@hpke/dhkem-x25519";
+import { Chacha20Poly1305 } from "@hpke/chacha20poly1305";
 
 // ── Envelope detection ──────────────────────────────────────────────
 
@@ -134,6 +137,69 @@ export async function decryptStudioV1({ envelope, viewId, dek }) {
     sealed,
   );
   return new Uint8Array(cleartext);
+}
+
+// ── HPKE transport for studio-v1 ────────────────────────────────────
+//
+// Broker → recipient hop encrypts each released DEK to a recipient-
+// supplied X25519 transport pubkey using HPKE base mode (RFC 9180,
+// suite DHKEM(X25519,HKDF-SHA256) + HKDF-SHA256 + ChaCha20Poly1305).
+// Same suite the broker uses (apps/workbooks-broker/src/lib/sealed.ts);
+// changing this string is a hard format break.
+
+const HPKE_INFO = new TextEncoder().encode("studio-v1/dek-transport");
+
+function hpkeSuite() {
+  return new CipherSuite({
+    kem: new DhkemX25519HkdfSha256(),
+    kdf: new HkdfSha256(),
+    aead: new Chacha20Poly1305(),
+  });
+}
+
+/** Generate an X25519 keypair for one /key call. The private key
+ *  never leaves the recipient's tab; the public key goes to the
+ *  broker on the request body. Returns objects ready for hand-off:
+ *  pubkeyB64u for the network, privateKey (a CryptoKey) for unsealing. */
+export async function generateTransportKeypair() {
+  const suite = hpkeSuite();
+  const kp = await suite.kem.generateKeyPair();
+  const pubBytes = new Uint8Array(await suite.kem.serializePublicKey(kp.publicKey));
+  const pubkeyB64u = bytesToB64u(pubBytes);
+  return { privateKey: kp.privateKey, pubkeyB64u };
+}
+
+/** Open one sealed_dek the broker returned. Inputs:
+ *    sealedDekB64u — base64url(enc || ciphertext) from the broker
+ *    privateKey    — CryptoKey from generateTransportKeypair()
+ *    workbookId / viewId / policyHash — AAD binding (must match the
+ *                                       broker's seal-time AAD or
+ *                                       AES-GCM rejects)
+ *  Returns the raw 32-byte DEK as a Uint8Array. Caller passes that
+ *  to decryptStudioV1.
+ */
+export async function unsealDek(args) {
+  const { sealedDekB64u, privateKey, workbookId, viewId, policyHash } = args;
+  const all = b64uToBytes(sealedDekB64u);
+  const enc = all.slice(0, 32);
+  const ct = all.slice(32);
+  const suite = hpkeSuite();
+  const recipient = await suite.createRecipientContext({
+    recipientKey: privateKey,
+    enc: enc.buffer,
+    info: HPKE_INFO,
+  });
+  const ad = new TextEncoder().encode(
+    `studio-v1|${workbookId}|${viewId}|${policyHash}`,
+  );
+  const dekBuf = await recipient.open(ct.buffer, ad);
+  return new Uint8Array(dekBuf);
+}
+
+function bytesToB64u(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 // ── age-v1 ──────────────────────────────────────────────────────────
