@@ -65,6 +65,7 @@ mod default_handler;
 mod edit_log;
 mod envelope;
 mod ledger;
+mod lease_cache;
 mod local_auth;
 mod permissions;
 mod xattr_openwith;
@@ -1128,6 +1129,70 @@ async fn open_handler(
     (StatusCode::OK, axum::Json(OpenResp { token, url })).into_response()
 }
 
+/// Quick synchronous broker reachability probe — used by the C1.9
+/// lease cache to decide whether a within-grace cached lease should
+/// serve. Three-second timeout via reqwest's blocking-via-runtime
+/// trick: we're already inside an async fn but std::process::id()
+/// patterns and the synchronous keyring API mean a sync probe is
+/// simplest. Returns true on any 2xx/3xx, false on every error.
+fn broker_health_probe_sync(broker_url: &str) -> bool {
+    let url = format!("{}/v1/health", broker_url.trim_end_matches('/'));
+    // Build a one-shot tokio runtime for the probe — 100ms cost is
+    // dwarfed by the network roundtrip and avoids blocking the
+    // outer async context's reactor.
+    let rt = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    rt.block_on(async {
+        let client = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        client
+            .get(&url)
+            .send()
+            .await
+            .map(|r| r.status().is_success() || r.status().is_redirection())
+            .unwrap_or(false)
+    })
+}
+
+/// Touch ID gate before a cached-lease open (C9.5 + C1.9). On
+/// macOS: LocalAuthentication framework prompt with the workbook
+/// name as the reason. Returns Err(human-readable) when denied or
+/// cancelled — that string bubbles to the CLI / Studio shell.
+///
+/// On Linux + Windows the local_auth module returns Unsupported;
+/// we fail-open in that case and just log. The threat model row
+/// 15 fix is macOS-only this iteration; non-mac fixes are a
+/// follow-up (polkit on Linux, Win Hello on Windows).
+fn local_auth_gate_or_fail(workbook_id: &str) -> Result<(), String> {
+    let reason = format!("Open sealed workbook {}", workbook_id);
+    match local_auth::prompt(&reason) {
+        Ok(local_auth::LocalAuthOutcome::Authorized) => Ok(()),
+        Ok(local_auth::LocalAuthOutcome::Cancelled) => {
+            Err("local auth cancelled — sealed open denied".to_string())
+        }
+        Ok(local_auth::LocalAuthOutcome::Unsupported) => {
+            // Non-mac: fall through. Logged so an operator sees the
+            // decision in tail logs. THREAT_MODEL row 15 is macOS-only
+            // this iteration.
+            eprintln!(
+                "[workbooksd] local auth unsupported on this platform — cached lease served without prompt"
+            );
+            Ok(())
+        }
+        Err(e) => Err(format!("local auth error: {e:?}")),
+    }
+}
+
 /// C1.8 sealed-workbook open path: parse the envelope, drive the
 /// broker auth flow, decrypt the cleartext into memory, register a
 /// session bound to the cleartext (NOT to the file path's contents).
@@ -1159,16 +1224,71 @@ async fn open_sealed(
 
     audit_log(&path, "broker-auth-begin", None, None);
 
-    let auth = broker_client::run_flow(
-        &broker_url,
+    // C1.9 — try the cached lease first. Fresh hit → skip the broker
+    // round-trip entirely. Grace hit → broker is unreachable but the
+    // cached lease is within its offline grace window; serve from
+    // cache and surface "offline" to the UI. Stale → fall through to
+    // a full broker auth flow, then cache the result.
+    //
+    // Touch ID gate (C9.5) wraps every cached-hit serve. A stolen
+    // unlocked laptop can't open content the broker hasn't actively
+    // re-released without the user authenticating locally first.
+    let cache_outcome = lease_cache::lookup(
         &env.workbook_id,
         &env.policy_hash,
-        |url| {
-            spawn_browser(url);
+        || {
+            // Synchronous quick health probe. Three-second timeout so a
+            // dead broker doesn't hang the open. We're already in the
+            // expired-window branch; another second to confirm
+            // reachability is acceptable UX-wise.
+            broker_health_probe_sync(&broker_url)
         },
-    )
-    .await
-    .map_err(|e| format!("broker auth: {e}"))?;
+        lease_cache::DEFAULT_OFFLINE_GRACE_SECONDS,
+    );
+
+    let (auth, opened_via): (broker_client::AuthSuccess, &'static str) = match cache_outcome
+    {
+        lease_cache::CacheOutcome::Fresh(auth) => {
+            local_auth_gate_or_fail(&env.workbook_id)?;
+            audit_log(&path, "lease-cache-fresh", Some(&auth.sub), Some(&auth.email));
+            (auth, "cache-fresh")
+        }
+        lease_cache::CacheOutcome::Grace(auth) => {
+            local_auth_gate_or_fail(&env.workbook_id)?;
+            audit_log(
+                &path,
+                "lease-cache-grace-offline",
+                Some(&auth.sub),
+                Some(&auth.email),
+            );
+            eprintln!(
+                "[workbooksd] OFFLINE — serving from cached lease for {} (broker unreachable, within grace window)",
+                env.workbook_id,
+            );
+            (auth, "cache-grace")
+        }
+        lease_cache::CacheOutcome::Stale => {
+            let fresh = broker_client::run_flow(
+                &broker_url,
+                &env.workbook_id,
+                &env.policy_hash,
+                |url| {
+                    spawn_browser(url);
+                },
+            )
+            .await
+            .map_err(|e| format!("broker auth: {e}"))?;
+            // Persist the fresh lease for the next open. Failure to
+            // cache is non-fatal — the workbook is already serveable.
+            if let Err(e) = lease_cache::save(&env.workbook_id, &env.policy_hash, &fresh) {
+                eprintln!(
+                    "[workbooksd] lease cache save failed (non-fatal): {e}"
+                );
+            }
+            (fresh, "broker-fresh")
+        }
+    };
+    eprintln!("[workbooksd] open path: {opened_via}");
 
     // C2: iterate the unlocked view set. Broker returns one DEK per
     // view the recipient's policy allows. Decrypt each into its own
