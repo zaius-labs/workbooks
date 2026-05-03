@@ -46,6 +46,149 @@ export interface InstallPromptOpts {
   reason?: string;
   /** Per-tab dismiss key. Toast only. Defaults to a per-variant key. */
   dismissKey?: string;
+  /**
+   * Feature key for catalog lookup. If provided AND no explicit
+   * title/reason given, the default copy comes from FEATURE_CATALOG.
+   * Also fires telemetry (CustomEvent `wb:installPromptShown`) so
+   * authors can pixel-track conversions to the lander. Authors
+   * customize per-feature copy via `registerFeature()`.
+   */
+  feature?: string;
+}
+
+// ── feature catalog ──────────────────────────────────────────────
+//
+// Map of daemon-only feature keys to default install-prompt copy.
+// Authors override at runtime via `registerFeature("agents", { title, reason })`
+// or declaratively in workbook.config.mjs (CLI bakes into a
+// `<script id="wb-install-prompts">` JSON block; phase 3).
+
+export interface FeatureCopy {
+  title: string;
+  reason: string;
+}
+
+const FEATURE_CATALOG: Record<string, FeatureCopy> = {
+  // Generic catch-all when caller didn't specify a feature.
+  daemon: {
+    title: "Connect to Workbooks",
+    reason:
+      "Install Workbooks (free) to enable this part of the workbook. Saves edits in place, brokers API keys via your OS keychain, and lets you wire up local agent CLIs.",
+  },
+  agents: {
+    title: "Run external coding agents",
+    reason:
+      "Wire Claude Code or Codex CLI into this workbook. Workbooks orchestrates the session; your CLI's existing login authenticates — no API keys leave your machine.",
+  },
+  autosave: {
+    title: "Save changes back to this file",
+    reason:
+      "Edit and save this workbook in place. Workbooks writes new bytes back to the file atomically so your in-progress work is in the file you keep.",
+  },
+  secrets: {
+    title: "Connect API keys safely",
+    reason:
+      "Store API keys in your OS keychain — never in the file you share. Workbooks brokers each call so the value never enters the page's JavaScript.",
+  },
+  network: {
+    title: "Call external services on your behalf",
+    reason:
+      "Make outbound HTTPS calls to your configured services. Workbooks enforces a per-secret host allowlist so a malicious skill can't redirect your key to a third-party domain.",
+  },
+  acp: {
+    title: "Sandboxed agent shell",
+    reason:
+      "Open a scratch directory tied to this workbook for an agent CLI to run shell commands and edit files. The daemon owns the filesystem boundary; the workbook only sees the diff.",
+  },
+};
+
+/** Override catalog copy for a feature key at runtime. Idempotent —
+ *  late callers (e.g. a config block parsed during page load) win
+ *  over earlier ones. Use this when you want to reframe the install
+ *  pitch in your workbook's language ("colorwave needs the daemon
+ *  to autosave your composition" vs. the generic Workbooks copy). */
+export function registerFeature(feature: string, copy: Partial<FeatureCopy>): void {
+  const prev = FEATURE_CATALOG[feature] ?? FEATURE_CATALOG.daemon;
+  FEATURE_CATALOG[feature] = { ...prev, ...copy };
+}
+
+/** Bulk-register features (e.g. from the workbook's config-baked
+ *  install-prompts JSON block). */
+export function registerFeatures(map: Record<string, Partial<FeatureCopy>>): void {
+  for (const [k, v] of Object.entries(map)) registerFeature(k, v);
+}
+
+// ── daemon binding detection ─────────────────────────────────────
+
+/** True iff this page was loaded via the workbooksd loopback session
+ *  URL (http://127.0.0.1:<port>/wb/<token>/). file://, plain web
+ *  origins, sandboxed iframes — all return false. */
+export function isDaemonBound(): boolean {
+  if (typeof location === "undefined") return false;
+  if (location.protocol !== "http:" && location.protocol !== "https:") return false;
+  if (location.hostname !== "127.0.0.1") return false;
+  return /^\/wb\/[0-9a-f]{32}\/?/.test(location.pathname);
+}
+
+// ── feature gate ─────────────────────────────────────────────────
+
+export interface GateOpts extends InstallPromptOpts {
+  /**
+   * Where to mount the install wall when the daemon isn't bound.
+   * Pass the DOM node that owns the gated feature's UI region; the
+   * wall replaces its empty state. If omitted, gate() emits
+   * telemetry only and returns false — the caller surfaces its own
+   * "install required" UI.
+   */
+  mountTo?: HTMLElement;
+}
+
+/** Gate a daemon-only feature. Returns true if the daemon is
+ *  connected (caller proceeds normally). Returns false if it isn't,
+ *  AND mounts the install wall at `opts.mountTo` (inline by default;
+ *  pass `variant: "hero"` for a full-bleed takeover or `"toast"` for
+ *  a non-blocking corner card).
+ *
+ *  Pattern:
+ *    const ok = wb.installPrompt.gate("agents", { mountTo: panel });
+ *    if (!ok) return;          // wall is up; user can install + reload
+ *    await wb.acp.startSession(...);
+ *
+ *  No "continue without" affordance — by design. If the feature
+ *  needs the daemon, the only ways forward are (a) install Workbooks
+ *  or (b) close the workbook. Toasts (variant: "toast") do allow
+ *  a per-tab dismiss via the X. */
+export function gate(feature: string, opts: GateOpts = {}): boolean {
+  if (isDaemonBound()) return true;
+  if (opts.mountTo) {
+    mountInstallPrompt(opts.mountTo, { ...opts, feature });
+  } else {
+    // Headless guard — emit telemetry, caller renders its own UI.
+    emitTelemetry(feature, opts.variant ?? "card");
+  }
+  return false;
+}
+
+// ── telemetry ────────────────────────────────────────────────────
+//
+// Every install prompt mount fires a `wb:installPromptShown`
+// CustomEvent on window. Authors / hosts can listen to track
+// conversion (e.g. workbooks-edge could pixel-track the lander
+// click-through). `detail` carries:
+//   { feature: string, variant: InstallVariant, ts: number }
+// — feature is "daemon" when the mount didn't carry a feature key.
+
+function emitTelemetry(feature: string, variant: InstallVariant): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(
+      new CustomEvent("wb:installPromptShown", {
+        detail: { feature, variant, ts: Date.now() },
+      }),
+    );
+  } catch {
+    // CustomEvent unavailable (very old browser) — silent skip.
+  }
 }
 
 /** Mount the prompt into `parent`. Returns a cleanup function that
@@ -84,6 +227,7 @@ export function mountInstallPrompt(
       requestAnimationFrame(() => el.classList.add("wb-ip-show")),
     );
   }
+  emitTelemetry(opts.feature ?? "daemon", variant);
   return () => el.remove();
 }
 
@@ -206,14 +350,20 @@ function build(
   return buildCard(target, opts);
 }
 
-function defaultTitle(target: InstallTarget) {
+function defaultTitle(target: InstallTarget, feature?: string) {
+  if (feature && FEATURE_CATALOG[feature]) {
+    return FEATURE_CATALOG[feature].title;
+  }
   return target.os === "windows"
     ? "Workbooks daemon (Windows soon)"
     : `Install Workbooks for ${target.label}`;
 }
 
-function defaultReason() {
-  return "Connects this workbook to your local agents and saves your work back into the file.";
+function defaultReason(feature?: string) {
+  if (feature && FEATURE_CATALOG[feature]) {
+    return FEATURE_CATALOG[feature].reason;
+  }
+  return FEATURE_CATALOG.daemon.reason;
 }
 
 function buildToast(target: InstallTarget, opts: InstallPromptOpts): HTMLElement {
@@ -231,8 +381,8 @@ function buildToast(target: InstallTarget, opts: InstallPromptOpts): HTMLElement
   root.innerHTML = `
     <div class="wb-ip-os">${target.iconSvg}</div>
     <div class="wb-ip-text">
-      <div class="wb-ip-title">${escapeHtml(opts.title ?? defaultTitle(target))}</div>
-      <div class="wb-ip-sub">${escapeHtml(opts.reason ?? defaultReason())}</div>
+      <div class="wb-ip-title">${escapeHtml(opts.title ?? defaultTitle(target, opts.feature))}</div>
+      <div class="wb-ip-sub">${escapeHtml(opts.reason ?? defaultReason(opts.feature))}</div>
       ${primaryActionHtml(target, "wb-ip-cta-sm")}
     </div>
     <button class="wb-ip-close" aria-label="Dismiss">×</button>
@@ -257,7 +407,7 @@ function buildCard(target: InstallTarget, opts: InstallPromptOpts): HTMLElement 
       <div class="wb-ip-logo">${WB_LOGO}</div>
       <div class="wb-ip-row-text">
         <div class="wb-ip-title">${escapeHtml(opts.title ?? "Install Workbooks to continue")}</div>
-        <div class="wb-ip-sub">${escapeHtml(opts.reason ?? defaultReason())}</div>
+        <div class="wb-ip-sub">${escapeHtml(opts.reason ?? defaultReason(opts.feature))}</div>
       </div>
     </div>
     <div class="wb-ip-actions">
@@ -274,7 +424,7 @@ function buildHero(target: InstallTarget, opts: InstallPromptOpts): HTMLElement 
   root.innerHTML = `
     <div class="wb-ip-logo wb-ip-logo-lg">${WB_LOGO}</div>
     <div class="wb-ip-title wb-ip-title-lg">${escapeHtml(opts.title ?? "Install Workbooks")}</div>
-    <div class="wb-ip-sub wb-ip-sub-lg">${escapeHtml(opts.reason ?? defaultReason())}</div>
+    <div class="wb-ip-sub wb-ip-sub-lg">${escapeHtml(opts.reason ?? defaultReason(opts.feature))}</div>
     <div class="wb-ip-actions wb-ip-actions-lg">
       ${primaryActionHtml(target, "wb-ip-cta wb-ip-cta-lg")}
     </div>

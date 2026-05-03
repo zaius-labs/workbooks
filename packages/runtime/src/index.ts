@@ -394,3 +394,33 @@ export type {
   UrlParamValue,
   UrlBinding,
 } from "./urlParamBinding";
+
+// install-prompt — daemon-feature gating + install wall.
+//
+// Authors call `gate("agents", { mountTo: panel })` to check whether
+// the daemon is connected before invoking a daemon-only feature.
+// When it isn't, the install wall mounts inline at `mountTo` (or in
+// the corner if variant: "toast"), and the function returns false.
+// When it is, returns true; caller proceeds.
+//
+// `registerFeature(key, copy)` lets authors override the default
+// catalog copy per feature ("agents" / "autosave" / "secrets" /
+// "network" / "acp" / "daemon" — the catch-all). Telemetry: every
+// install prompt mount fires a `wb:installPromptShown` CustomEvent
+// on window so authors / hosts can pixel-track conversions.
+export {
+  mountInstallPrompt,
+  detectInstallTarget,
+  isDaemonBound,
+  gate as gateFeature,
+  registerFeature,
+  registerFeatures,
+} from "./install-prompt";
+export type {
+  InstallOS,
+  InstallVariant,
+  InstallTarget,
+  InstallPromptOpts,
+  GateOpts,
+  FeatureCopy,
+} from "./install-prompt";
