@@ -5,7 +5,7 @@ Svelte 5 sign-in components + design tokens for the Workbooks Studio identity br
 The package is the visual source-of-truth for every Workbooks-branded surface that asks the user to authenticate:
 
 - **broker `/sign-in` route** (C7.4) — the page the broker redirects to from `/v1/auth/start`
-- **pre-auth shell** inside sealed `.workbook.html` files (C8) — visual continuity across the redirect
+- **pre-auth shell** inside sealed `.html` workbook files (C8) — visual continuity across the redirect
 - **admin webapp** at `admin.workbooks.sh` (C5) — same tokens, same components
 
 ## v0.1.0 — tokens + logo only

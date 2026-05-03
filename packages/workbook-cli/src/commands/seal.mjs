@@ -40,7 +40,7 @@ export async function runSeal(opts) {
   const policyPath = opts.policy;
   const title = opts.title ?? "Sealed workbook";
 
-  if (!inPath) throw new Error("missing --in <path-to-workbook.html>");
+  if (!inPath) throw new Error("missing --in <path-to-workbook>.html");
   if (!outPath) throw new Error("missing --out <path>");
   if (!broker) throw new Error("missing --broker <https://broker.url>");
   if (!policyPath) throw new Error("missing --policy <policy.json>");
