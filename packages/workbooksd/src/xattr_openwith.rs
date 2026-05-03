@@ -52,6 +52,18 @@ pub const WORKBOOKS_APP_PATH: &str = "/Applications/Workbooks.app";
 
 const XATTR_NAME: &str = "com.apple.LaunchServices.OpenWith";
 
+/// Apple's "this file came from the internet" flag. Browsers stamp
+/// it on every download; Gatekeeper then blocks double-click open
+/// until the user hand-approves OR the handling app is notarized.
+/// Workbooks isn't notarized today, so a quarantined .html that
+/// also has our OpenWith xattr still hits a "Apple could not verify"
+/// dialog. We strip quarantine ourselves AFTER the content sniff
+/// has already classified the file as a workbook — that sniff IS
+/// our trust assertion ("we know what shape this is"), and every
+/// workbook then runs in a sandboxed iframe per the security model
+/// regardless of where it came from.
+const QUARANTINE_XATTR: &str = "com.apple.quarantine";
+
 /// Stamp `path` so LaunchServices opens it via Workbooks regardless
 /// of the user's default browser. Returns `Ok(())` on success, an
 /// error string on failure. Best-effort callers should swallow the
@@ -112,8 +124,36 @@ pub fn stamp(path: &Path) -> Result<(), String> {
             std::io::Error::last_os_error()
         ));
     }
+
+    // Best-effort quarantine strip. If it fails (file already
+    // unquarantined, FS doesn't support xattrs, etc.) we don't
+    // surface the error — stamping itself succeeded and that's
+    // the contract of this function.
+    let _ = clear_quarantine(path);
     Ok(())
 }
+
+/// Remove `com.apple.quarantine` from `path`. Returns `Ok(())` when
+/// the xattr was either removed or wasn't present to begin with.
+/// Errors only on real I/O failures.
+#[cfg(target_os = "macos")]
+pub fn clear_quarantine(path: &Path) -> Result<(), String> {
+    use std::os::unix::ffi::OsStrExt;
+    let cpath = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|e| format!("path cstring: {e}"))?;
+    let cname = std::ffi::CString::new(QUARANTINE_XATTR).expect("static name is C-safe");
+    // SAFETY: removexattr is POSIX-style and thread-safe.
+    let rc = unsafe { libc::removexattr(cpath.as_ptr(), cname.as_ptr(), 0) };
+    if rc == 0 { return Ok(()); }
+    let err = std::io::Error::last_os_error();
+    // ENOATTR (93 on macOS) means the xattr wasn't there — that's a
+    // success case for our purposes (idempotent dequarantine).
+    if err.raw_os_error() == Some(93) { return Ok(()); }
+    Err(format!("removexattr {}: {err}", path.display()))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn clear_quarantine(_path: &std::path::Path) -> Result<(), String> { Ok(()) }
 
 /// Non-macOS no-op. Lets the call sites compile cross-platform without
 /// `cfg` gates everywhere; xattrs in the macOS-LaunchServices sense
