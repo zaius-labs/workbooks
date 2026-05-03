@@ -4,21 +4,25 @@
 #   /Applications/Workbooks.app   (Tauri Manager UI, opened on demand)
 #   /usr/local/bin/workbooksd     (the daemon binary, supervised below)
 #
-# Three responsibilities:
+# Four responsibilities:
 #
 #   1. Bootstrap the user-scoped LaunchAgent so the daemon runs at
 #      login + restarts on crash. The user never has to open
-#      Workbooks.app for the daemon to start; it's there waiting
-#      whenever a browser-served workbook needs autosave or any
-#      .workbook.html is double-clicked from Finder.
+#      Workbooks.app for the daemon to start.
 #
-#   2. Wipe stale runtime.json from any previous (possibly
-#      crashed) daemon so the freshly-bootstrapped one writes its
-#      own port without stomping on another reader.
+#   2. Wipe stale runtime.json from any previous (possibly crashed)
+#      daemon so the freshly-bootstrapped one writes its own port
+#      cleanly.
 #
-#   3. Refresh Launch Services so /Applications/Workbooks.app's
-#      sh.workbooks.workbook UTI + public.html Alternate-rank
-#      registrations land without requiring a logout.
+#   3. Refresh Launch Services so /Applications/Workbooks.app's UTI
+#      declarations land without a logout.
+#
+#   4. Set Workbooks as the default handler for sh.workbooks.workbook
+#      so DOUBLE-clicking a .workbook.html (not just right-click)
+#      routes to Workbooks. Without this, macOS only goes to a
+#      UTI-specific app when the user has explicitly set the per-UTI
+#      default; otherwise it falls back to the broader public.html
+#      handler (Safari).
 #
 # Idempotent — safe to re-run on upgrade.
 
@@ -36,14 +40,12 @@ LOG_DIR="$CONSOLE_HOME/Library/Logs"
 LOG_FILE="$LOG_DIR/workbooksd.log"
 RUNTIME_DIR="$CONSOLE_HOME/Library/Application Support/sh.workbooks.workbooksd"
 
-# Create the LaunchAgent + log directories owned by the desktop
-# user (postinstall runs as root, but launchd permissions require
-# the plist + log dir be readable to the agent's UID).
+# 1. Create the LaunchAgent + log directories owned by the desktop
+# user (postinstall runs as root, but launchd needs the plist + log
+# dir owned by the agent's UID).
 sudo -u "$CONSOLE_USER" /bin/sh -c "mkdir -p '$PLIST_DIR' '$LOG_DIR'"
 
-# Write the plist owned by the user. KeepAlive=true means launchd
-# restarts the daemon if it crashes; RunAtLoad=true means it starts
-# immediately on bootstrap (and on every login thereafter).
+# Write the plist owned by the user.
 sudo -u "$CONSOLE_USER" /bin/sh -c "cat > '$PLIST'" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -63,19 +65,36 @@ sudo -u "$CONSOLE_USER" /bin/sh -c "cat > '$PLIST'" <<EOF
 </plist>
 EOF
 
-# Bootstrap (best-effort — bootout fails silently if not registered).
-# Wipe stale runtime.json BEFORE bootstrap so the new daemon's port
-# discovery write isn't racing with whatever the old one left.
+# 2. Wipe stale runtime.json BEFORE bootstrap so the new daemon's
+# port-discovery write doesn't race with whatever the old one left.
 rm -f "$RUNTIME_DIR/runtime.json" || true
-launchctl bootout "gui/$CONSOLE_UID/sh.workbooks.workbooksd" >/dev/null 2>&1 || true
+
+# Bootstrap (preinstall already booted out the old one).
 launchctl bootstrap "gui/$CONSOLE_UID" "$PLIST" >/dev/null 2>&1 || {
   echo "[postinstall] launchctl bootstrap failed; user may need to log out/in" >&2
 }
 
-# Launch Services refresh so /Applications/Workbooks.app's UTI
-# declarations (sh.workbooks.workbook + public.html alternate) are
-# picked up without a logout.
+# 3. Launch Services refresh so the bundle's CFBundleDocumentTypes
+# + UTExportedTypeDeclarations are registered immediately.
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
 [ -x "$LSREGISTER" ] && "$LSREGISTER" -f /Applications/Workbooks.app >/dev/null 2>&1 || true
+
+# 4. Set Workbooks as the user's default handler for sh.workbooks.workbook.
+# This writes ~/Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist
+# via cfprefsd (defaults command) so the change takes immediate effect.
+# We dedupe — if an entry for sh.workbooks.workbook already exists
+# (e.g. a re-install), don't append a duplicate.
+sudo -u "$CONSOLE_USER" /bin/sh <<INNER
+  if ! defaults read com.apple.LaunchServices/com.apple.launchservices.secure LSHandlers 2>/dev/null \\
+       | grep -q '"sh.workbooks.workbook"'; then
+    defaults write com.apple.LaunchServices/com.apple.launchservices.secure LSHandlers \\
+      -array-add '{ LSHandlerContentType = "sh.workbooks.workbook"; LSHandlerRoleEditor = "sh.workbooks.launcher"; LSHandlerPreferredVersions = { LSHandlerRoleEditor = "-"; }; }' \\
+      >/dev/null 2>&1 || true
+  fi
+INNER
+
+# Reload LaunchServices so the new default is picked up without a
+# logout. -kill -r -domain user re-scans the user's bundle DB.
+[ -x "$LSREGISTER" ] && "$LSREGISTER" -kill -r -domain user >/dev/null 2>&1 || true
 
 exit 0

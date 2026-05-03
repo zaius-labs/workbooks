@@ -229,8 +229,9 @@ chmod +x "$PAYLOAD_DIR/usr/local/bin/workbooksd"
 
 SCRIPTS_DIR="$STAGE_DIR/scripts"
 mkdir -p "$SCRIPTS_DIR"
+cp "$HERE/scripts/preinstall"  "$SCRIPTS_DIR/preinstall"
 cp "$HERE/scripts/postinstall" "$SCRIPTS_DIR/postinstall"
-chmod +x "$SCRIPTS_DIR/postinstall"
+chmod +x "$SCRIPTS_DIR/preinstall" "$SCRIPTS_DIR/postinstall"
 
 # ── 9. Build the component .pkg ──────────────────────────────────
 
