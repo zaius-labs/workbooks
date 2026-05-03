@@ -1,25 +1,26 @@
 #!/bin/sh
-# Postinstall — runs as ROOT after the .pkg lays /Applications/Workbooks.app
-# down. Two responsibilities:
+# Postinstall — runs as ROOT after the .pkg lays down:
 #
-#   1. Migrate users away from the old dual-app layout
-#      (Workbooks.app shell-shim + /usr/local/bin/workbooksd
-#      LaunchAgent). Kill any running daemon, bootout the
-#      LaunchAgent, delete its plist + the bare binary.
+#   /Applications/Workbooks.app   (Tauri Manager UI, opened on demand)
+#   /usr/local/bin/workbooksd     (the daemon binary, supervised below)
 #
-#   2. Refresh Launch Services so /Applications/Workbooks.app's
-#      .workbook.html UTI + public.html Alternate-rank are picked
-#      up without requiring a logout.
+# Three responsibilities:
 #
-# The new Workbooks.app spawns its own embedded daemon on first
-# launch (detached via setsid so it survives Manager quit), so we
-# do NOT install a LaunchAgent here. That's the whole point of the
-# consolidation — one app, one binary path, no system-wide daemon
-# supervisor.
+#   1. Bootstrap the user-scoped LaunchAgent so the daemon runs at
+#      login + restarts on crash. The user never has to open
+#      Workbooks.app for the daemon to start; it's there waiting
+#      whenever a browser-served workbook needs autosave or any
+#      .workbook.html is double-clicked from Finder.
 #
-# Idempotent: safe to re-run on upgrade. Best-effort throughout —
-# we never fail an install because a legacy file we tried to clean
-# up wasn't there.
+#   2. Wipe stale runtime.json from any previous (possibly
+#      crashed) daemon so the freshly-bootstrapped one writes its
+#      own port without stomping on another reader.
+#
+#   3. Refresh Launch Services so /Applications/Workbooks.app's
+#      sh.workbooks.workbook UTI + public.html Alternate-rank
+#      registrations land without requiring a logout.
+#
+# Idempotent — safe to re-run on upgrade.
 
 set -e
 
@@ -28,39 +29,53 @@ CONSOLE_USER=$(id -un "$CONSOLE_UID" 2>/dev/null || echo root)
 CONSOLE_HOME=$(dscl . -read /Users/"$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
 [ -z "$CONSOLE_HOME" ] && CONSOLE_HOME="/Users/$CONSOLE_USER"
 
-LEGACY_BIN="/usr/local/bin/workbooksd"
-LEGACY_PLIST="$CONSOLE_HOME/Library/LaunchAgents/sh.workbooks.workbooksd.plist"
-
-# 1a. Stop the legacy LaunchAgent if present. bootout is the modern
-# way; failure usually means it wasn't loaded — fine.
-launchctl bootout "gui/$CONSOLE_UID/sh.workbooks.workbooksd" >/dev/null 2>&1 || true
-
-# 1b. Kill any straggler workbooksd process that wasn't owned by the
-# LaunchAgent (e.g. a previous embedded-sidecar run that detached).
-# pkill -f matches the full command line; tight enough that we won't
-# clobber unrelated processes.
-pkill -f /usr/local/bin/workbooksd >/dev/null 2>&1 || true
-
-# 1c. Drop the legacy plist + bare binary. Don't error if they're
-# already gone (clean-installs on fresh machines).
-rm -f "$LEGACY_PLIST" || true
-rm -f "$LEGACY_BIN" || true
-
-# 1d. Stale runtime.json from the legacy daemon would point the new
-# app at a dead port; strip it so the new app spawns fresh on first
-# launch. The ledger.json sibling stays put — that's the user's
-# workbook history, and it's compatible across versions.
+BIN="/usr/local/bin/workbooksd"
+PLIST_DIR="$CONSOLE_HOME/Library/LaunchAgents"
+PLIST="$PLIST_DIR/sh.workbooks.workbooksd.plist"
+LOG_DIR="$CONSOLE_HOME/Library/Logs"
+LOG_FILE="$LOG_DIR/workbooksd.log"
 RUNTIME_DIR="$CONSOLE_HOME/Library/Application Support/sh.workbooks.workbooksd"
-rm -f "$RUNTIME_DIR/runtime.json" || true
 
-# 2. Launch Services refresh. The .pkg overwrites
-# /Applications/Workbooks.app, but LaunchServices caches the prior
-# bundle's UTI declarations until something nudges it. -f forces
-# re-registration of the bundle's CFBundleDocumentTypes +
-# UTExportedTypeDeclarations.
+# Create the LaunchAgent + log directories owned by the desktop
+# user (postinstall runs as root, but launchd permissions require
+# the plist + log dir be readable to the agent's UID).
+sudo -u "$CONSOLE_USER" /bin/sh -c "mkdir -p '$PLIST_DIR' '$LOG_DIR'"
+
+# Write the plist owned by the user. KeepAlive=true means launchd
+# restarts the daemon if it crashes; RunAtLoad=true means it starts
+# immediately on bootstrap (and on every login thereafter).
+sudo -u "$CONSOLE_USER" /bin/sh -c "cat > '$PLIST'" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>sh.workbooks.workbooksd</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$BIN</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$LOG_FILE</string>
+  <key>StandardErrorPath</key><string>$LOG_FILE</string>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>
+EOF
+
+# Bootstrap (best-effort — bootout fails silently if not registered).
+# Wipe stale runtime.json BEFORE bootstrap so the new daemon's port
+# discovery write isn't racing with whatever the old one left.
+rm -f "$RUNTIME_DIR/runtime.json" || true
+launchctl bootout "gui/$CONSOLE_UID/sh.workbooks.workbooksd" >/dev/null 2>&1 || true
+launchctl bootstrap "gui/$CONSOLE_UID" "$PLIST" >/dev/null 2>&1 || {
+  echo "[postinstall] launchctl bootstrap failed; user may need to log out/in" >&2
+}
+
+# Launch Services refresh so /Applications/Workbooks.app's UTI
+# declarations (sh.workbooks.workbook + public.html alternate) are
+# picked up without a logout.
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
-if [ -x "$LSREGISTER" ]; then
-  "$LSREGISTER" -f /Applications/Workbooks.app >/dev/null 2>&1 || true
-fi
+[ -x "$LSREGISTER" ] && "$LSREGISTER" -f /Applications/Workbooks.app >/dev/null 2>&1 || true
 
 exit 0

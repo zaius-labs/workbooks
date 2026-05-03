@@ -169,20 +169,70 @@ if [ "$SKIP_NOTARIZE" = "0" ]; then
   xcrun stapler validate "$TAURI_APP"
 fi
 
-# ── 6. Stage payload tree (single entry: /Applications/Workbooks.app)
+# ── 6. Build + sign + notarize the standalone daemon binary ──────
+#
+# The .pkg ships TWO things that operate independently:
+#
+#   /usr/local/bin/workbooksd       universal daemon, supervised by
+#                                   a user-scoped LaunchAgent so it
+#                                   starts at login + restarts on
+#                                   crash. Browser-served workbooks
+#                                   keep autosaving without the user
+#                                   ever opening the Manager UI.
+#
+#   /Applications/Workbooks.app     Tauri Manager UI, opened on
+#                                   demand (Spotlight, Dock, file
+#                                   double-click). Detects the
+#                                   running LaunchAgent daemon via
+#                                   runtime.json and attaches; only
+#                                   spawns its bundled sidecar as a
+#                                   fallback if no daemon is up.
+#
+# Both signed/notarized; LaunchAgent is bootstrapped by postinstall.
+
+UNIVERSAL_BIN="$STAGE_DIR/workbooksd-universal"
+echo "[pkg] lipo'ing daemon into universal binary for /usr/local/bin..."
+lipo -create -output "$UNIVERSAL_BIN" \
+  "$RUNTIME_DIR/target/aarch64-apple-darwin/release/workbooksd" \
+  "$RUNTIME_DIR/target/x86_64-apple-darwin/release/workbooksd"
+
+if [ "$SKIP_SIGN" = "0" ]; then
+  echo "[pkg] codesigning universal daemon..."
+  codesign --sign "$APPLE_DEV_ID_NAME" \
+           --options runtime --timestamp --force "$UNIVERSAL_BIN"
+  codesign --verify --strict --verbose=2 "$UNIVERSAL_BIN"
+fi
+
+if [ "$SKIP_NOTARIZE" = "0" ]; then
+  echo "[pkg] notarizing universal daemon..."
+  bin_zip="/tmp/workbooksd-universal-$$.zip"
+  ditto -c -k --keepParent "$UNIVERSAL_BIN" "$bin_zip"
+  xcrun notarytool submit "$bin_zip" \
+    --key "$APPLE_NOTARY_KEY_PATH" \
+    --key-id "$APPLE_NOTARY_KEY_ID" \
+    --issuer "$APPLE_NOTARY_ISSUER" \
+    --wait
+  rm -f "$bin_zip"
+  # Bare Mach-O can't be stapled (stapler only does .app/.dmg/.pkg);
+  # Gatekeeper checks the notarization ticket online at first launch.
+fi
+
+# ── 7. Stage payload tree (Workbooks.app + /usr/local/bin/workbooksd) ──
 
 PAYLOAD_DIR="$STAGE_DIR/payload"
-mkdir -p "$PAYLOAD_DIR/Applications"
+mkdir -p "$PAYLOAD_DIR/Applications" "$PAYLOAD_DIR/usr/local/bin"
 ditto "$TAURI_APP" "$PAYLOAD_DIR/Applications/Workbooks.app"
+cp "$UNIVERSAL_BIN" "$PAYLOAD_DIR/usr/local/bin/workbooksd"
+chmod +x "$PAYLOAD_DIR/usr/local/bin/workbooksd"
 
-# ── 7. Postinstall scripts ───────────────────────────────────────
+# ── 8. Postinstall scripts ───────────────────────────────────────
 
 SCRIPTS_DIR="$STAGE_DIR/scripts"
 mkdir -p "$SCRIPTS_DIR"
 cp "$HERE/scripts/postinstall" "$SCRIPTS_DIR/postinstall"
 chmod +x "$SCRIPTS_DIR/postinstall"
 
-# ── 8. Build the component .pkg ──────────────────────────────────
+# ── 9. Build the component .pkg ──────────────────────────────────
 
 COMPONENT_PKG="$STAGE_DIR/component.pkg"
 echo "[pkg] running pkgbuild..."
