@@ -1887,32 +1887,114 @@ fn acquire_lockfile() -> Result<std::fs::File, String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    let mut f = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&path)
-        .map_err(|e| format!("open lockfile {}: {e}", path.display()))?;
 
-    let rc = unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-    if rc != 0 {
-        // Re-read to surface the existing pid if we can.
-        let mut existing = String::new();
-        let _ = f.read_to_string(&mut existing);
-        let pid = existing.trim();
+    // Two-pass acquire so launchd's respawn-on-crash actually works:
+    //
+    // Pass 1 — try flock. If it succeeds, we're golden.
+    // Pass 2 — if flock failed, the lock could be:
+    //   (a) genuinely held by another live workbooksd (good — bail)
+    //   (b) inherited by a now-dead child of a prior workbooksd
+    //       (bad — kernel keeps the lock alive on the inherited fd
+    //       even after the original daemon died, so the LaunchAgent's
+    //       respawn loop hits it forever and the daemon never recovers)
+    //   (c) PID file content points at a process that no longer exists
+    //       (bad — same scenario, just visible via the recorded PID)
+    //
+    // For (b) and (c) we walk through the on-disk PID, do a kill(0)
+    // existence check, and if the recorded owner is dead we delete the
+    // lockfile and retry. This breaks the stale-lock respawn loop that
+    // killed the "daemon is forever" guarantee in 0.3.x.
+    //
+    // FD_CLOEXEC also prevents future occurrences: any child we spawn
+    // (e.g. via `workbooksd open`'s self-respawn or the manager's
+    // sidecar lifecycle) won't inherit the lock fd, so killing the
+    // parent fully releases the lock.
+    fn try_open_and_lock(path: &Path) -> std::io::Result<(std::fs::File, i32)> {
+        let f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)?;
+        // FD_CLOEXEC — see comment above. SAFETY: fcntl with F_SETFD is
+        // a thread-safe POSIX call; we pass a valid fd we just opened.
+        unsafe {
+            let flags = libc::fcntl(f.as_raw_fd(), libc::F_GETFD);
+            if flags >= 0 {
+                libc::fcntl(f.as_raw_fd(), libc::F_SETFD, flags | libc::FD_CLOEXEC);
+            }
+        }
+        let rc = unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        Ok((f, rc))
+    }
+
+    let (mut f, rc) = try_open_and_lock(&path).map_err(|e| {
+        format!("open lockfile {}: {e}", path.display())
+    })?;
+
+    if rc == 0 {
+        f.set_len(0).ok();
+        f.seek(std::io::SeekFrom::Start(0)).ok();
+        let _ = writeln!(f, "{}", std::process::id());
+        f.flush().ok();
+        return Ok(f);
+    }
+
+    // flock failed — read recorded PID and check if alive.
+    let mut existing = String::new();
+    let _ = f.read_to_string(&mut existing);
+    let pid_str = existing.trim();
+    let recorded_pid: Option<i32> = pid_str.parse().ok();
+
+    let alive = match recorded_pid {
+        Some(p) if p > 0 => {
+            // kill(pid, 0) returns 0 if the process exists and we have
+            // permission to signal it. ESRCH = process gone (stale lock).
+            // Other errors (EPERM, etc.) we treat as alive — better to
+            // refuse than to corrupt a real running daemon's session.
+            let rc = unsafe { libc::kill(p, 0) };
+            if rc == 0 {
+                true
+            } else {
+                let err = std::io::Error::last_os_error();
+                err.raw_os_error() != Some(libc::ESRCH)
+            }
+        }
+        _ => false, // empty or malformed PID file → treat as stale
+    };
+
+    if alive {
         return Err(format!(
             "another workbooksd is already running (lock: {}, pid: {})",
             path.display(),
-            if pid.is_empty() { "?" } else { pid }
+            if pid_str.is_empty() { "?" } else { pid_str }
         ));
     }
 
-    f.set_len(0).ok();
-    f.seek(std::io::SeekFrom::Start(0)).ok();
-    let _ = writeln!(f, "{}", std::process::id());
-    f.flush().ok();
-    Ok(f)
+    // Stale lock — drop our (now redundant) handle, remove the file,
+    // and retry the open+flock once. If THIS attempt also fails to
+    // lock, something has raced us in to acquire it; treat as a real
+    // contender and bail.
+    drop(f);
+    let _ = std::fs::remove_file(&path);
+    eprintln!(
+        "[workbooksd] cleared stale lock (recorded pid {} no longer exists)",
+        if pid_str.is_empty() { "<empty>" } else { pid_str }
+    );
+    let (mut f2, rc2) = try_open_and_lock(&path).map_err(|e| {
+        format!("reopen lockfile {}: {e}", path.display())
+    })?;
+    if rc2 != 0 {
+        return Err(format!(
+            "lost race acquiring lock {} after clearing stale entry",
+            path.display()
+        ));
+    }
+    f2.set_len(0).ok();
+    f2.seek(std::io::SeekFrom::Start(0)).ok();
+    let _ = writeln!(f2, "{}", std::process::id());
+    f2.flush().ok();
+    Ok(f2)
 }
 
 // ── permissions ──────────────────────────────────────────────────
