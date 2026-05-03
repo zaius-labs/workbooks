@@ -113,6 +113,18 @@ fn store(f: &LedgerFile) -> Result<(), String> {
     Ok(())
 }
 
+/// True for paths under macOS's tmp roots — system tmp (`/tmp`,
+/// `/private/tmp`) and per-user tmp (`/var/folders/.../T/`,
+/// `/private/var/folders/.../T/`). Spotlight excludes these from
+/// indexing by default, and tests / one-shots write here, so any
+/// ledger entry pointing at one is noise.
+fn is_ephemeral_path(p: &str) -> bool {
+    p.starts_with("/tmp/")
+        || p.starts_with("/private/tmp/")
+        || p.starts_with("/var/folders/")
+        || p.starts_with("/private/var/folders/")
+}
+
 /// Extract workbook_id from a save body's `<script id="wb-meta">`
 /// JSON. Returns None for fresh-build workbooks that haven't been
 /// saved yet (no wb-meta) or malformed inputs.
@@ -250,23 +262,24 @@ pub fn list_summaries() -> Vec<WorkbookSummary> {
     let mut f = load();
 
     // Auto-prune: drop any workbook whose paths_seen all resolve to
-    // non-existent files. Test fixtures (every E2E test creates
-    // entries in /tmp/, those tmp dirs vanish after the test process
-    // exits) and one-shot temp workbooks leave the ledger littered
-    // otherwise — the manager UI fills with cards for dead files.
-    // We do this on the read path so the user never sees them, and
-    // also persist the pruned ledger so future reads are fast and
-    // cross-tool callers (the GET /ledger/<id> endpoint, the manager,
-    // etc.) all see consistent state.
+    // either non-existent files OR ephemeral system-tmp locations.
+    // Test fixtures and one-shot temp workbooks leave the ledger
+    // littered otherwise — the manager UI fills with cards for files
+    // the user doesn't care about (and which Spotlight can't surface
+    // anyway, since macOS excludes /private/tmp and /private/var/
+    // folders from its index, so the discover sweep won't even see
+    // them).
     //
-    // Done in-place to avoid a redundant clone of the whole map.
-    // We also prune saves[] within remaining entries — a workbook
-    // saved many times across paths can have entries pointing at
-    // gone-tmp paths even when at least one canonical path remains.
+    // Done in-place on the read path so the user never sees them,
+    // and persisted so cross-tool callers (the GET /ledger/<id>
+    // endpoint, the manager, etc.) all see consistent state.
     let before = f.by_id.len();
     f.by_id.retain(|_, h| {
-        h.paths_seen.retain(|p| std::path::Path::new(p).exists());
-        h.saves.retain(|s| std::path::Path::new(&s.file_path).exists());
+        h.paths_seen
+            .retain(|p| std::path::Path::new(p).exists() && !is_ephemeral_path(p));
+        h.saves.retain(|s| {
+            std::path::Path::new(&s.file_path).exists() && !is_ephemeral_path(&s.file_path)
+        });
         !h.paths_seen.is_empty()
     });
     if f.by_id.len() != before {
