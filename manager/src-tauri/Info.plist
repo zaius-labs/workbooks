@@ -23,9 +23,22 @@
       <array><string>sh.workbooks.workbook</string></array>
     </dict>
     <dict>
+      <!--
+        Claim public.html at LSHandlerRank=Owner so Workbooks can
+        be set as the system default for HTML. We don't OWN the UTI
+        (Apple does), but Owner-rank registration tells LaunchServices
+        we're a first-class candidate. The postinstall flips the
+        user's per-UTI default to us via the LSHandlers preference.
+        Workbooks.app then content-sniffs each opened file: workbook
+        markers → daemon, plain HTML → forwarded to the user's
+        previous default (captured at install time as "fallback
+        browser"). End result: workbook files route through the
+        daemon, every other .html keeps going to the browser the
+        user always preferred.
+      -->
       <key>CFBundleTypeName</key><string>HTML Document</string>
-      <key>CFBundleTypeRole</key><string>Viewer</string>
-      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSHandlerRank</key><string>Owner</string>
       <key>LSItemContentTypes</key>
       <array><string>public.html</string></array>
     </dict>

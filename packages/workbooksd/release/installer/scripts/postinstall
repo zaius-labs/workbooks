@@ -1,28 +1,34 @@
 #!/bin/sh
 # Postinstall — runs as ROOT after the .pkg lays down:
 #
-#   /Applications/Workbooks.app   (Tauri Manager UI, opened on demand)
-#   /usr/local/bin/workbooksd     (the daemon binary, supervised below)
+#   /Applications/Workbooks.app   (Tauri Manager UI + odoc handler)
+#   /usr/local/bin/workbooksd     (the daemon binary)
 #
-# Four responsibilities:
+# Five responsibilities:
 #
 #   1. Bootstrap the user-scoped LaunchAgent so the daemon runs at
-#      login + restarts on crash. The user never has to open
-#      Workbooks.app for the daemon to start.
+#      login + restarts on crash. The user never has to open the UI
+#      for the daemon to be available.
 #
-#   2. Wipe stale runtime.json from any previous (possibly crashed)
-#      daemon so the freshly-bootstrapped one writes its own port
-#      cleanly.
+#   2. Wipe stale runtime.json so the new daemon writes its port
+#      cleanly without racing a previous reader.
 #
 #   3. Refresh Launch Services so /Applications/Workbooks.app's UTI
 #      declarations land without a logout.
 #
-#   4. Set Workbooks as the default handler for sh.workbooks.workbook
-#      so DOUBLE-clicking a .workbook.html (not just right-click)
-#      routes to Workbooks. Without this, macOS only goes to a
-#      UTI-specific app when the user has explicitly set the per-UTI
-#      default; otherwise it falls back to the broader public.html
-#      handler (Safari).
+#   4. CAPTURE the user's existing default for public.html (i.e. the
+#      browser they actually use) into Application Support. Workbooks
+#      reads this at runtime and forwards plain-HTML opens to that
+#      browser. Done BEFORE we overwrite the default in step 5; if
+#      we already are the default (re-install), preserve whatever
+#      we captured the first time.
+#
+#   5. SET Workbooks as the user's default handler for public.html so
+#      every .html double-click routes through Workbooks first.
+#      Workbooks content-sniffs the file: workbook → daemon, plain
+#      HTML → the captured fallback browser. Net effect: workbook
+#      files open in the daemon, everything else keeps opening in
+#      the browser the user always used.
 #
 # Idempotent — safe to re-run on upgrade.
 
@@ -38,14 +44,13 @@ PLIST_DIR="$CONSOLE_HOME/Library/LaunchAgents"
 PLIST="$PLIST_DIR/sh.workbooks.workbooksd.plist"
 LOG_DIR="$CONSOLE_HOME/Library/Logs"
 LOG_FILE="$LOG_DIR/workbooksd.log"
-RUNTIME_DIR="$CONSOLE_HOME/Library/Application Support/sh.workbooks.workbooksd"
+APP_SUPPORT="$CONSOLE_HOME/Library/Application Support/sh.workbooks.workbooksd"
+RUNTIME_JSON="$APP_SUPPORT/runtime.json"
+FALLBACK_FILE="$APP_SUPPORT/fallback-browser.txt"
 
-# 1. Create the LaunchAgent + log directories owned by the desktop
-# user (postinstall runs as root, but launchd needs the plist + log
-# dir owned by the agent's UID).
-sudo -u "$CONSOLE_USER" /bin/sh -c "mkdir -p '$PLIST_DIR' '$LOG_DIR'"
+# 1. LaunchAgent setup.
+sudo -u "$CONSOLE_USER" /bin/sh -c "mkdir -p '$PLIST_DIR' '$LOG_DIR' '$APP_SUPPORT'"
 
-# Write the plist owned by the user.
 sudo -u "$CONSOLE_USER" /bin/sh -c "cat > '$PLIST'" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -65,36 +70,60 @@ sudo -u "$CONSOLE_USER" /bin/sh -c "cat > '$PLIST'" <<EOF
 </plist>
 EOF
 
-# 2. Wipe stale runtime.json BEFORE bootstrap so the new daemon's
-# port-discovery write doesn't race with whatever the old one left.
-rm -f "$RUNTIME_DIR/runtime.json" || true
+# 2. Wipe stale runtime.json.
+rm -f "$RUNTIME_JSON" || true
 
-# Bootstrap (preinstall already booted out the old one).
+# Bootstrap (preinstall booted out the old one).
 launchctl bootstrap "gui/$CONSOLE_UID" "$PLIST" >/dev/null 2>&1 || {
   echo "[postinstall] launchctl bootstrap failed; user may need to log out/in" >&2
 }
 
-# 3. Launch Services refresh so the bundle's CFBundleDocumentTypes
-# + UTExportedTypeDeclarations are registered immediately.
+# 3. Launch Services refresh for the bundle's UTI declarations.
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
 [ -x "$LSREGISTER" ] && "$LSREGISTER" -f /Applications/Workbooks.app >/dev/null 2>&1 || true
 
-# 4. Set Workbooks as the user's default handler for sh.workbooks.workbook.
-# This writes ~/Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist
-# via cfprefsd (defaults command) so the change takes immediate effect.
-# We dedupe — if an entry for sh.workbooks.workbook already exists
-# (e.g. a re-install), don't append a duplicate.
-sudo -u "$CONSOLE_USER" /bin/sh <<INNER
-  if ! defaults read com.apple.LaunchServices/com.apple.launchservices.secure LSHandlers 2>/dev/null \\
-       | grep -q '"sh.workbooks.workbook"'; then
-    defaults write com.apple.LaunchServices/com.apple.launchservices.secure LSHandlers \\
-      -array-add '{ LSHandlerContentType = "sh.workbooks.workbook"; LSHandlerRoleEditor = "sh.workbooks.launcher"; LSHandlerPreferredVersions = { LSHandlerRoleEditor = "-"; }; }' \\
-      >/dev/null 2>&1 || true
+# 4. Capture the user's CURRENT default for public.html into the
+# fallback-browser file — but only if we haven't captured it before
+# (so re-installs don't overwrite it with "ourselves").
+if [ ! -s "$FALLBACK_FILE" ]; then
+  CURRENT_DEFAULT=$(sudo -u "$CONSOLE_USER" /usr/bin/python3 - <<'PY' 2>/dev/null
+import subprocess
+try:
+    from CoreServices import LSCopyDefaultRoleHandlerForContentType, kLSRolesAll
+    bid = LSCopyDefaultRoleHandlerForContentType("public.html", kLSRolesAll)
+    if bid:
+        print(bid)
+except Exception:
+    pass
+PY
+)
+  # If pyobjc isn't installed (clean Mac), fall back to parsing
+  # `lsregister -dump` for the "all roles:" line under the
+  # public.html handler-pref entry.
+  if [ -z "$CURRENT_DEFAULT" ] && [ -x "$LSREGISTER" ]; then
+    CURRENT_DEFAULT=$(sudo -u "$CONSOLE_USER" "$LSREGISTER" -dump 2>/dev/null \
+      | awk '/^handlerpref id:.*public.html/{f=1; next} f && /all roles:/{print $3; exit}')
   fi
-INNER
+  # Filter out us — if Workbooks is somehow already the default
+  # (testing artifact, prior failed install), use Safari.
+  case "$CURRENT_DEFAULT" in
+    sh.workbooks.*|"") CURRENT_DEFAULT="com.apple.Safari" ;;
+  esac
+  sudo -u "$CONSOLE_USER" /bin/sh -c "printf '%s' '$CURRENT_DEFAULT' > '$FALLBACK_FILE'"
+  echo "[postinstall] captured fallback browser: $CURRENT_DEFAULT" >&2
+fi
 
-# Reload LaunchServices so the new default is picked up without a
-# logout. -kill -r -domain user re-scans the user's bundle DB.
+# 5. Setting Workbooks as the default handler for public.html
+# happens at FIRST LAUNCH of Workbooks.app, not here. macOS gates
+# default-handler changes behind a "Change All" confirmation
+# dialog, which can't appear from postinstall context (returns
+# permErr -54). Workbooks.app's setup hook calls
+# `workbooksd set-default-handler public.html sh.workbooks.launcher`
+# — running in a GUI session, the dialog appears and the user can
+# confirm.
+#
+# Reload LaunchServices DB so the bundle's UTI claims (registered
+# above by lsregister -f) are visible in Open-With menus right away.
 [ -x "$LSREGISTER" ] && "$LSREGISTER" -kill -r -domain user >/dev/null 2>&1 || true
 
 exit 0

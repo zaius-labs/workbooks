@@ -142,6 +142,59 @@ fn resolve_sidecar_path(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
     from_cwd.ok_or_else(|| "workbooksd sidecar not found in bundle or dev tree".to_string())
 }
 
+/// Bundle ID of the consolidated Workbooks app — kept in sync with
+/// tauri.conf.json's identifier. Used as the handler bundle ID when
+/// claiming the default for public.html.
+const WORKBOOKS_BUNDLE_ID: &str = "sh.workbooks.launcher";
+
+/// Marker file: presence means we already prompted the user (or set
+/// successfully) to make Workbooks the default for public.html.
+/// Lives next to runtime.json. Removed only by uninstall — re-install
+/// won't re-prompt.
+fn default_handler_marker() -> PathBuf {
+    let mut p: PathBuf = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    #[cfg(target_os = "macos")]
+    {
+        p.push("Library/Application Support/sh.workbooks.workbooksd");
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        p.push(".local/share/workbooksd");
+    }
+    p.push("default-handler-prompted");
+    p
+}
+
+/// Ask macOS to make Workbooks the default app for public.html. Must
+/// run in a GUI session — postinstall can't because macOS shows a
+/// "Change All" confirmation dialog the user has to click. We invoke
+/// the workbooksd subcommand we ship for exactly this purpose; it
+/// links CoreServices and calls LSSetDefaultRoleHandlerForContentType.
+///
+/// Idempotent via a marker file: only attempted on the very first
+/// launch after install. If the user dismisses the prompt, we don't
+/// nag — they can run "Set as default" from the manager UI later.
+#[cfg(target_os = "macos")]
+fn maybe_claim_default_handler(daemon_bin: &PathBuf) {
+    let marker = default_handler_marker();
+    if marker.exists() {
+        return;
+    }
+    let _ = std::process::Command::new(daemon_bin)
+        .args(["set-default-handler", "public.html", WORKBOOKS_BUNDLE_ID])
+        .spawn();
+    // Touch the marker regardless of whether the user accepts the
+    // prompt — repeated nags are worse than a missed default. Users
+    // who declined can change it back later via Finder Get Info, and
+    // we'll add a manager-UI control in a follow-up.
+    if let Some(parent) = marker.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&marker, "");
+}
+
 /// Wait up to `total` for runtime.json to appear AND respond healthy.
 /// Polled at 100 ms intervals — daemon startup is typically under
 /// 500 ms once the binary is on disk.
@@ -171,11 +224,75 @@ struct OpenResp {
     url: String,
 }
 
+/// True if `html` looks like a Workbook (has wb-meta or wb-permissions).
+/// Mirror of workbooksd's `looks_like_workbook` — duplicated here so
+/// the routing decision happens BEFORE the daemon HTTP round-trip
+/// (and works even if the daemon's down). We only sniff the head of
+/// the file (~16 KB) since the markers always live in <head>.
+fn looks_like_workbook(head: &str) -> bool {
+    head.contains(r#"<meta name="wb-permissions""#)
+        || head.contains(r#"<script id="wb-meta""#)
+        || head.contains(r#"<script type="application/json" id="wb-meta""#)
+}
+
+/// Read the user's "fallback browser" preference — the bundle ID of
+/// whatever app should handle plain (non-workbook) HTML. Captured at
+/// install time as the user's previous default for public.html. If
+/// unset, we hand off to Safari, which is always present on macOS.
+fn fallback_browser_bundle_id() -> String {
+    let mut p: PathBuf = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    p.push("Library/Application Support/sh.workbooks.workbooksd/fallback-browser.txt");
+    std::fs::read_to_string(&p)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "com.apple.Safari".to_string())
+}
+
+/// Hand a non-workbook HTML file off to the user's preferred browser.
+/// `open -b <bundle-id> <file>` launches that app with the file —
+/// equivalent to "Always Open With" without changing system defaults.
+fn open_in_fallback(path: &str) {
+    let bundle = fallback_browser_bundle_id();
+    let _ = std::process::Command::new("open")
+        .args(["-b", &bundle, path])
+        .spawn();
+}
+
 /// Forward a Finder open event to the daemon's /open and shell-open
 /// the resulting browser URL. Called from RunEvent::Opened on macOS.
+///
+/// Strategy:
+///   1. Sniff the file: if it doesn't carry a workbook marker, hand
+///      it straight to the user's fallback browser. Workbooks claims
+///      public.html as the system default so we route ALL .html
+///      opens; only those that ARE workbooks should land at the
+///      daemon.
+///   2. If it's a workbook, POST to /open and shell-open the result.
 fn route_file_open(path: &str) -> Result<(), String> {
+    use std::io::Read;
+
+    // Sniff first ~16 KB. Workbook markers always live in <head>;
+    // 16 KB is enough to clear typical inlined favicons/fonts that
+    // pad early <head> content.
+    let mut head_buf = vec![0u8; 16 * 1024];
+    let mut f = std::fs::File::open(path)
+        .map_err(|e| format!("read {path}: {e}"))?;
+    let n = f.read(&mut head_buf).unwrap_or(0);
+    head_buf.truncate(n);
+    let head = String::from_utf8_lossy(&head_buf);
+
+    if !looks_like_workbook(&head) {
+        eprintln!("[manager] non-workbook HTML, forwarding to fallback browser: {path}");
+        open_in_fallback(path);
+        return Ok(());
+    }
+
+    // Workbook: forward to daemon for token + URL.
     let port = discover_live_port()
-        .ok_or_else(|| "daemon not running — this should be impossible after setup".to_string())?;
+        .ok_or_else(|| "daemon not running".to_string())?;
     let url = format!("http://127.0.0.1:{port}/open");
     let body = serde_json::json!({ "path": path });
     let resp = ureq::post(&url)
@@ -186,11 +303,14 @@ fn route_file_open(path: &str) -> Result<(), String> {
         .into_json()
         .map_err(|e| format!("decode /open response: {e}"))?;
 
-    // Hand the wb/<token>/ URL to the user's default browser. Using
-    // `open` on macOS (and the cross-platform shell open elsewhere)
-    // means the workbook lands in whatever browser the user prefers
-    // — Manager itself doesn't render workbooks.
-    let _ = std::process::Command::new("open").arg(&parsed.url).spawn();
+    // Hand the wb/<token>/ URL to the user's default browser. We
+    // use the fallback bundle ID here too so the workbook lands in
+    // the SAME browser the user prefers for plain HTML — not in
+    // Workbooks itself (which has no rendering capability).
+    let bundle = fallback_browser_bundle_id();
+    let _ = std::process::Command::new("open")
+        .args(["-b", &bundle, &parsed.url])
+        .spawn();
     Ok(())
 }
 
@@ -204,18 +324,21 @@ pub fn run() {
             // a previous Manager run that detached its daemon, or the
             // legacy LaunchAgent-based install. Either way, we
             // attach rather than fight for the port.
+            let sidecar = resolve_sidecar_path(&app.handle())
+                .map_err(|e| format!("locate workbooksd sidecar: {e}"))?;
             if discover_live_port().is_none() {
-                let bin = resolve_sidecar_path(&app.handle())
-                    .map_err(|e| format!("locate workbooksd sidecar: {e}"))?;
-                spawn_daemon_detached(&bin)
+                spawn_daemon_detached(&sidecar)
                     .map_err(|e| format!("spawn workbooksd: {e}"))?;
-                // Block briefly so daemon_url returns successfully on
-                // the first frontend call. 3 s is generous — typical
-                // bind takes ~200 ms.
                 if wait_for_daemon(Duration::from_secs(3)).is_none() {
                     eprintln!("[manager] warning: daemon didn't respond within 3s");
                 }
             }
+            // First-launch only: ask macOS to make Workbooks the
+            // default for public.html. Triggers a system prompt the
+            // user must accept; we run it here (in a GUI session)
+            // because postinstall can't show that dialog.
+            #[cfg(target_os = "macos")]
+            maybe_claim_default_handler(&sidecar);
             Ok(())
         })
         .build(tauri::generate_context!())

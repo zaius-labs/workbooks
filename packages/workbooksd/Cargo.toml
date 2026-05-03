@@ -1,6 +1,6 @@
 [package]
 name = "workbooksd"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 description = "Background daemon that serves and saves .workbook.html files for the local browser"
 license = "MIT"
@@ -87,6 +87,15 @@ glob-match = "0.2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# macOS-only: CoreServices link for the `set-default-handler`
+# subcommand. We FFI to LSSetDefaultRoleHandlerForContentType so the
+# .pkg postinstall can flip a UTI's default handler without depending
+# on PyObjC (stripped from /usr/bin/python3 in macOS Sonoma+) or on
+# Xcode CLT (not present on clean Macs). core-foundation supplies
+# CFString. The link line lives in default_handler.rs.
+[target.'cfg(target_os = "macos")'.dependencies.core-foundation]
+version = "0.10"
 
 # C9.5 — local-credential gate before cached lease open.
 # macOS: LocalAuthentication framework via objc2 bindings. Touch ID /

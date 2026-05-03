@@ -59,6 +59,7 @@ use axum::{
 mod acp;
 mod broker_client;
 mod c2pa_sign;
+mod default_handler;
 mod edit_log;
 mod envelope;
 mod ledger;
@@ -570,6 +571,26 @@ fn main() {
                 std::process::exit(2);
             }
         },
+        Some("set-default-handler") => {
+            // workbooksd set-default-handler <UTI> <BUNDLE_ID>
+            // Used by the .pkg postinstall to make Workbooks the
+            // default for public.html. See default_handler.rs.
+            let uti = args.next();
+            let bid = args.next();
+            match (uti, bid) {
+                (Some(u), Some(b)) => {
+                    let rc = default_handler::set_default_handler(&u, &b);
+                    if rc != 0 {
+                        eprintln!("LSSetDefaultRoleHandlerForContentType returned {rc}");
+                        std::process::exit(1);
+                    }
+                }
+                _ => {
+                    eprintln!("usage: workbooksd set-default-handler <UTI> <BUNDLE_ID>");
+                    std::process::exit(2);
+                }
+            }
+        }
         Some(other) => {
             eprintln!("unknown subcommand: {other}");
             std::process::exit(2);
