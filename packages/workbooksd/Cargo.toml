@@ -1,6 +1,6 @@
 [package]
 name = "workbooksd"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 description = "Background daemon that serves and saves .html files for the local browser"
 license = "MIT"

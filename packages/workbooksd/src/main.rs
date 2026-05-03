@@ -2227,14 +2227,25 @@ async fn require_perm(state: &AppState, token: &str, id: &str) -> Result<PathBuf
 const KEYCHAIN_SERVICE: &str = "sh.workbooks.workbooksd";
 
 fn path_fingerprint(path: &Path) -> String {
-    // Lightweight hash — we don't need cryptographic strength here,
-    // just collision-resistance across paths a single user has.
-    // Using FxHash via std hasher (fnv-ish) is fine for that.
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut h = DefaultHasher::new();
-    path.hash(&mut h);
-    format!("{:016x}", h.finish())
+    // Must be deterministic across daemon restarts: the keychain
+    // account name is `<fingerprint>:<secret_id>`, so a fingerprint
+    // that drifts between runs orphans every stored secret on every
+    // LaunchAgent respawn. Earlier versions used DefaultHasher,
+    // which is seeded with per-process random keys (Rust's HashDoS
+    // mitigation) and so was NOT deterministic — every restart
+    // produced fresh hashes and silently abandoned the user's
+    // keychain entries.
+    //
+    // SHA-256 truncated to 16 hex chars matches the prior format
+    // width while being content-deterministic. We use sha2 already
+    // pulled in for the ledger; the truncation costs us collision
+    // resistance vs. the full digest, but for the ~thousands of
+    // paths a single user has it's negligible.
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(path.to_string_lossy().as_bytes());
+    let full = format!("{:x}", h.finalize());
+    full.chars().take(16).collect()
 }
 
 /// Path-keyed keychain account name. Used for back-compat reads

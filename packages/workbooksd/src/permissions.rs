@@ -112,16 +112,25 @@ pub fn parse_from_html(html: &str) -> Permissions {
 }
 
 /// Path-fingerprint the same way secrets do, so the approvals file
-/// is keyed consistently across the codebase. We re-import the
-/// helper from the secrets path via main.rs. To avoid coupling we
-/// duplicate the tiny std-hash here — it's intentionally
-/// non-cryptographic.
+/// Deterministic across daemon restarts — required so per-path
+/// approvals persist past LaunchAgent respawns, install upgrades,
+/// and reboots. Earlier versions used `std::collections::hash_map::DefaultHasher`,
+/// which is seeded with per-process random keys (Rust's HashDoS
+/// mitigation since 1.7). That meant every daemon restart produced
+/// a fresh hash for the same path, orphaning every approval the user
+/// had ever clicked. Result: the in-page Permissions modal popped up
+/// on every refresh because the lookup couldn't find their grants.
+///
+/// SHA-256 truncated to 16 hex chars matches the prior format width
+/// (so `granted` map keys keep their visual shape) while being
+/// content-deterministic. We use the `sha2` crate that's already
+/// pulled in for the ledger's content hashing — no new dep.
 fn path_fingerprint(path: &Path) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut h = DefaultHasher::new();
-    path.hash(&mut h);
-    format!("{:016x}", h.finish())
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(path.to_string_lossy().as_bytes());
+    let full = format!("{:x}", h.finalize());
+    full.chars().take(16).collect()
 }
 
 fn approvals_file() -> PathBuf {
