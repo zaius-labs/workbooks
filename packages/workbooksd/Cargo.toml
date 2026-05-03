@@ -1,6 +1,6 @@
 [package]
 name = "workbooksd"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "Background daemon that serves and saves .workbook.html files for the local browser"
 license = "MIT"
@@ -84,6 +84,14 @@ time = "0.3"
 # Wildcard host matching for the per-secret domain allowlist.
 # (e.g. "*.fal.run" matches "queue.fal.run".)
 glob-match = "0.2"
+# Binary-plist serialization for the macOS LaunchServices.OpenWith
+# extended attribute. We stamp this xattr on every workbook file the
+# daemon serves or writes — macOS Sequoia honours per-file OpenWith
+# overrides above the system default for public.html (which is
+# locked to whatever browser the user picked), so this is how we
+# claim .workbook.html opens for Workbooks WITHOUT requiring the
+# user to do Get Info → Change All. See xattr_openwith.rs.
+plist = "1"
 # Ed25519 signing for the C8.7 author-claim path. Same per-machine key
 # as c2pa_sign, surfaced via raw seed extraction from the rcgen-emitted
 # PKCS#8. Pure Rust, no OpenSSL. The recipient's pre-auth shell verifies

@@ -4,72 +4,32 @@
 <dict>
   <!--
     Custom Info.plist additions merged into Tauri's generated bundle.
-    Declares Workbooks.app as:
-      1. Editor for sh.workbooks.workbook UTI (the .workbook.html
-         tag-spec'd type), exported below.
-      2. Alternate Viewer for public.html so Finder's "Open With"
-         menu lists Workbooks for any .html file. Default-app status
-         stays with the system browser; the daemon's content sniff
-         (looks for wb-meta or wb-permissions) is the real gate.
-    Replaces the standalone Workbooks.app shell-script bundle that
-    the workbooksd .pkg used to install separately.
+    As of 0.3.1, the architecture stopped depending on a custom UTI:
+    workbook files are just plain .html, recognized by content
+    (`<meta name="wb-permissions">` / `<script id="wb-meta">`), and
+    routed via the per-file `com.apple.LaunchServices.OpenWith`
+    extended attribute (stamped by the daemon on every /open + /save).
+    The xattr overrides the system default for public.html on a
+    per-file basis, which Apple still allows in Sequoia even though
+    they've locked programmatic browser-default changes.
+
+    All Workbooks needs from Info.plist now is to be a registered
+    handler candidate for public.html, so that:
+      1. Finder's right-click "Open With" menu lists Workbooks for
+         any HTML file (the user-driven first-open path)
+      2. macOS will launch the bundle when LaunchServices reads our
+         OpenWith xattr on a workbook file (system finds the bundle
+         by identifier; the rank-based selection only matters when
+         no per-file xattr is set)
   -->
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
-      <key>CFBundleTypeName</key><string>Workbook</string>
-      <key>CFBundleTypeRole</key><string>Editor</string>
-      <key>LSItemContentTypes</key>
-      <array><string>sh.workbooks.workbook</string></array>
-    </dict>
-    <dict>
-      <!--
-        Keep public.html only at LSHandlerRank=Alternate. macOS
-        Ventura+ blocks programmatic claiming of public.html as
-        default (browser-class protection), so Owner-rank gives no
-        benefit and just clutters the OS's "Open With" menu in
-        unusual places. The real routing happens through the
-        sh.workbooks.workbook UTI below — IF macOS recognises the
-        .workbook.html compound extension.
-      -->
       <key>CFBundleTypeName</key><string>HTML Document</string>
       <key>CFBundleTypeRole</key><string>Viewer</string>
       <key>LSHandlerRank</key><string>Alternate</string>
       <key>LSItemContentTypes</key>
       <array><string>public.html</string></array>
-    </dict>
-  </array>
-  <key>UTExportedTypeDeclarations</key>
-  <array>
-    <dict>
-      <!--
-        The workbook file format. Conforms to BOTH public.html (so
-        it inherits HTML semantics — browsers can render it, our
-        web pipelines treat it like HTML) AND public.data (the
-        physical-file root Apple's UTI guidance requires for
-        on-disk file formats; without this, lsregister silently
-        downgrades the registration in macOS Sonoma+).
-        Tag spec lists workbook.html as the compound extension AND
-        workbook as a single-segment fallback — Sequoia's UTI
-        inference sometimes only matches the trailing dot-segment,
-        so the bare `workbook` ext is a backup for users who rename
-        their files to drop the .html suffix.
-      -->
-      <key>UTTypeIdentifier</key><string>sh.workbooks.workbook</string>
-      <key>UTTypeDescription</key><string>Workbook</string>
-      <key>UTTypeConformsTo</key>
-      <array>
-        <string>public.html</string>
-        <string>public.data</string>
-      </array>
-      <key>UTTypeTagSpecification</key>
-      <dict>
-        <key>public.filename-extension</key>
-        <array>
-          <string>workbook.html</string>
-          <string>workbook</string>
-        </array>
-      </dict>
     </dict>
   </array>
 </dict>

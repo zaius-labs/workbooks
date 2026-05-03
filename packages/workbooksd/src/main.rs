@@ -67,6 +67,7 @@ mod envelope;
 mod ledger;
 mod local_auth;
 mod permissions;
+mod xattr_openwith;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -573,6 +574,66 @@ fn main() {
                 std::process::exit(2);
             }
         },
+        Some("stamp") => {
+            // workbooksd stamp <path>
+            // Writes the com.apple.LaunchServices.OpenWith xattr so
+            // the file always opens via Workbooks. Used by the .pkg
+            // postinstall to bulk-stamp existing .workbook.html files
+            // in the user's common locations. Best-effort: missing
+            // file or write failure prints to stderr and exits non-zero,
+            // but the caller (postinstall) ignores it.
+            match args.next() {
+                Some(p) => match xattr_openwith::stamp(std::path::Path::new(&p)) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        eprintln!("workbooksd stamp: {e}");
+                        std::process::exit(1);
+                    }
+                },
+                None => {
+                    eprintln!("usage: workbooksd stamp <path>");
+                    std::process::exit(2);
+                }
+            }
+        }
+        Some("stamp-if-workbook") => {
+            // workbooksd stamp-if-workbook <path>
+            // Read the head of <path>, content-sniff for workbook
+            // markers (`<meta name="wb-permissions">` or
+            // `<script id="wb-meta">`), and stamp the OpenWith xattr
+            // if it matches. No-op (and exit 0) for non-workbook
+            // files — this is the safe primitive the postinstall
+            // uses to walk ~/Downloads/etc and route only the actual
+            // workbooks, leaving regular HTML files alone. Returns
+            // exit code 0 on hit, 0 on miss, 1 on read error.
+            match args.next() {
+                Some(p) => {
+                    let path = std::path::Path::new(&p);
+                    let mut buf = vec![0u8; 16 * 1024];
+                    let n = match std::fs::File::open(path)
+                        .and_then(|mut f| std::io::Read::read(&mut f, &mut buf))
+                    {
+                        Ok(n) => n,
+                        Err(e) => {
+                            eprintln!("workbooksd stamp-if-workbook: read {}: {e}", p);
+                            std::process::exit(1);
+                        }
+                    };
+                    let head = String::from_utf8_lossy(&buf[..n]);
+                    if looks_like_workbook(&head) {
+                        if let Err(e) = xattr_openwith::stamp(path) {
+                            eprintln!("workbooksd stamp-if-workbook: {e}");
+                            std::process::exit(1);
+                        }
+                        eprintln!("[workbooksd] stamped {p}");
+                    }
+                }
+                None => {
+                    eprintln!("usage: workbooksd stamp-if-workbook <path>");
+                    std::process::exit(2);
+                }
+            }
+        }
         Some("set-default-handler") => {
             // workbooksd set-default-handler <UTI> <BUNDLE_ID>
             // Used by the .pkg postinstall to make Workbooks the
@@ -1051,6 +1112,14 @@ async fn open_handler(
             .into_response();
     }
 
+    // macOS-only: stamp the file's OpenWith xattr so future double-clicks
+    // route to Workbooks automatically — bypasses Apple's lock on
+    // changing the public.html system default. Best-effort: write
+    // failure is logged but doesn't block the open. See xattr_openwith.rs.
+    if let Err(e) = xattr_openwith::stamp(&path) {
+        eprintln!("[workbooksd] OpenWith stamp on {} failed: {e}", path.display());
+    }
+
     let evicted = state.sessions.lock().await.insert(token.clone(), path);
     if let Some(old) = evicted {
         eprintln!("[workbooksd] sessions at cap; evicted oldest token {old}");
@@ -1369,6 +1438,15 @@ async fn save_workbook(
         agent,
     );
     audit_log(&path, "save", Some(&agent), None);
+
+    // Stamp the OpenWith xattr so this file routes back to Workbooks
+    // on its next double-click — even though atomic_write replaced the
+    // inode (rename-over-tempfile pattern). Without re-stamping after
+    // each write, the user's first save would erase the routing they
+    // got from the postinstall bulk-stamp or from /open. Best-effort.
+    if let Err(e) = xattr_openwith::stamp(&path) {
+        eprintln!("[workbooksd] OpenWith stamp on {} failed: {e}", path.display());
+    }
 
     // C2PA sidecar — opt-in via the `c2pa` permission. Runs AFTER
     // the atomic write so the sidecar's content_sha256 assertion
@@ -2792,24 +2870,27 @@ fn validate_workbook_path(raw: &str) -> Result<PathBuf, String> {
     // open. Brand-new files coming out of `wb build` get wb-meta
     // injected by the substrate plugin, so the content check is
     // the canonical truth.
-    // Accept either:
-    //   .html / .htm  — the legacy compound `foo.workbook.html` pattern,
-    //                   plus arbitrary HTML the user may want to open
-    //                   (the content sniff in open_handler is the real
-    //                   gate; this is just defense-in-depth so a stray
-    //                   request can't ask the daemon to serve /etc/passwd).
-    //   .workbook     — the single-segment extension that macOS Sequoia
-    //                   actually honors via UTI tag-spec (compound
-    //                   `.workbook.html` is silently broken in 15+).
-    //                   File contents are still HTML; the extension is
-    //                   purely a routing hint.
-    let lower = name.to_ascii_lowercase();
-    let ok = lower.ends_with(".html")
-        || lower.ends_with(".htm")
-        || lower.ends_with(".workbook");
-    if !ok {
-        return Err("not an html or .workbook file".into());
-    }
+    // We deliberately do NOT gate on file extension. As of 0.3.1
+    // workbooks are identified by content (`<meta name="wb-permissions">`
+    // or `<script id="wb-meta">`), not by name. The .workbook.html
+    // convention is being retired — files should just be `.html`,
+    // because:
+    //   - macOS Finder breaks the compound extension on duplicate
+    //     ("foo.workbook.html" → "foo.workbook (1).html")
+    //   - the per-file OpenWith xattr we stamp on /open and /save
+    //     is what actually routes; the extension is irrelevant
+    //   - dropping the convention removes a class of "looks weird in
+    //     Finder" / Get Info Kind bugs
+    //
+    // Defense-in-depth still happens: open_handler reads the file
+    // and rejects with 400 if no workbook marker is present, so a
+    // stray /open POST can't make the daemon serve arbitrary files
+    // — the content gate, not the name gate, is canonical.
+    //
+    // We do still require the path to point at an actual file (not
+    // a directory or symlink to /dev/null), via the canonicalize()
+    // call above plus the file_name() check.
+    let _ = name; // kept for the file_name() validation above
     Ok(abs)
 }
 

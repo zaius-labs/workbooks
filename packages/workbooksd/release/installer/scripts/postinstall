@@ -113,19 +113,30 @@ PY
   echo "[postinstall] captured fallback browser: $CURRENT_DEFAULT" >&2
 fi
 
-# 5. Make Workbooks the default for sh.workbooks.workbook UTI
-# (our OWNED UTI — works without browser-default protection
-# kicking in). This way `.workbook` files (single-segment ext)
-# route to us via UTI without any user setup. Files that keep
-# the legacy `.workbook.html` compound extension still need
-# Get Info → Change All to set public.html → Workbooks, since
-# macOS Sequoia blocks programmatic claiming of public.html.
-sudo -u "$CONSOLE_USER" "$BIN" set-default-handler \
-  sh.workbooks.workbook sh.workbooks.launcher >/dev/null 2>&1 || true
-
+# 5. Routing for existing workbook files happens LAZILY:
+#
+#   - daemon's /open + /save handlers write the
+#     com.apple.LaunchServices.OpenWith xattr on every file they
+#     touch (see xattr_openwith.rs)
+#   - macOS Sequoia honours that per-file xattr above the system
+#     default for public.html (which Apple's browser-default
+#     protection won't let us claim programmatically anyway)
+#   - so the FIRST time a user opens a given workbook through
+#     Workbooks (right-click → Open With → Workbooks, or via the
+#     manager UI), the file gets stamped — every double-click of
+#     that same file thereafter routes automatically
+#
+# We deliberately do NOT walk the user's filesystem to pre-stamp
+# existing files. Hardcoded paths (Downloads/Desktop/Documents) are
+# brittle and miss workbooks in project trees; full-disk walks are
+# slow and overstep. Lazy stamping costs the user one right-click
+# per file, which is the same first-time friction they'd have today.
+# Power users who want bulk-stamp can run
+# `workbooksd stamp-if-workbook <path>` against any folder — the
+# subcommand exists and is documented in the README.
+#
 # Reload LaunchServices DB so the bundle's UTI claims (registered
-# above by lsregister -f) and our default-handler claim are visible
-# in Open-With menus right away.
+# above by lsregister -f) are visible in Open-With menus right away.
 [ -x "$LSREGISTER" ] && "$LSREGISTER" -kill -r -domain user >/dev/null 2>&1 || true
 
 exit 0
