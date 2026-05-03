@@ -1,0 +1,46 @@
+[package]
+name = "workbooks-manager"
+version = "0.1.0"
+edition = "2021"
+description = "Workbooks Manager — desktop app shell"
+license = "MIT"
+
+# Tauri 2.0 ships the app as one library + a thin main wrapper.
+# We build only `tauri-build` for compile-time codegen and the
+# tauri runtime itself. No extra Rust deps — everything user-
+# facing lives in the Svelte frontend; the shell just opens the
+# window and lets the webview fetch the daemon's HTTP endpoints.
+
+[lib]
+name = "workbooks_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# devtools — keep webview inspector available even on release
+# builds. Helps users diagnose daemon connectivity issues
+# (right-click → Inspect Element). Tradeoff is a few KB of
+# bundle size; well worth it for a v0.1.x management app.
+tauri = { version = "2", features = ["devtools"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Sync HTTP client for daemon health-check + /open POST. Lightweight
+# (~150 KB) and avoids pulling tokio into the Tauri shell — the
+# daemon's already async; the manager just needs to talk to it
+# from Tauri's RunEvent handlers, which run on the main thread.
+ureq = { version = "2", default-features = false, features = ["json"] }
+# UNIX-side detach: setsid() so the spawned daemon survives Manager
+# exit. Without this the workbooksd child dies when Manager quits,
+# which kills autosave for any browser-served workbook the user
+# left open.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Custom Info.plist additions merged into Tauri's generated bundle.
+    Declares Workbooks.app as:
+      1. Editor for sh.workbooks.workbook UTI (the .workbook.html
+         tag-spec'd type), exported below.
+      2. Alternate Viewer for public.html so Finder's "Open With"
+         menu lists Workbooks for any .html file. Default-app status
+         stays with the system browser; the daemon's content sniff
+         (looks for wb-meta or wb-permissions) is the real gate.
+    Replaces the standalone Workbooks.app shell-script bundle that
+    the workbooksd .pkg used to install separately.
+  -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>Workbook</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSItemContentTypes</key>
+      <array><string>sh.workbooks.workbook</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>HTML Document</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array><string>public.html</string></array>
+    </dict>
+  </array>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>sh.workbooks.workbook</string>
+      <key>UTTypeDescription</key><string>Workbook</string>
+      <key>UTTypeConformsTo</key>
+      <array><string>public.html</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array><string>workbook.html</string></array>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>
