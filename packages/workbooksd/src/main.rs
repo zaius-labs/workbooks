@@ -1,3 +1,11 @@
+// On Windows, release builds opt out of the console subsystem so the
+// daemon runs as a true background process (no black console window
+// flashing at login or install). Debug builds keep the console so
+// `cargo run` shows eprintln! / panic output for developers.
+//
+// macOS and Linux ignore this attribute (compile-time cfg gates it).
+#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+
 // workbooksd — local background daemon that serves and saves
 // .html files to the user's browser.
 //

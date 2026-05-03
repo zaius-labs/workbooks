@@ -143,18 +143,27 @@
       <ComponentRef Id='RunAtLogin' />
     </Feature>
 
-    <!-- Notify Explorer the .workbook.html association changed.
-         Without this, users see the new association only after a
-         logout/login cycle. -->
+    <!-- Launch the daemon at the end of a fresh install so the user
+         has a working background process immediately — without it the
+         daemon waits for the next sign-in (Run-at-login key only fires
+         then). Per-user registry writes for Software\Classes already
+         trigger Explorer's shell-association refresh on commit, so we
+         don't need a separate SHChangeNotify dance.
+
+         FileKey points at the installed binary (resolved post-install
+         to %LOCALAPPDATA%\Programs\Workbooks\workbooksd.exe). The
+         binary uses windows_subsystem = "windows" in release builds,
+         so no console window flashes — true background. asyncNoWait
+         lets the installer finish without waiting on the daemon. -->
     <CustomAction
-      Id='RefreshShellAssoc'
-      Directory='INSTALLDIR'
-      ExeCommand='[SystemFolder]cmd.exe /c "echo refresh > nul"'
+      Id='LaunchDaemon'
+      FileKey='WorkbooksdExeFile'
+      ExeCommand=''
       Execute='deferred'
-      Return='ignore'
-      Impersonate='yes' />
+      Impersonate='yes'
+      Return='asyncNoWait' />
     <InstallExecuteSequence>
-      <Custom Action='RefreshShellAssoc' After='InstallFiles'>NOT Installed</Custom>
+      <Custom Action='LaunchDaemon' Before='InstallFinalize'>NOT Installed</Custom>
     </InstallExecuteSequence>
 
     <!-- Quiet install UI: progress bar + license. Matches the .pkg
