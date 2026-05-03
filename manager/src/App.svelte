@@ -45,7 +45,7 @@
   <main class="empty"><div class="loader">connecting…</div></main>
 {:else if daemon.status === "no-daemon"}
   <InstallBanner onRetry={() => daemon.boot()} />
-{:else if daemon.workbooks.length === 0}
+{:else if daemon.workbooks.length === 0 && daemon.discovered.length === 0}
   <EmptyState
     title="Nothing yet"
     body={["Open any .html and it'll show up here."]}
@@ -61,6 +61,7 @@
 {:else}
   <WorkbookList
     workbooks={daemon.workbooks}
+    discovered={daemon.discovered}
     onPick={showDetails}
     onOpenLatest={openPath}
     onRefresh={() => daemon.refresh()}

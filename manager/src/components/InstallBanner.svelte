@@ -4,13 +4,41 @@
    * otherwise surface a "daemon not running" error. Matches the
    * file:// install toast aesthetic in workbook-cli's runtime-inject:
    * Workbooks logo, feature-forward copy ("get more from your
-   * workbooks"), free CTA. Optionally takes a "retry" callback for
-   * the case where the daemon SHOULD be running locally but the
-   * Manager just lost contact (network probe failed, daemon crashed
-   * but is being respawned by launchd). Retry triggers a re-probe
-   * via the parent's daemon.boot().
+   * workbooks"), and TWO actions:
+   *   1. Install — direct download of the OS-specific asset
+   *   2. Learn more — opens the workbooks.sh lander
+   * Plus an optional "Already installed — retry" link for transient
+   * daemon outages (the daemon crashed but is being respawned by
+   * launchd, etc.).
    */
   let { onRetry = null } = $props();
+
+  // Pick the right binary asset for this OS+arch. Mirror of the
+  // detectInstallUrl helper in workbook-cli/src/runtime-inject/installToast.mjs.
+  // Manager always runs on the desktop OS the user installed it on,
+  // so this is mostly redundant — but kept symmetric so code reading
+  // either surface tells the same story. webview's userAgent reports
+  // the host OS reliably.
+  function detectInstallUrl() {
+    if (typeof navigator === "undefined") return "https://workbooks.sh";
+    const ua = navigator.userAgent || "";
+    const platform = navigator.platform || "";
+    if (/Mac/i.test(platform) || /Mac OS X|Macintosh/i.test(ua)) {
+      return "https://workbooks.sh/dl/Workbooks.pkg";
+    }
+    if (/Win/i.test(platform) || /Windows/i.test(ua)) {
+      return "https://workbooks.sh/dl/Workbooks.msi";
+    }
+    if (/Linux/i.test(platform) || /Linux/i.test(ua)) {
+      const arch = (navigator.userAgentData && navigator.userAgentData.architecture) || "";
+      const isArm = /aarch64|arm64/i.test(arch) || /aarch64|arm64/i.test(ua);
+      const triple = isArm ? "aarch64-unknown-linux-gnu" : "x86_64-unknown-linux-gnu";
+      return `https://workbooks.sh/dl/workbooksd-${triple}`;
+    }
+    return "https://workbooks.sh";
+  }
+
+  const installUrl = detectInstallUrl();
 </script>
 
 <main>
@@ -26,13 +54,21 @@
       Workbooks just unlocks the parts a browser can't do alone.
     </p>
     <div class="actions">
-      <a class="primary" href="https://workbooks.sh" target="_blank" rel="noopener noreferrer">
-        Install Workbooks (free)
-      </a>
-      {#if onRetry}
-        <button class="secondary" onclick={onRetry}>Already installed — retry</button>
-      {/if}
+      <a
+        class="primary"
+        href={installUrl}
+        download
+        target="_blank"
+        rel="noopener noreferrer">Install</a>
+      <a
+        class="secondary"
+        href="https://workbooks.sh"
+        target="_blank"
+        rel="noopener noreferrer">Learn more</a>
     </div>
+    {#if onRetry}
+      <button class="retry" onclick={onRetry}>Already installed — retry</button>
+    {/if}
   </div>
 </main>
 
@@ -73,28 +109,40 @@
   }
   p strong { color: var(--fg); font-weight: 600; }
   .actions {
-    display: flex; flex-direction: column; gap: 8px; align-items: center;
+    display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
   }
-  a.primary {
+  a.primary, a.secondary {
     display: inline-block;
-    background: var(--fg);
-    color: var(--bg);
     text-decoration: none;
-    padding: 9px 18px;
+    padding: 9px 20px;
     border-radius: 8px;
     font-size: 13px;
     font-weight: 600;
-    transition: opacity 100ms ease, transform 80ms ease;
+    border: 1px solid transparent;
+    transition: opacity 100ms ease, transform 80ms ease,
+                background 100ms ease, border-color 100ms ease;
+  }
+  a.primary {
+    background: var(--fg);
+    color: var(--bg);
   }
   a.primary:hover { opacity: 0.9; }
   a.primary:active { transform: translateY(0.5px); }
-  button.secondary {
+  a.secondary {
+    background: transparent;
+    color: var(--fg-muted);
+    border-color: var(--border);
+  }
+  a.secondary:hover { color: var(--fg); border-color: var(--fg-faint); }
+  a.secondary:active { transform: translateY(0.5px); }
+  button.retry {
+    margin-top: 14px;
     background: transparent;
     border: 0;
     color: var(--fg-faint);
     font-size: 11.5px;
     cursor: pointer;
-    padding: 6px 10px;
+    padding: 4px 10px;
   }
-  button.secondary:hover { color: var(--fg-muted); }
+  button.retry:hover { color: var(--fg-muted); }
 </style>

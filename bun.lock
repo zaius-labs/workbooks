@@ -168,6 +168,23 @@
         "vite": "^6.0.0",
       },
     },
+    "packages/auth-ui": {
+      "name": "@work.books/auth-ui",
+      "version": "0.2.0",
+      "devDependencies": {
+        "svelte": "^5.46.0",
+      },
+      "peerDependencies": {
+        "svelte": "^5.0.0",
+      },
+    },
+    "packages/decrypt": {
+      "name": "@work.books/decrypt",
+      "version": "0.1.0",
+      "dependencies": {
+        "age-encryption": "^0.2.4",
+      },
+    },
     "packages/runtime": {
       "name": "@work.books/runtime",
       "version": "0.6.0",
@@ -230,7 +247,7 @@
     },
     "packages/workbook-cli": {
       "name": "@work.books/cli",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "bin": {
         "workbook": "./bin/workbook.mjs",
       },
@@ -445,7 +462,11 @@
 
     "@types/unist": ["@types/unist@3.0.3", "", {}, "sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q=="],
 
+    "@work.books/auth-ui": ["@work.books/auth-ui@workspace:packages/auth-ui"],
+
     "@work.books/cli": ["@work.books/cli@workspace:packages/workbook-cli"],
+
+    "@work.books/decrypt": ["@work.books/decrypt@workspace:packages/decrypt"],
 
     "@work.books/example-chess": ["@work.books/example-chess@workspace:examples/chess"],
 

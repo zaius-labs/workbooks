@@ -10,12 +10,14 @@ function makeStore() {
    *   status: "loading" | "ok" | "no-daemon",
    *   url: string | null,
    *   workbooks: Array<any>,
+   *   discovered: Array<any>,
    *   error: string | null,
    * }} */
   const state = $state({
     status: "loading",
     url: null,
     workbooks: [],
+    discovered: [],
     error: null,
   });
 
@@ -43,11 +45,22 @@ function makeStore() {
 
   async function refresh() {
     if (!state.url) return;
+    // Fire both calls in parallel — ledger is fast (in-memory), discover
+    // can take a beat the first time (mdfind + per-file content sniff)
+    // but we don't want either to block the other.
     try {
-      const r = await fetch(`${state.url}/ledger/list`);
-      if (!r.ok) throw new Error(`ledger/list: HTTP ${r.status}`);
-      const j = await r.json();
-      state.workbooks = j.workbooks ?? [];
+      const [listR, discR] = await Promise.allSettled([
+        fetch(`${state.url}/ledger/list`).then((r) => r.json()),
+        fetch(`${state.url}/ledger/discover`).then((r) => r.json()),
+      ]);
+      if (listR.status === "fulfilled") {
+        state.workbooks = listR.value.workbooks ?? [];
+      } else {
+        throw listR.reason;
+      }
+      if (discR.status === "fulfilled") {
+        state.discovered = discR.value.workbooks ?? [];
+      }
     } catch (e) {
       state.error = e?.message ?? String(e);
     }
@@ -79,6 +92,7 @@ function makeStore() {
     get status() { return state.status; },
     get url()    { return state.url; },
     get workbooks() { return state.workbooks; },
+    get discovered() { return state.discovered; },
     get error()  { return state.error; },
     boot, refresh, history, open,
   };

@@ -35,6 +35,38 @@
 // Disable per-workbook via workbook.config.mjs:
 //   export default { installToast: { enabled: false }, ... }
 
+// Pick the right download URL for the user's OS+arch. workbooks.sh
+// proxies /dl/* to the latest GitHub release asset, so:
+//   macOS (universal pkg)         → /dl/Workbooks.pkg
+//   Linux x86_64 / aarch64 binary → /dl/workbooksd-<arch>-unknown-linux-gnu
+//   Windows                       → /dl/Workbooks.msi
+//   anything else                 → lander
+//
+// macOS UA strings always say "Intel Mac OS X" even on Apple Silicon
+// (legacy Safari compatibility), so we don't try to discriminate
+// arch — the .pkg is universal anyway. Linux UA does carry arch
+// info reliably; navigator.userAgentData (Chromium) is preferred
+// when present.
+function detectInstallUrl() {
+  if (typeof navigator === "undefined") return "https://workbooks.sh";
+  const ua = navigator.userAgent || "";
+  const platform = navigator.platform || "";
+
+  if (/Mac/i.test(platform) || /Mac OS X|Macintosh/i.test(ua)) {
+    return "https://workbooks.sh/dl/Workbooks.pkg";
+  }
+  if (/Win/i.test(platform) || /Windows/i.test(ua)) {
+    return "https://workbooks.sh/dl/Workbooks.msi";
+  }
+  if (/Linux/i.test(platform) || /Linux/i.test(ua)) {
+    const arch = (navigator.userAgentData && navigator.userAgentData.architecture) || "";
+    const isArm = /aarch64|arm64/i.test(arch) || /aarch64|arm64/i.test(ua);
+    const triple = isArm ? "aarch64-unknown-linux-gnu" : "x86_64-unknown-linux-gnu";
+    return `https://workbooks.sh/dl/workbooksd-${triple}`;
+  }
+  return "https://workbooks.sh";
+}
+
 (function () {
   if (typeof window === "undefined" || typeof document === "undefined") return;
   if (window.__wbInstallToast) return;
@@ -119,12 +151,24 @@
   // notice. We do NOT lead with "you don't have X". The user is
   // already using the workbook successfully via file:// — the toast
   // is offering an upgrade, not flagging a missing dependency.
+  //
+  // The toast offers TWO actions:
+  //   1. "Learn more" → workbooks.sh (the information landing page)
+  //   2. "Install"    → direct download of the OS-specific asset
+  //                     (so the user gets the .pkg / .msi / Linux
+  //                     binary without an extra hop through the
+  //                     lander). For platforms where direct-binary
+  //                     download isn't useful (Linux's curl|sh is
+  //                     the canonical install), this falls back to
+  //                     the lander.
   const cfg = Object.assign(
     {
       title: "Get more from this workbook",
       sub: "Install Workbooks — free — to enable autosave, API key storage, and outbound calls to your configured services.",
-      cta: "Install Workbooks (free)",
-      url: "https://workbooks.sh",
+      learnMore: "Learn more",
+      install: "Install",
+      learnMoreUrl: "https://workbooks.sh",
+      installUrl: detectInstallUrl(),
     },
     window.__wbInstallToastConfig || {},
   );
@@ -153,13 +197,27 @@
     .wb-install-toast .wb-it-text { flex: 1; min-width: 0; }
     .wb-install-toast .wb-it-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; letter-spacing: -0.01em; }
     .wb-install-toast .wb-it-sub { color: #a8acb8; font-size: 12.5px; margin-bottom: 12px; line-height: 1.5; }
-    .wb-install-toast a.wb-it-cta {
-      display: inline-block; color: #15171d; background: #f5f5f5;
-      text-decoration: none; padding: 6px 12px; border-radius: 7px;
-      font-size: 12.5px; font-weight: 600;
-      transition: background 0.12s ease;
+    .wb-install-toast .wb-it-actions {
+      display: flex; gap: 8px; flex-wrap: wrap;
     }
-    .wb-install-toast a.wb-it-cta:hover { background: #fff; }
+    .wb-install-toast a.wb-it-btn {
+      display: inline-block; text-decoration: none;
+      padding: 6px 12px; border-radius: 7px;
+      font-size: 12.5px; font-weight: 600;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+      border: 1px solid transparent;
+    }
+    .wb-install-toast a.wb-it-btn-primary {
+      color: #15171d; background: #f5f5f5;
+    }
+    .wb-install-toast a.wb-it-btn-primary:hover { background: #fff; }
+    .wb-install-toast a.wb-it-btn-secondary {
+      color: #f5f5f5; background: transparent;
+      border-color: #2f3340;
+    }
+    .wb-install-toast a.wb-it-btn-secondary:hover {
+      background: rgba(255,255,255,0.05); border-color: #4a4f5e;
+    }
     .wb-install-toast .wb-it-close {
       position: absolute; top: 6px; right: 6px;
       background: none; border: 0; color: #a8acb8;
@@ -186,7 +244,10 @@
       '<div class="wb-it-text">' +
       '<div class="wb-it-title"></div>' +
       '<div class="wb-it-sub"></div>' +
-      '<a class="wb-it-cta" target="_blank" rel="noopener noreferrer"></a>' +
+      '<div class="wb-it-actions">' +
+      '<a class="wb-it-btn wb-it-btn-primary" target="_blank" rel="noopener noreferrer"></a>' +
+      '<a class="wb-it-btn wb-it-btn-secondary" target="_blank" rel="noopener noreferrer"></a>' +
+      "</div>" +
       "</div>" +
       '<button class="wb-it-close" aria-label="Dismiss">×</button>';
 
@@ -194,9 +255,16 @@
     // of cfg fields containing markup that breaks the toast.
     root.querySelector(".wb-it-title").textContent = cfg.title;
     root.querySelector(".wb-it-sub").textContent = cfg.sub;
-    const cta = root.querySelector(".wb-it-cta");
-    cta.textContent = cfg.cta;
-    cta.href = cfg.url;
+    const installBtn = root.querySelector(".wb-it-btn-primary");
+    installBtn.textContent = cfg.install;
+    installBtn.href = cfg.installUrl;
+    // The Install button is a direct download of a binary — set the
+    // download attribute so the browser doesn't try to navigate to it
+    // (which would just render as garbage on macOS .pkg / Linux ELF).
+    installBtn.setAttribute("download", "");
+    const learnBtn = root.querySelector(".wb-it-btn-secondary");
+    learnBtn.textContent = cfg.learnMore;
+    learnBtn.href = cfg.learnMoreUrl;
 
     document.body.appendChild(root);
     requestAnimationFrame(() =>

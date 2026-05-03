@@ -63,12 +63,14 @@ mod broker_client;
 mod c2pa_sign;
 mod claim_sign;
 mod default_handler;
+mod download_watcher;
 mod edit_log;
 mod envelope;
 mod ledger;
 mod lease_cache;
 mod local_auth;
 mod permissions;
+mod spotlight_discover;
 mod xattr_openwith;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
@@ -723,6 +725,7 @@ async fn daemon_main() {
         // accepts the request. The handlers themselves still gate
         // on require_daemon_origin for CSRF defense.
         .route("/ledger/list", get(ledger_list_handler))
+        .route("/ledger/discover", get(ledger_discover_handler))
         .route("/ledger/:workbook_id", get(ledger_by_id_handler))
         // Author-claim signing (C8.7-A). CLI's `workbook seal --sign`
         // calls these to embed a signed claim into wrapStudio's
@@ -821,6 +824,15 @@ async fn daemon_main() {
         eprintln!("[workbooksd] runtime.json write failed: {e}");
     }
     eprintln!("[workbooksd] listening on http://{BIND_HOST}:{bound}");
+
+    // Spawn the downloads watcher AFTER bind so a watcher panic can't
+    // prevent the daemon from accepting connections. Best-effort; if
+    // it fails to spawn (no $HOME, FSEvents permission denied, etc.)
+    // the daemon still serves — users just lose the auto-stamp magic
+    // and have to right-click → Open With → Workbooks the first time
+    // for fresh files.
+    download_watcher::spawn();
+
     axum::serve(listener, app).await.expect("serve");
 }
 
@@ -2122,6 +2134,33 @@ async fn ledger_list_handler(headers: HeaderMap) -> impl IntoResponse {
         return resp;
     }
     let workbooks = ledger::list_summaries();
+    (
+        StatusCode::OK,
+        axum::Json(serde_json::json!({ "workbooks": workbooks })),
+    )
+        .into_response()
+}
+
+/// Spotlight-backed full-disk discovery — lists EVERY workbook file
+/// indexed by macOS's metadata server, regardless of whether the
+/// daemon's ever served it. Lets the manager surface workbooks the
+/// user has on disk but hasn't opened through Workbooks yet.
+///
+/// Output: { "workbooks": [{ path, size, modified, workbook_id, stamped }] }
+/// Sorted modified-desc. Cached daemon-side for ~30 seconds so a
+/// rapidly-refreshing manager doesn't fork mdfind 10x/sec.
+///
+/// macOS-only. Linux/Windows return an empty list (could fill via
+/// Tracker / Windows Search Index in a follow-up).
+async fn ledger_discover_handler(headers: HeaderMap) -> impl IntoResponse {
+    if let Err(resp) = require_daemon_origin(&headers) {
+        return resp;
+    }
+    // Run the (potentially seconds-long) mdfind on a blocking thread
+    // so the axum runtime stays responsive.
+    let workbooks = tokio::task::spawn_blocking(spotlight_discover::discover)
+        .await
+        .unwrap_or_default();
     (
         StatusCode::OK,
         axum::Json(serde_json::json!({ "workbooks": workbooks })),

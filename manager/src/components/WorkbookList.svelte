@@ -15,7 +15,7 @@
   import { iconSearch, iconRefresh, iconExternal } from "../lib/icons.js";
   import { ago, basename, agentShort } from "../lib/format.js";
 
-  let { workbooks, onPick, onOpenLatest, onRefresh } = $props();
+  let { workbooks, discovered = [], onPick, onOpenLatest, onRefresh } = $props();
   let q = $state("");
 
   let filtered = $derived.by(() => {
@@ -25,6 +25,25 @@
       (w.workbook_id?.toLowerCase().includes(needle)) ||
       (w.paths_seen ?? []).some((p) => p.toLowerCase().includes(needle))
     );
+  });
+
+  // Files Spotlight found on disk that the daemon's never served —
+  // i.e. their path doesn't match any paths_seen in the ledger. These
+  // appear in a separate "Discovered" section so users can see "I have
+  // workbooks on disk Workbooks doesn't know about yet" without
+  // confusing them with their actual session history.
+  let discoveredFresh = $derived.by(() => {
+    if (!discovered?.length) return [];
+    const known = new Set();
+    for (const w of workbooks) {
+      for (const p of w.paths_seen ?? []) known.add(p);
+    }
+    const needle = q.trim().toLowerCase();
+    return discovered.filter((d) => {
+      if (known.has(d.path)) return false;
+      if (!needle) return true;
+      return d.path.toLowerCase().includes(needle);
+    });
   });
 
   function pickById(id) {
@@ -97,6 +116,35 @@
         </div>
       {/each}
     </div>
+  {/if}
+
+  {#if discoveredFresh.length > 0}
+    <section class="discovered">
+      <h3 class="discovered-h">
+        <span>Discovered on disk</span>
+        <span class="discovered-count tnum">{discoveredFresh.length}</span>
+      </h3>
+      <p class="discovered-blurb">
+        Files Spotlight found that haven't been opened in Workbooks yet.
+        Click to open — that's all it takes to wire them up.
+      </p>
+      <div class="discovered-list">
+        {#each discoveredFresh as d (d.path)}
+          <button
+            class="disc-row"
+            onclick={() => onOpenLatest(d.path)}
+            title={d.path}
+          >
+            <span class="disc-name">{basename(d.path)}</span>
+            <span class="disc-path">{d.path}</span>
+            <span class="disc-meta tnum">
+              {#if !d.stamped}<span class="disc-tag">unstamped</span>{/if}
+              {ago(d.modified)}
+            </span>
+          </button>
+        {/each}
+      </div>
+    </section>
   {/if}
 </div>
 
@@ -256,5 +304,84 @@
     color: var(--fg-faint);
     font-size: 12px;
     text-align: center;
+  }
+
+  /* "Discovered on disk" — a calmer, denser list. Not cards — these
+   * are files Workbooks doesn't really know about yet, so we
+   * deliberately downplay them visually. The user upgrades them to
+   * full cards by clicking once (which calls /open and stamps xattr). */
+  .discovered { margin-top: 32px; }
+  .discovered-h {
+    display: flex; align-items: baseline; gap: 8px;
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--fg-muted);
+    margin: 0 0 4px 0;
+  }
+  .discovered-count {
+    font-size: 10px;
+    background: var(--surface-3);
+    color: var(--fg-faint);
+    padding: 1px 6px;
+    border-radius: 8px;
+    letter-spacing: normal;
+  }
+  .discovered-blurb {
+    margin: 0 0 10px 0;
+    font-size: 11px;
+    color: var(--fg-faint);
+    line-height: 1.45;
+    max-width: 60ch;
+  }
+  .discovered-list {
+    display: flex; flex-direction: column;
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .disc-row {
+    background: transparent; border: 0;
+    padding: 8px 12px;
+    display: grid;
+    grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: baseline;
+    cursor: pointer;
+    text-align: left;
+    color: var(--fg);
+    border-top: 1px solid var(--hairline);
+    transition: background 80ms ease;
+  }
+  .disc-row:first-child { border-top: 0; }
+  .disc-row:hover { background: var(--surface-2); }
+  .disc-name {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 28ch;
+  }
+  .disc-path {
+    font-size: 10.5px;
+    color: var(--fg-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    direction: rtl; /* keep filename visible if path overflows */
+    text-align: left;
+  }
+  .disc-meta {
+    font-size: 10px;
+    color: var(--fg-muted);
+    display: flex; align-items: baseline; gap: 6px;
+  }
+  .disc-tag {
+    font-size: 9.5px;
+    background: var(--surface-3);
+    color: var(--fg-faint);
+    padding: 1px 5px;
+    border-radius: 3px;
+    letter-spacing: 0.02em;
   }
 </style>

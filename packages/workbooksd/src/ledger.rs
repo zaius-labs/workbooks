@@ -247,7 +247,34 @@ pub struct ForkRef {
 }
 
 pub fn list_summaries() -> Vec<WorkbookSummary> {
-    let f = load();
+    let mut f = load();
+
+    // Auto-prune: drop any workbook whose paths_seen all resolve to
+    // non-existent files. Test fixtures (every E2E test creates
+    // entries in /tmp/, those tmp dirs vanish after the test process
+    // exits) and one-shot temp workbooks leave the ledger littered
+    // otherwise — the manager UI fills with cards for dead files.
+    // We do this on the read path so the user never sees them, and
+    // also persist the pruned ledger so future reads are fast and
+    // cross-tool callers (the GET /ledger/<id> endpoint, the manager,
+    // etc.) all see consistent state.
+    //
+    // Done in-place to avoid a redundant clone of the whole map.
+    // We also prune saves[] within remaining entries — a workbook
+    // saved many times across paths can have entries pointing at
+    // gone-tmp paths even when at least one canonical path remains.
+    let before = f.by_id.len();
+    f.by_id.retain(|_, h| {
+        h.paths_seen.retain(|p| std::path::Path::new(p).exists());
+        h.saves.retain(|s| std::path::Path::new(&s.file_path).exists());
+        !h.paths_seen.is_empty()
+    });
+    if f.by_id.len() != before {
+        // Best-effort persist; if write fails the in-memory view is
+        // still pruned for this call, and the next list_summaries()
+        // will re-prune.
+        let _ = store(&f);
+    }
 
     // First pass: build a sha → [(workbook_id, save_ts)] index over
     // EVERY save in the ledger. This is the substrate fork-detection
