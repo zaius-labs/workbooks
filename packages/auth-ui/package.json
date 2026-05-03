@@ -1,6 +1,6 @@
 {
   "name": "@work.books/auth-ui",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Svelte sign-in components for the Workbooks Studio identity broker. Lander-locked design tokens; same visual language as the pre-auth shell + admin webapp.",
   "type": "module",
   "license": "Apache-2.0",

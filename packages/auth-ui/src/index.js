@@ -1,7 +1,10 @@
 // @work.books/auth-ui — public exports.
 //
-// v0.1.0 ships only the design tokens + logo asset. Components
-// (SignInForm, MagicCodeInput) land in C7.2 / C7.3.
+// v0.2.0: tokens + logo + SignInForm + MagicCodeInput. Broker
+// /sign-in route + hosted recipient flow C3 mount these directly.
+
+export { default as SignInForm } from "./SignInForm.svelte";
+export { default as MagicCodeInput } from "./MagicCodeInput.svelte";
 
 export const TOKENS_CSS_HREF = new URL("./tokens.css", import.meta.url).href;
 export const LOGO_SVG_HREF = new URL("./logo.svg", import.meta.url).href;
