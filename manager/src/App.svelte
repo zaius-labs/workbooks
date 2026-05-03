@@ -8,6 +8,7 @@
    */
   import Titlebar from "./components/Titlebar.svelte";
   import EmptyState from "./components/EmptyState.svelte";
+  import InstallBanner from "./components/InstallBanner.svelte";
   import WorkbookList from "./components/WorkbookList.svelte";
   import DetailsView from "./components/DetailsView.svelte";
   import { daemon } from "./lib/daemon.svelte.js";
@@ -43,11 +44,7 @@
 {#if daemon.status === "loading"}
   <main class="empty"><div class="loader">connecting…</div></main>
 {:else if daemon.status === "no-daemon"}
-  <EmptyState
-    title="Daemon offline"
-    body={["Open a .html from Finder to wake the daemon, or reinstall via the latest .pkg."]}
-    action={{ label: "Retry", onClick: () => daemon.boot() }}
-  />
+  <InstallBanner onRetry={() => daemon.boot()} />
 {:else if daemon.workbooks.length === 0}
   <EmptyState
     title="Nothing yet"

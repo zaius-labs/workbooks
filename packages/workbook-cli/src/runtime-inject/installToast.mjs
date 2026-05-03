@@ -115,11 +115,15 @@
     }
   }
 
+  // Default copy: friendly and feature-forward, not a deficiency
+  // notice. We do NOT lead with "you don't have X". The user is
+  // already using the workbook successfully via file:// — the toast
+  // is offering an upgrade, not flagging a missing dependency.
   const cfg = Object.assign(
     {
-      title: "Workbooks not installed",
-      sub: "Install the runtime to enable saving this file in place.",
-      cta: "Install →",
+      title: "Get more from this workbook",
+      sub: "Install Workbooks — free — to enable autosave, API key storage, and outbound calls to your configured services.",
+      cta: "Install Workbooks (free)",
       url: "https://workbooks.sh",
     },
     window.__wbInstallToastConfig || {},
@@ -133,26 +137,27 @@
 
   const CSS = `
     .wb-install-toast {
-      position: fixed; bottom: 1.5rem; left: 1.5rem; z-index: 2147483646;
-      max-width: 340px; box-sizing: border-box;
-      padding: 14px 36px 14px 14px;
+      position: fixed; bottom: 1.75rem; left: 1.75rem; z-index: 2147483646;
+      max-width: 380px; box-sizing: border-box;
+      padding: 18px 42px 18px 18px;
       background: #15171d; color: #f5f5f5;
-      border: 1px solid #2a2d35; border-radius: 12px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.18);
-      font: 13px/1.4 ui-sans-serif, -apple-system, system-ui, sans-serif;
-      display: flex; gap: 12px; align-items: flex-start;
+      border: 1px solid #2a2d35; border-radius: 14px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.32), 0 4px 12px rgba(0,0,0,0.18);
+      font: 13.5px/1.45 ui-sans-serif, -apple-system, system-ui, sans-serif;
+      display: flex; gap: 14px; align-items: flex-start;
       transform: translateY(8px); opacity: 0;
       transition: opacity 0.2s ease, transform 0.2s ease;
     }
     .wb-install-toast.wb-it-show { transform: translateY(0); opacity: 1; }
-    .wb-install-toast svg { flex: 0 0 auto; width: 28px; height: 28px; }
+    .wb-install-toast svg { flex: 0 0 auto; width: 32px; height: 32px; }
     .wb-install-toast .wb-it-text { flex: 1; min-width: 0; }
-    .wb-install-toast .wb-it-title { font-weight: 600; margin-bottom: 2px; }
-    .wb-install-toast .wb-it-sub { color: #a8acb8; font-size: 12px; margin-bottom: 8px; }
+    .wb-install-toast .wb-it-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; letter-spacing: -0.01em; }
+    .wb-install-toast .wb-it-sub { color: #a8acb8; font-size: 12.5px; margin-bottom: 12px; line-height: 1.5; }
     .wb-install-toast a.wb-it-cta {
       display: inline-block; color: #15171d; background: #f5f5f5;
-      text-decoration: none; padding: 4px 10px; border-radius: 6px;
-      font-size: 12px; font-weight: 600;
+      text-decoration: none; padding: 6px 12px; border-radius: 7px;
+      font-size: 12.5px; font-weight: 600;
+      transition: background 0.12s ease;
     }
     .wb-install-toast a.wb-it-cta:hover { background: #fff; }
     .wb-install-toast .wb-it-close {
