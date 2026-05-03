@@ -215,5 +215,143 @@ function findMeta(html, name) {
   check("invalid claimSig shape → wrap throws", threw);
 }
 
+// 5. C8.6 — priorChain provenance chain.
+{
+  const kp = await subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+  const pubRaw = new Uint8Array(await subtle.exportKey("raw", kp.publicKey));
+
+  const claim = {
+    author_sub: "workos|user_bob",
+    author_email: "bob@bank.example",
+    key_id: "k_bob",
+    ts: 1730000000,
+  };
+  const claimMsg = canonicalClaimBytes({
+    author_sub: claim.author_sub,
+    author_email: claim.author_email,
+    workbook_id: "deterministic_wb_chain",
+    key_id: claim.key_id,
+    ts: claim.ts,
+  });
+  const sigBytes = new Uint8Array(
+    await subtle.sign({ name: "Ed25519" }, kp.privateKey, claimMsg),
+  );
+  const sigB64u = Buffer.from(sigBytes)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  const priorChain = [
+    {
+      author_sub: "workos|user_alice",
+      author_email: "alice@acme.example",
+      key_id: "k_alice",
+      ts: 1729000000,
+      workbook_id: "deterministic_wb_chain",
+      sig: "_".repeat(86) + "0",  // shape-valid placeholder; verify happens in browser
+    },
+    {
+      author_sub: "workos|user_charlie",
+      author_email: "charlie@audit.example",
+      key_id: "k_charlie",
+      ts: 1729500000,
+      workbook_id: "deterministic_wb_chain",
+      sig: "_".repeat(86) + "1",
+    },
+  ];
+
+  const out = await wrapStudio({
+    html: "<p>chain test</p>",
+    brokerUrl: BROKER,
+    policy: POLICY,
+    title: "Chain test",
+    workbookId: "deterministic_wb_chain",
+    claim,
+    claimSig: sigB64u,
+    priorChain,
+  });
+
+  const chainMeta = findMeta(out.html, "wb-claim-chain");
+  check("priorChain → wb-claim-chain meta present", chainMeta !== null);
+
+  // Decode the meta and confirm round-trip.
+  const padded = chainMeta + "=".repeat((4 - (chainMeta.length % 4)) % 4);
+  const std = padded.replace(/-/g, "+").replace(/_/g, "/");
+  const decoded = JSON.parse(Buffer.from(std, "base64").toString("utf8"));
+  check(
+    "wb-claim-chain decodes to the original priorChain array",
+    Array.isArray(decoded) && decoded.length === 2,
+    `length=${decoded.length}`,
+  );
+  check(
+    "chain entry [0] preserves author_email",
+    decoded[0].author_email === "alice@acme.example",
+  );
+  check(
+    "chain entry [1] preserves sig",
+    decoded[1].sig === priorChain[1].sig,
+  );
+
+  // Validation: empty / malformed entries are rejected.
+  let threw = false;
+  try {
+    await wrapStudio({
+      html: "<p>x</p>",
+      brokerUrl: BROKER,
+      policy: POLICY,
+      claim,
+      claimSig: sigB64u,
+      priorChain: [{ author_sub: "x" }],  // missing required fields
+    });
+  } catch (e) {
+    threw = e.message.includes("priorChain");
+  }
+  check("malformed priorChain entry → throws", threw);
+
+  let threwArrType = false;
+  try {
+    await wrapStudio({
+      html: "<p>x</p>",
+      brokerUrl: BROKER,
+      policy: POLICY,
+      claim,
+      claimSig: sigB64u,
+      priorChain: "not an array",
+    });
+  } catch (e) {
+    threwArrType = e.message.includes("priorChain must be an array");
+  }
+  check("non-array priorChain → throws", threwArrType);
+}
+
+// 6. C8.5 — daemon-aware sign-in CTA visible in shell.
+{
+  const out = await wrapStudio({
+    html: "<p>x</p>",
+    brokerUrl: BROKER,
+    policy: POLICY,
+    title: "CTA test",
+  });
+  check(
+    "shell carries 'Open in Workbooks app' button",
+    out.html.includes('id="wb-open-app"') &&
+      out.html.includes("Open in Workbooks app"),
+  );
+  check(
+    "shell carries workbooks-open:// URL scheme handler",
+    out.html.includes("workbooks-open://"),
+  );
+  check(
+    "shell hides install hint until detection runs",
+    out.html.includes('class="app-hint hide"'),
+  );
+  check(
+    "shell carries provenance modal scaffold (C8.8)",
+    out.html.includes('id="wb-modal"') &&
+      out.html.includes("Provenance chain"),
+  );
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

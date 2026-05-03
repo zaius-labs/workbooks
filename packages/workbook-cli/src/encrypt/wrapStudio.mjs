@@ -248,6 +248,27 @@ button:hover{opacity:.88}
 .badge[data-state="warn"]{color:var(--warn)}
 .badge[data-state="err"]{color:var(--err)}
 .foot{margin-top:1.5rem;font-size:.75rem;color:var(--fg-mute);font-family:var(--mono);letter-spacing:.02em}
+button.secondary{background:var(--code-bg);color:var(--fg);margin-bottom:.6rem}
+.app-hint{margin-top:.6rem;font-size:.75rem;color:var(--fg-mute);text-align:center}
+.app-hint a{color:var(--fg-mute);text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px}
+.app-hint a:hover{text-decoration-color:var(--fg-mute)}
+.app-hint.show{display:block}
+.app-hint.hide{display:none}
+/* Trust badge clickability — only when there's a chain to inspect. */
+.badge.clickable{cursor:pointer;text-decoration:underline;text-decoration-color:currentColor;text-decoration-style:dotted;text-underline-offset:3px}
+/* Provenance modal (C8.8) */
+.modal-backdrop{position:fixed;inset:0;background:color-mix(in srgb, var(--fg) 40%, transparent);z-index:9;display:none}
+.modal-backdrop.open{display:block}
+.modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:2rem;max-width:520px;width:90%;z-index:10;display:none;max-height:80vh;overflow:auto}
+.modal.open{display:block}
+.modal h2{font-size:1.25rem;margin:0 0 1rem}
+.modal-close{position:absolute;top:1rem;right:1rem;background:transparent;color:var(--fg-mute);border:0;font-size:1.25rem;cursor:pointer;padding:0;width:auto;line-height:1}
+.chain-entry{padding:.85rem 0;border-bottom:1px solid var(--line)}
+.chain-entry:last-child{border-bottom:0}
+.chain-entry .who{font-size:.95rem;font-weight:500;margin:0}
+.chain-entry .when{font-family:var(--mono);font-size:.7rem;color:var(--fg-mute);margin:.15rem 0 .3rem}
+.chain-entry .keyfp{font-family:var(--mono);font-size:.7rem;color:var(--fg-mute);margin:0}
+.chain-entry .badge{margin-top:.35rem}
 </style>
 </head>
 <body>
@@ -256,24 +277,68 @@ button:hover{opacity:.88}
 <p class="kicker">workbooks · sealed</p>
 <h1>%%TITLE%%</h1>
 <p class="lede">This workbook is sealed. Sign in to your organization to unlock — decryption happens after identity is verified by the broker.</p>
-%%CLAIM_BLOCK%%<button id="wb-signin">Sign in to unlock</button>
+%%CLAIM_BLOCK%%<button id="wb-open-app" class="secondary">Open in Workbooks app</button>
+<button id="wb-signin">Sign in to unlock</button>
+<p id="wb-app-hint" class="app-hint hide">Don't have Workbooks installed? <a href="https://workbooks.sh/install" target="_blank" rel="noopener">Get the app</a></p>
 <p class="foot">studio-v1 · aes-256-gcm</p>
 </main>
+<div id="wb-modal-backdrop" class="modal-backdrop" role="presentation"></div>
+<div id="wb-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="wb-modal-title">
+  <button id="wb-modal-close" aria-label="Close">×</button>
+  <h2 id="wb-modal-title">Provenance chain</h2>
+  <p style="font-size:.85rem;color:var(--fg-mute);margin:0 0 1rem">Every author who has sealed or re-sealed this workbook, with in-browser ed25519 signature verification against the broker's registered keys.</p>
+  <div id="wb-chain"></div>
+</div>
 <script type="application/octet-stream" id="wb-payload">%%PAYLOAD_B64%%</script>
 <script type="module">
 // Browser fallback shell. Daemons parse meta tags directly and never
-// hit this code path. Two responsibilities here:
+// hit this code path. Three responsibilities:
 //
-//   1. Wire the sign-in button → broker /v1/auth/start.
-//   2. If the workbook carries a signed author-claim (wb-author-sig
-//      meta), verify it in-browser BEFORE flipping the trust badge to
-//      "verified". Failure paths render visible warnings — never
-//      silently display a forged identity.
+//   1. Sign-in CTAs (C8.5):
+//      - "Open in Workbooks app" tries a custom URL scheme. If the
+//        scheme isn't registered (no Workbooks.app installed), fall
+//        through to a small "Get the app" hint.
+//      - "Sign in to unlock" goes to broker /v1/auth/start.
+//   2. Author-claim verification (C8.3): single current-author claim.
+//   3. Provenance chain (C8.6+8.8): wb-claim-chain meta carries every
+//      prior author's signed claim. Each verifies independently; the
+//      modal renders the full walk + per-entry status.
 
 const meta = (n) => {
   const el = document.querySelector('meta[name="' + n + '"]');
   return el ? el.content : null;
 };
+
+// ── C8.5 — Daemon-aware sign-in CTAs ────────────────────────────────
+//
+// "Open in Workbooks app" uses workbooks-open://<workbook-id>. The
+// Workbooks.app registers this scheme via its bundle's
+// CFBundleURLTypes (mac) / desktop file (linux). If the scheme isn't
+// handled, no app launch happens — we surface a "Get the app" hint
+// after 1.5s. Heuristic but standard (Slack, Zoom, 1Password use the
+// same pattern).
+document.getElementById("wb-open-app").addEventListener("click", () => {
+  const id = meta("wb-workbook-id") ?? "";
+  const broker = meta("wb-broker-url") ?? "";
+  const url = "workbooks-open://" + encodeURIComponent(id) +
+              "?broker=" + encodeURIComponent(broker) +
+              "&from=" + encodeURIComponent(location.href);
+  // Detect "scheme not handled" by watching for visibility loss.
+  // If the browser handed off to an app, the page goes hidden; if
+  // not, we stay visible and surface the install hint.
+  let handed = false;
+  const onHide = () => { handed = true; };
+  document.addEventListener("visibilitychange", onHide, { once: true });
+  location.href = url;
+  setTimeout(() => {
+    document.removeEventListener("visibilitychange", onHide);
+    if (!handed) {
+      const hint = document.getElementById("wb-app-hint");
+      hint.classList.remove("hide");
+      hint.classList.add("show");
+    }
+  }, 1500);
+});
 
 document.getElementById("wb-signin").addEventListener("click", () => {
   const broker = meta("wb-broker-url");
@@ -282,62 +347,200 @@ document.getElementById("wb-signin").addEventListener("click", () => {
   location.href = broker + "/v1/auth/start?workbook_id=" + id + "&return_to=" + ret;
 });
 
-// Author-claim verification (C8.3). Skips silently if no claim present.
+// ── C8.3 + C8.6 + C8.8 — Author claim + chain verification ──────────
+
+const claimsToVerify = [];
+
+const currentClaim = readCurrentClaim();
+if (currentClaim) claimsToVerify.push({ ...currentClaim, label: "current" });
+
+const chainRaw = meta("wb-claim-chain");
+if (chainRaw) {
+  try {
+    const decoded = atob(chainRaw.replace(/-/g, "+").replace(/_/g, "/"));
+    const entries = JSON.parse(decoded);
+    if (Array.isArray(entries)) {
+      for (const e of entries) {
+        if (
+          typeof e === "object" && e &&
+          typeof e.author_sub === "string" &&
+          typeof e.author_email === "string" &&
+          typeof e.key_id === "string" &&
+          typeof e.workbook_id === "string" &&
+          typeof e.ts === "number" &&
+          typeof e.sig === "string"
+        ) {
+          claimsToVerify.push({ ...e, label: "prior" });
+        }
+      }
+    }
+  } catch (e) {
+    // Malformed chain meta — log to console but render nothing
+    // misleading. The current claim still verifies independently.
+    console.warn("[wb] wb-claim-chain parse failed", e);
+  }
+}
+
 (async () => {
   const badge = document.getElementById("wb-claim-badge");
   if (!badge) return;
-  const sig = meta("wb-author-sig");
-  const sub = meta("wb-author-sub");
-  const keyId = meta("wb-author-key-id");
-  const email = meta("wb-author-email");
-  const ts = meta("wb-claim-ts");
-  const workbookId = meta("wb-workbook-id");
-  const broker = meta("wb-broker-url");
-  if (!sig || !sub || !keyId || !email || !ts || !workbookId || !broker) {
+  if (claimsToVerify.length === 0) {
     setBadge(badge, "warn", "unverified");
     return;
   }
+
+  const broker = meta("wb-broker-url");
+  if (!broker) {
+    setBadge(badge, "warn", "verify failed");
+    return;
+  }
+
+  // Verify each entry. We cache pubkey lookups per (sub) so a chain
+  // with N saves by the same author hits the broker once.
+  const keysCache = new Map();
+  const results = [];
+  for (const c of claimsToVerify) {
+    results.push(await verifyOne(broker, c, keysCache));
+  }
+
+  // Top-level badge state: worst result wins. ok everywhere → ok;
+  // any err → err; any warn (and no err) → warn.
+  let badgeState = "ok";
+  for (const r of results) {
+    if (r.state === "err") { badgeState = "err"; break; }
+    if (r.state === "warn") badgeState = "warn";
+  }
+  const badgeText = badgeState === "ok"
+    ? (results.length === 1 ? "verified" : "chain verified · " + results.length)
+    : badgeState === "err" ? "tampered" : "unverified";
+  setBadge(badge, badgeState, badgeText);
+
+  // Always make the badge clickable so a curious recipient can see
+  // the full chain breakdown — even when there's only one entry.
+  badge.classList.add("clickable");
+  badge.setAttribute("role", "button");
+  badge.setAttribute("tabindex", "0");
+  const open = () => openModal(results);
+  badge.addEventListener("click", open);
+  badge.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+  });
+})();
+
+function readCurrentClaim() {
+  const sub = meta("wb-author-sub");
+  const email = meta("wb-author-email");
+  const keyId = meta("wb-author-key-id");
+  const ts = meta("wb-claim-ts");
+  const sig = meta("wb-author-sig");
+  const workbookId = meta("wb-workbook-id");
+  const name = meta("wb-author-name");
+  if (!sub || !email || !keyId || !ts || !sig || !workbookId) return null;
+  return {
+    author_sub: sub,
+    author_email: email,
+    author_name: name ?? null,
+    key_id: keyId,
+    ts: Number(ts),
+    workbook_id: workbookId,
+    sig,
+  };
+}
+
+async function verifyOne(broker, claim, keysCache) {
   try {
-    const r = await fetch(broker + "/v1/authors/" + encodeURIComponent(sub) + "/keys");
-    if (!r.ok) {
-      setBadge(badge, "warn", "verify failed");
-      return;
+    let keys = keysCache.get(claim.author_sub);
+    if (!keys) {
+      const r = await fetch(broker + "/v1/authors/" + encodeURIComponent(claim.author_sub) + "/keys");
+      if (!r.ok) {
+        return { ...claim, state: "warn", reason: "verify failed" };
+      }
+      const j = await r.json();
+      keys = j.keys || [];
+      keysCache.set(claim.author_sub, keys);
     }
-    const { keys } = await r.json();
-    const key = (keys || []).find((k) => k.id === keyId);
+    const key = keys.find((k) => k.id === claim.key_id);
     if (!key) {
-      // Key is not in the live set — either revoked, never registered,
-      // or sub mismatch. All of these are "do not trust this claim."
-      setBadge(badge, "err", "key not found");
-      return;
+      return { ...claim, state: "err", reason: "key not found", keyFingerprint: null };
     }
     const pubkeyBytes = b64uToBytes(key.pubkey);
     const cryptoKey = await crypto.subtle.importKey(
-      "raw",
-      pubkeyBytes,
-      { name: "Ed25519" },
-      false,
-      ["verify"],
+      "raw", pubkeyBytes, { name: "Ed25519" }, false, ["verify"],
     );
-    const claimMsg = canonicalClaimBytes({
-      author_sub: sub,
-      author_email: email,
-      workbook_id: workbookId,
-      key_id: keyId,
-      ts: Number(ts),
+    const msg = canonicalClaimBytes({
+      author_sub: claim.author_sub,
+      author_email: claim.author_email,
+      workbook_id: claim.workbook_id,
+      key_id: claim.key_id,
+      ts: claim.ts,
     });
-    const sigBytes = b64uToBytes(sig);
     const ok = await crypto.subtle.verify(
-      { name: "Ed25519" },
-      cryptoKey,
-      sigBytes,
-      claimMsg,
+      { name: "Ed25519" }, cryptoKey, b64uToBytes(claim.sig), msg,
     );
-    setBadge(badge, ok ? "ok" : "err", ok ? "verified" : "tampered");
+    return {
+      ...claim,
+      state: ok ? "ok" : "err",
+      reason: ok ? "verified" : "tampered",
+      keyFingerprint: await sha256Prefix(pubkeyBytes),
+    };
   } catch (e) {
-    setBadge(badge, "warn", "verify failed");
+    return { ...claim, state: "warn", reason: "verify failed" };
   }
-})();
+}
+
+async function sha256Prefix(bytes) {
+  const buf = await crypto.subtle.digest("SHA-256", bytes);
+  const hex = Array.from(new Uint8Array(buf).slice(0, 8))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return hex;
+}
+
+function openModal(entries) {
+  const list = document.getElementById("wb-chain");
+  list.innerHTML = "";
+  // Render in the order they appear: current first, prior chain in
+  // the order the wb-claim-chain meta provided (oldest → newest, or
+  // however the re-sealer composed it).
+  for (const e of entries) {
+    const div = document.createElement("div");
+    div.className = "chain-entry";
+    const who = document.createElement("p");
+    who.className = "who";
+    who.textContent = e.author_name
+      ? e.author_name + " <" + e.author_email + ">"
+      : e.author_email;
+    div.appendChild(who);
+    const when = document.createElement("p");
+    when.className = "when";
+    when.textContent = new Date(e.ts * 1000).toISOString().slice(0, 19) + "Z" +
+                       (e.label === "prior" ? " · prior author" : "");
+    div.appendChild(when);
+    if (e.keyFingerprint) {
+      const fp = document.createElement("p");
+      fp.className = "keyfp";
+      fp.textContent = "key " + e.keyFingerprint + "…";
+      div.appendChild(fp);
+    }
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.dataset.state = e.state;
+    badge.textContent = e.reason;
+    div.appendChild(badge);
+    list.appendChild(div);
+  }
+  document.getElementById("wb-modal-backdrop").classList.add("open");
+  document.getElementById("wb-modal").classList.add("open");
+}
+function closeModal() {
+  document.getElementById("wb-modal-backdrop").classList.remove("open");
+  document.getElementById("wb-modal").classList.remove("open");
+}
+document.getElementById("wb-modal-backdrop").addEventListener("click", closeModal);
+document.getElementById("wb-modal-close").addEventListener("click", closeModal);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeModal();
+});
 
 function setBadge(el, state, text) {
   el.dataset.state = state;
@@ -436,6 +639,7 @@ export async function wrapStudio({
   workbookId = newWorkbookId(),
   claim,
   claimSig,
+  priorChain,
 }) {
   if (typeof brokerUrl !== "string" || !brokerUrl.startsWith("https://")) {
     throw new Error("wrapStudio: brokerUrl must be an https:// URL");
@@ -535,6 +739,12 @@ export async function wrapStudio({
   // shell script can verify against the broker's pubkey list. The
   // signer (workbooksd, see core-5ah.10) is responsible for using
   // canonicalClaimBytes() above to produce the bytes it signed.
+  //
+  // C8.6 — priorChain carries every author-claim that's been signed
+  // before the current one. Each entry is the same shape as the
+  // current claim plus its own .sig. The shell verifier walks the
+  // chain in order; the modal renders every entry's status.
+  // Emitted as base64url-encoded JSON in `wb-claim-chain`.
   let claimMeta = "";
   let claimBlock = "";
   if (claim) {
@@ -564,6 +774,40 @@ export async function wrapStudio({
       }
       metaParts.push(
         `<meta name="wb-author-sig" content="${htmlEscape(claimSig)}">`,
+      );
+    }
+    // C8.6 — append the prior provenance chain if present. Each entry
+    // is a previously-signed claim (same shape as the current claim).
+    // We base64url(JSON) it into a single meta tag rather than a stream
+    // of per-entry tags — keeps the meta surface tidy and lets the
+    // shell parse with one atob.
+    if (priorChain !== undefined) {
+      if (!Array.isArray(priorChain)) {
+        throw new Error("wrapStudio: priorChain must be an array of signed claims");
+      }
+      const required = ["author_sub", "author_email", "key_id", "ts", "workbook_id", "sig"];
+      for (let i = 0; i < priorChain.length; i++) {
+        const e = priorChain[i];
+        if (typeof e !== "object" || e === null) {
+          throw new Error(`wrapStudio: priorChain[${i}] must be an object`);
+        }
+        for (const k of required) {
+          if (e[k] === undefined || e[k] === null || e[k] === "") {
+            throw new Error(`wrapStudio: priorChain[${i}].${k} is required`);
+          }
+        }
+        if (typeof e.ts !== "number" || !Number.isFinite(e.ts)) {
+          throw new Error(`wrapStudio: priorChain[${i}].ts must be a finite number`);
+        }
+      }
+      const json = JSON.stringify(priorChain);
+      const b64u = Buffer.from(json, "utf8")
+        .toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+      metaParts.push(
+        `<meta name="wb-claim-chain" content="${b64u}">`,
       );
     }
     claimMeta = "\n" + metaParts.join("\n");
