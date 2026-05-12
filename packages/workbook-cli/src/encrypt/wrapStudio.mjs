@@ -248,6 +248,8 @@ button:hover{opacity:.88}
 .badge[data-state="warn"]{color:var(--warn)}
 .badge[data-state="err"]{color:var(--err)}
 .foot{margin-top:1.5rem;font-size:.75rem;color:var(--fg-mute);font-family:var(--mono);letter-spacing:.02em}
+.foot a{color:inherit;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px}
+.foot a:hover{text-decoration-color:var(--fg-mute);color:var(--fg)}
 button.secondary{background:var(--code-bg);color:var(--fg);margin-bottom:.6rem}
 .app-hint{margin-top:.6rem;font-size:.75rem;color:var(--fg-mute);text-align:center}
 .app-hint a{color:var(--fg-mute);text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px}
@@ -276,11 +278,9 @@ button.secondary{background:var(--code-bg);color:var(--fg);margin-bottom:.6rem}
 <a class="logo" href="https://workbooks.sh" aria-label="Workbooks"><svg viewBox="0 0 634 632" xmlns="http://www.w3.org/2000/svg"><path d="M517.107 187.121c3.312-.185 8.268.011 11.708.025l18.899-.006c5.975.053 12.157-.374 18.097.049 2.266.162 4.811.531 6.928 1.374 3.545 1.412 7.111 5.477 8.498 8.898.799 1.962.985 4.393 1.112 6.494.554 9.275.154 18.791.157 28.086.007 8.063.486 16.478-.216 24.507-.189 2.18-.592 4.854-1.514 6.845-1.684 3.63-5.189 6.732-8.925 8.033-6.229 2.169-33.731 1.225-42.055 1.209-3.898-.007-8.606-.463-12.25 1.082-4.102 1.742-8.008 5.198-9.624 9.414-1.855 4.83-1.316 10.614-1.313 15.701l.062 28.033c.015 6.295.758 15.131-1.539 20.931-5.597 14.151-20.837 9.282-32.675 10.081-9.138.613-19.654-1.541-28.452 1.755-12.015 4.682-10.959 16.502-10.876 26.83l.072 27.738c0 4.091.204 11.711-.22 15.565-.204 1.949-.709 3.859-1.489 5.657-3.514 7.973-10.538 9.347-18.42 9.298-14.549-.084-29.245.092-43.77-.078-6.634-.077-13.039-5.484-14.813-11.708-1.062-3.736-.715-10.334-.709-14.383l-.012-28.013c.025-5.27.139-10.377-.009-15.701.031-8.802-7.467-16.363-16.234-16.808-9.417-.471-18.834.117-28.275-.202-10.584-.359-22.852-.421-27.975 10.873-1.892 4.172-1.358 12.256-1.344 16.893l.017 27.378c.001 6.261.75 16.71-1.632 22.197-4.048 9.332-13.185 9.759-21.739 9.555-14.084-.338-27.714.359-41.744-.14-6.89-.244-12.302-5.843-14.258-12.107-1.101-3.993-.763-9.827-.762-14.064l.041-24.485c.025-5.926.758-19.291-.879-24.605-4.667-15.15-24.772-11.102-37.157-11.408-11.647-.291-29.066 4.565-34.084-11.374-1.797-5.71-1.061-16.048-1.067-22.136-.027-8.601-.01-17.205.051-25.808.063-9.655 1.263-19.248-9.165-24.403l-.369-.178c-5.697-2.008-10.659-1.421-16.695-1.383l-21.296.038c-9.081.006-17.585 1.431-23.965-6.161-5-5.95-4.043-11.304-4.152-18.542-.085-5.669-.039-11.249-.047-16.863l.013-17.394c.025-6.844-.723-13.073 3.195-19.068 5.171-7.912 13.402-6.857 21.719-6.89l20.827.058c7.153.011 14.83-.321 21.96.169 2.616.313 5.245 1.252 7.38 2.756 8.112 5.718 6.989 16.016 6.936 24.686l-.134 27.752c-.021 5.352-.285 11.796.477 16.997.494 5.157 6.217 11.482 11.6 12.509 9.836 1.651 20.253.675 30.329.858 11.947.218 26.591-2.583 30.621 12.773 1.115 4.247.67 10.385.659 14.906l-.06 27.135c-.009 4.348-.22 12.197.378 16.31.609 4.358 2.939 8.292 6.468 10.922 1.904 1.406 4.344 2.696 6.687 2.99 7.476.938 16.342.483 23.937.542 4.237.034 14.821.21 18.394-.387 6.14-1.08 11.199-5.429 13.193-11.334 1.436-4.33.933-11.3.876-16.063l-.087-27.235c.006-5.421-.181-11.265.521-16.641.885-6.781 7.074-13.157 14.031-13.69 8.019-.615 16.289-.149 24.342-.228 8.958.055 18.193-.388 27.112.415 6.785.794 12.296 5.557 13.766 12.301 1.096 5.026.74 10.851.706 16.012l-.111 26.129c-.034 9.183-1.635 21.259 6.764 27.261 7.241 5.174 19.014 3.169 27.601 3.469 7.064-.331 14.624.588 21.62-.387 16.216-2.256 14.25-18.378 14.207-29.288l-.053-26.435c-.009-7.155-1.046-17.233 3.548-23.127 2.325-2.947 5.566-5.037 9.209-5.94 4.656-1.196 9.269-.388 14.012-.48 10.689-.209 21.818.574 32.433-.278 5.724-.46 11.758-5.155 13.457-10.603 1.43-4.586 1.062-10.521 1.04-15.394l-.027-29.017c-.016-14.087-1.948-28.484 16.531-31.054z"/></svg></a>
 <p class="kicker">workbooks · sealed</p>
 <h1>%%TITLE%%</h1>
-<p class="lede">This workbook is sealed. Sign in to your organization to unlock — decryption happens after identity is verified by the broker.</p>
-%%CLAIM_BLOCK%%<button id="wb-open-app" class="secondary">Open in Workbooks app</button>
-<button id="wb-signin">Sign in to unlock</button>
-<p id="wb-app-hint" class="app-hint hide">Don't have Workbooks installed? <a href="https://workbooks.sh/install" target="_blank" rel="noopener">Get the app</a></p>
-<p class="foot">studio-v1 · aes-256-gcm</p>
+<p class="lede">This workbook is encrypted and access-locked. Sign in to verify you're on the access list — decryption happens in your browser after sign-in. No app to install.</p>
+%%CLAIM_BLOCK%%<button id="wb-signin">Sign in to unlock</button>
+<p class="foot">studio-v1 · aes-256-gcm · <a href="https://workbooks.sh" rel="noopener">what's a workbook?</a></p>
 </main>
 <div id="wb-modal-backdrop" class="modal-backdrop" role="presentation"></div>
 <div id="wb-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="wb-modal-title">
@@ -309,36 +309,10 @@ const meta = (n) => {
   return el ? el.content : null;
 };
 
-// ── C8.5 — Daemon-aware sign-in CTAs ────────────────────────────────
-//
-// "Open in Workbooks app" uses workbooks-open://<workbook-id>. The
-// Workbooks.app registers this scheme via its bundle's
-// CFBundleURLTypes (mac) / desktop file (linux). If the scheme isn't
-// handled, no app launch happens — we surface a "Get the app" hint
-// after 1.5s. Heuristic but standard (Slack, Zoom, 1Password use the
-// same pattern).
-document.getElementById("wb-open-app").addEventListener("click", () => {
-  const id = meta("wb-workbook-id") ?? "";
-  const broker = meta("wb-broker-url") ?? "";
-  const url = "workbooks-open://" + encodeURIComponent(id) +
-              "?broker=" + encodeURIComponent(broker) +
-              "&from=" + encodeURIComponent(location.href);
-  // Detect "scheme not handled" by watching for visibility loss.
-  // If the browser handed off to an app, the page goes hidden; if
-  // not, we stay visible and surface the install hint.
-  let handed = false;
-  const onHide = () => { handed = true; };
-  document.addEventListener("visibilitychange", onHide, { once: true });
-  location.href = url;
-  setTimeout(() => {
-    document.removeEventListener("visibilitychange", onHide);
-    if (!handed) {
-      const hint = document.getElementById("wb-app-hint");
-      hint.classList.remove("hide");
-      hint.classList.add("show");
-    }
-  }, 1500);
-});
+// ── Sign-in CTA ─────────────────────────────────────────────────────
+// Pivot 2026-05-04: the "Open in Workbooks app" daemon CTA was
+// removed alongside the daemon-as-primary pivot. Sealed workbooks now
+// only offer the "Sign in to unlock" path through the broker.
 
 document.getElementById("wb-signin").addEventListener("click", () => {
   const broker = meta("wb-broker-url");

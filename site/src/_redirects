@@ -1,12 +1,7 @@
 # Cloudflare Pages redirects.
 #
-# /dl/* — single source of truth is the latest GitHub Release on
-# shinyobjectz-sh/workbooks. The release pipeline at
-# packages/workbooksd/release/release.sh creates the release; this file
-# just points downloads at it. Everything in /dl/ is a redirect, no
-# binaries are stored here or in git.
-#
-# Format: <source-path>  <destination-url>  <status-code>
-# :splat captures the wildcard.
+# (Pivot 2026-05-04 — the legacy `/dl/*` daemon-download redirect was
+# removed. Workbooks ships as portable HTML now; the CLI builds them.
+# See vendor/workbooks/CLAUDE.md → "Workbooks pivot (W-series)".)
 
-/dl/*  https://github.com/shinyobjectz-sh/workbooks/releases/latest/download/:splat  302
+# Format: <source-path>  <destination-url>  <status-code>

@@ -137,6 +137,39 @@ export async function loadConfig(projectDir) {
     };
   }
 
+  // Source bundle — embed a gzipped JSON snapshot of the project source
+  // inside the compiled .html so recipients can `workbook unbundle`.
+  // On by default for unencrypted builds (W1.3 of the workbooks pivot
+  // 2026-05-04). Authors with proprietary trees opt out via
+  // `bundle: { enabled: false }`. `additionalIgnore` accepts gitignore-
+  // lite patterns; `includeGit: true` ships the .git/ directory too.
+  let bundle = { enabled: true, includeGit: false, additionalIgnore: [] };
+  if (cfg.bundle !== undefined && cfg.bundle !== null) {
+    if (cfg.bundle === false) {
+      bundle = { enabled: false, includeGit: false, additionalIgnore: [] };
+    } else if (typeof cfg.bundle === "object" && !Array.isArray(cfg.bundle)) {
+      bundle = {
+        enabled: cfg.bundle.enabled !== false,
+        includeGit: cfg.bundle.includeGit === true,
+        additionalIgnore: Array.isArray(cfg.bundle.additionalIgnore)
+          ? cfg.bundle.additionalIgnore.slice()
+          : [],
+      };
+      if (
+        !bundle.additionalIgnore.every((p) => typeof p === "string" && p.length > 0)
+      ) {
+        throw new Error(
+          "workbook.config: bundle.additionalIgnore must be an array of non-empty strings",
+        );
+      }
+    } else {
+      throw new Error(
+        "workbook.config: 'bundle' must be a boolean or " +
+          "{ enabled?, includeGit?, additionalIgnore? }",
+      );
+    }
+  }
+
   // Save-on-Cmd+S — author-controlled state envelope, on by default.
   // Authors override the state via window.serializeWorkbookState /
   // window.rehydrateWorkbookState in their main.js. Disable entirely
@@ -326,5 +359,6 @@ export async function loadConfig(projectDir) {
     inlineRuntime: cfg.inlineRuntime ?? true,
     encrypt,                    // null when not configured
     save,                       // { enabled: true } default
+    bundle,                     // source-bundle settings; default enabled
   };
 }

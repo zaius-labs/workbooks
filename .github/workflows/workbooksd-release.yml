@@ -1,5 +1,12 @@
-name: workbooksd release
+name: workbooksd release (legacy)
 
+# ── Legacy as of 2026-05-04 pivot ────────────────────────────────────
+# workbooksd is the legacy save-in-place daemon. The workbooks product
+# moved to portable HTML mini-apps (CLI + .html with embedded source
+# bundle). This workflow still triggers on explicit `workbooksd-v*` tag
+# pushes for users who need to recut, but new daemon releases should be
+# rare. See packages/workbooksd/README.md for pivot context.
+#
 # Build the workbooksd Rust daemon for all supported targets, sign each
 # (Apple Developer ID for macOS, Microsoft Trusted Signing for Windows),
 # checksum, and ship the binaries to workbooks.sh/dl/ via the existing

@@ -1,5 +1,13 @@
 # Authoring a workbook
 
+> **Pivot 2026-05-04 — read first.** The recommended distribution is
+> the bare `.html` artifact emitted by `workbook build` (now with the
+> source tree bundled inside; recover via `workbook unbundle`).
+> Sections below that describe save-in-place / `workbooksd` flows are
+> still accurate for users who explicitly install the legacy daemon,
+> but they are no longer the primary path. See
+> `packages/workbooksd/README.md` for the daemon's legacy status.
+
 Workbooks are a **format**, not a framework. The runtime + build tool
 are open about how you author the source — pick whatever shape and
 tooling matches the work, get the same `.html` artifact at

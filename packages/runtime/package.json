@@ -71,6 +71,11 @@
       "types": "./src/agentLoop.ts",
       "default": "./src/agentLoop.ts"
     },
+    "./chat": {
+      "svelte": "./src/chat/index.ts",
+      "types": "./src/chat/index.ts",
+      "default": "./src/chat/index.ts"
+    },
     "./htmlBindings": {
       "types": "./src/htmlBindings.ts",
       "default": "./src/htmlBindings.ts"

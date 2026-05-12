@@ -304,14 +304,14 @@ html, body { background: #0a0a0a; color: #f5f5f5; font-family: Inter, ui-sans-se
     </div>
   </div>
 
-  <!-- S5: runtime -->
+  <!-- S5: CLI install + ship-the-source-with-the-artifact loop -->
   <div class="section s5">
-    <div class="s5-cmd"><span class="prompt">$</span>curl -fsSL https://workbooks.sh/install | sh</div>
+    <div class="s5-cmd"><span class="prompt">$</span>npm install -g @work.books/cli</div>
     <div class="s5-keypress">
-      <div class="s5-key">⌘</div><div class="s5-key">S</div>
-      <span style="margin-left: 12px;">Save in place</span>
+      <div class="s5-key">📤</div>
+      <span style="margin-left: 12px;">Email the .html</span>
     </div>
-    <div class="s5-saved">Saved</div>
+    <div class="s5-saved">Source bundled inside</div>
   </div>
 
   <!-- S6: authoring -->

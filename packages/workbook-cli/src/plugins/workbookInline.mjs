@@ -369,7 +369,44 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
         const tagEnd = TRIGGER.TAG_SCRIPT_END();
         const specTag =
           `${tagOpen} id="workbook-spec" type="application/json">${specJson}${tagEnd}`;
-        const injection = (iconLinks ? iconLinks + "\n" : "") + specTag;
+
+        // Dark Reader auto-lock — Dark Reader (and similar extensions)
+        // inject `--darkreader-*` CSS vars and rewrite color values,
+        // which mangles author-controlled palettes (especially Svelte
+        // apps with prefers-color-scheme contracts). The standard
+        // defense is `<meta name="darkreader-lock">`, which the
+        // extension respects. Authors can opt out by declaring their
+        // own meta with a different name, or `darkreader-allow`.
+        const hasDarkReaderMeta = /<meta\s[^>]*name\s*=\s*["']?darkreader[\w-]*/i.test(html);
+        const darkReaderLock = hasDarkReaderMeta
+          ? ""
+          : `<meta name="darkreader-lock">`;
+
+        // Workbook baseline — minimal reset that fixes the "h-full
+        // doesn't work without Tailwind" trap and normalizes form-
+        // element borders. Authors who set their own html/body height
+        // override these via specificity. id=`wb-baseline-style` so it's
+        // identifiable + idempotent (re-injection won't duplicate).
+        const hasBaseline = /id\s*=\s*["']?wb-baseline-style["']?/i.test(html);
+        const baseline = hasBaseline
+          ? ""
+          : `<style id="wb-baseline-style">
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%;margin:0;padding:0}
+body{font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:transparent;border:0;padding:0;cursor:pointer}
+:root{color-scheme:light dark}
+</style>`;
+
+        const injection = [
+          darkReaderLock,
+          baseline,
+          iconLinks,
+          specTag,
+        ]
+          .filter(Boolean)
+          .join("\n");
         // Place the slot first, then inject spec/icons before it. The
         // slot stays in place for the writeBundle pass.
         return injectIntoHead(ensureSlot(html), injection);
@@ -411,13 +448,14 @@ export default function workbookInline({ config, runtimeOverride } = {}) {
         ? `${SAVE_BEGIN}\n<script>${escapeForScript(saveHandlerSrc)}</script>\n${SAVE_END}`
         : "";
 
-      // Install-Workbooks toast — fixed bottom-left card that shows up
-      // when the file is opened via file:// (or any non-daemon URL),
-      // prompting the user to install workbooksd. Self-suppresses when
-      // loaded via http://127.0.0.1:47119/wb/<token>/ or inside an
-      // iframe. Disable per-workbook via config.installToast.enabled =
-      // false (e.g. for cloud-only workbooks where the CTA doesn't apply).
-      const installToastEnabled = config.installToast?.enabled !== false;
+      // Install-Workbooks toast — fixed bottom-left card prompting the
+      // user to install the legacy `workbooksd` daemon for save-in-place.
+      //
+      // Default OFF as of the 2026-05-04 pivot — bare HTML artifacts
+      // are the canonical shape; the daemon is legacy. Authors who
+      // explicitly want recipients to see the install prompt can
+      // opt back in with `installToast: { enabled: true }`.
+      const installToastEnabled = config.installToast?.enabled === true;
       const installToastSrc = installToastEnabled ? await readInstallToast() : null;
       const { BEGIN: TOAST_BEGIN, END: TOAST_END } = makeInstallToastSentinels();
       const installToastBlock = installToastSrc

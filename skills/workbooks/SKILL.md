@@ -1,15 +1,17 @@
 ---
 name: Workbooks authoring
-description: Author single-file HTML workbooks — `.html` files that ship a real WASM runtime (Polars, Candle, SQLite, ML), save themselves in place via workbooksd, and run from file://, USB, email, or any browser. Use this skill when the user asks to build, edit, or scaffold a workbook; when they mention `workbook init`, `workbook dev`, `workbook build`; or when they want a portable single-file analytical app, notebook, or document.
+description: Author portable single-file HTML workbooks — `.html` files that ship an inlined WASM runtime (Polars, Candle, SQLite, ML), embed their own gzipped source bundle, and run anywhere a browser runs (file://, USB, email, any host). Use this skill when the user asks to build, edit, or scaffold a workbook; when they mention `workbook init`, `workbook dev`, `workbook build`, `workbook unbundle`; or when they want a portable single-file analytical app, notebook, or document.
 ---
 
 # Workbooks authoring
 
-A workbook is one HTML file that runs anywhere a browser does and saves
-itself in place when the local **workbooksd** runtime is installed.
+A workbook is one HTML file that runs anywhere a browser does. The
+artifact is portable + iterable: the CLI compiles your project tree into
+a single `.html`, with the source bundled inside (gzipped) so recipients
+can `workbook unbundle` it back into a working directory.
 
 ```
-<slug>.html  =  HTML  +  inlined WASM runtime  +  your code
+<slug>.html  =  HTML  +  inlined WASM runtime  +  your code  +  gzipped source bundle
 ```
 
 Three render shapes — pick the one that matches what the reader does:
@@ -27,11 +29,11 @@ This skill is intentionally split. Don't read everything at once.
 | If the user wants to…                           | Load                                              |
 | ----------------------------------------------- | ------------------------------------------------- |
 | understand the file format itself               | [references/format.md](references/format.md)      |
-| scaffold, dev, build, lint, sign                | [references/cli.md](references/cli.md)            |
+| scaffold, dev, build, lint, sign, unbundle      | [references/cli.md](references/cli.md)            |
 | call the browser-side runtime (DataFrames, ML)  | [references/runtime.md](references/runtime.md)    |
 | fix a `workbook check` rule failure             | [references/checks.md](references/checks.md)      |
-| ship to users (workbooksd, file://, web)        | [references/deploy.md](references/deploy.md)      |
-| use the file-as-database substrate              | [references/substrate.md](references/substrate.md)|
+| ship to users (file://, USB, email, web host)   | [references/deploy.md](references/deploy.md)      |
+| use the file-as-database substrate (legacy)     | [references/substrate.md](references/substrate.md)|
 | copy a working example as a starting point      | [references/examples.md](references/examples.md)  |
 
 ## Hard rules
@@ -41,29 +43,30 @@ These hold regardless of what the user is building.
 1. **One file output.** A workbook is always exactly one `<slug>.html`
    file. No siblings. No `dist/assets/`. The workbook-cli enforces this.
 
-2. **Plain `.html` extension.** As of `@work.books/cli` 0.4.0 the
-   legacy `.workbook.html` compound extension is retired. Workbook
-   identity is content-based — `<meta name="wb-permissions">` and
-   `<script id="wb-meta">` inside the file mark it as a workbook, not
-   the filename. macOS routes double-clicks via the per-file
-   `LaunchServices.OpenWith` extended attribute the daemon stamps on
-   `/open` and `/save`, not via UTI tag-spec on the extension.
+2. **Plain `.html` extension.** Workbook identity is content-based —
+   `<meta name="wb-permissions">` and `<script id="wb-meta">` inside
+   the file mark it as a workbook, not the filename.
 
-3. **No `workbook-runner`.** The legacy C polyglot is removed. If you
-   see `workbook-runner` or `cosmocc` in any active code path, that
-   reference is stale — it was replaced by `packages/workbooksd` (a
-   small Rust background daemon).
+3. **Author with `@work.books/cli`.** Don't hand-write your own bundler.
+   The CLI handles WASM inlining, runtime injection, the
+   DecompressionStream sandwich, source-bundle embedding, and (when
+   requested) the encrypt/sign stages.
 
-4. **Author workbooks with `@work.books/cli`.** Don't hand-write your
-   own bundler. The CLI handles WASM inlining, runtime injection, the
-   DecompressionStream sandwich, save handler, and install toast.
+4. **Bare `.html` is the canonical artifact.** It runs in any browser
+   without anything installed. Source-bundle embedding is on by default
+   so the artifact ships with its own iterable source; recipients can
+   `workbook unbundle <file.html>` to recover the project tree.
 
-5. **Install Workbooks once, edit any workbook anywhere.** The save
-   contract is: when `workbooksd` is running and the page is loaded
-   via `http://127.0.0.1:<port>/wb/<token>/` (random port published
-   in `~/Library/Application Support/sh.workbooks.workbooksd/runtime.json`),
-   ⌘S writes the file in place atomically. When it isn't, the
-   workbook still renders; it's read-only.
+5. **Persistent state lives at workbooks.sh.** The `.html` artifact
+   itself is stateless — perfect for one-shot deliverables (a chart, a
+   tool, a presentation). Workflows that need login + per-recipient
+   state move to the hosted viewer at workbooks.sh; the artifact stays
+   portable, the host adds storage.
+
+6. **`workbooksd` is legacy.** The save-in-place daemon still exists
+   for installed users, but it's no longer the recommended path. Don't
+   propose new daemon work without flagging the pivot. See
+   `packages/workbooksd/README.md`.
 
 ## Quick-start
 
@@ -73,11 +76,24 @@ npm install -g @work.books/cli
 workbook init my-thing
 cd my-thing
 workbook dev      # live-reload server
-workbook build    # → dist/my-thing.html
+workbook build    # → dist/my-thing.html (with embedded source bundle)
 
 # Run anywhere
-open dist/my-thing.html                 # without workbooksd: read-only
-workbooksd open dist/my-thing.html      # with workbooksd: edit + save
+open dist/my-thing.html                                # any browser
+
+# Recover the source from a built artifact
+workbook unbundle dist/my-thing.html ./extracted
+cd extracted && npm install && workbook dev
+```
+
+Build flags worth knowing:
+
+```
+workbook build
+  --no-bundle      skip embedding the source (smaller .html, no `unbundle`)
+  --bundle-git     include the .git/ directory in the source bundle
+  --no-wasm        skip wasm + runtime inlining (dev-only, smaller files)
+  --encrypt        wrap in a passphrase lock screen (age-v1)
 ```
 
 ## Disambiguation — workbooks vs HyperFrames vs Signal
@@ -97,6 +113,7 @@ this skill.
 ## Source of truth
 
 - Repo: <https://github.com/shinyobjectz-sh/workbooks>
-- Spec: `docs/WORKBOOK_SPEC.md` in that repo
+- Spec: `docs/SPEC.md` in that repo
 - Examples: `examples/` in that repo (chess, earthquakes, stocks, etc.)
-- Daemon: <https://workbooks.sh>
+- CLI on npm: `@work.books/cli`
+- Hosted viewer (for persistent / multi-user workflows): <https://workbooks.sh>

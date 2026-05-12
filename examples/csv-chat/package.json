@@ -1,0 +1,19 @@
+{
+  "name": "@work.books/example-csv-chat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "workbook dev",
+    "build": "workbook build"
+  },
+  "dependencies": {
+    "@work.books/runtime": "workspace:*",
+    "svelte": "^5.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@work.books/cli": "workspace:*",
+    "vite": "^6.0.0"
+  }
+}

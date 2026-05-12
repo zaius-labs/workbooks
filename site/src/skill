@@ -1,0 +1,38 @@
+#!/bin/sh
+# workbooks.sh — installer for the Workbooks Claude Code skill.
+#
+# Usage:
+#   curl -fsSL https://workbooks.sh/skill | sh
+#
+# What this does:
+#   1. Pulls the Workbooks skill from the OSS repo's main branch
+#      (skills/workbooks/SKILL.md + references/).
+#   2. Drops it at ~/.claude/skills/workbooks/, replacing any prior version.
+#
+# Plugin-marketplace install (`/plugin install`) is the canonical Claude
+# Code path and we'll move to it once the OSS repo grows the
+# .claude-plugin/marketplace.json wrapper. Until then this is the
+# friction-free single-line install.
+
+set -eu
+
+SKILL_DIR="${HOME}/.claude/skills"
+TARBALL="https://github.com/shinyobjectz-sh/workbooks/archive/refs/heads/main.tar.gz"
+
+mkdir -p "$SKILL_DIR"
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+# --strip-components=2 drops "workbooks-main/skills/" so the workbooks
+# skill directory lands directly in $TMP.
+curl -fsSL "$TARBALL" \
+  | tar -xz -C "$TMP" --strip-components=2 workbooks-main/skills/workbooks
+
+# Replace any prior install atomically. rm -rf is fine here — the
+# target is only ever a skill directory we own.
+rm -rf "$SKILL_DIR/workbooks"
+mv "$TMP/workbooks" "$SKILL_DIR/workbooks"
+
+echo "[install] Workbooks skill → $SKILL_DIR/workbooks"
+echo "[install] Restart Claude Code (or run /reload-skills) to pick it up."

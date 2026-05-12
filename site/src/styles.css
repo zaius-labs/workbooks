@@ -36,6 +36,34 @@ main {
   padding: 6rem 1.5rem 8rem;
 }
 
+/* Top-right nav — sign-in / runner shortcuts. Sits over the page so
+ * it doesn't affect the centered hero spacing. Hidden on narrow widths
+ * so the hero owns the first viewport on phones. */
+.topnav {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.5rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+@media (max-width: 540px) {
+  .topnav { display: none; }
+}
+.topnav-link {
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  text-decoration: none;
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+}
+.topnav-link:hover { color: var(--fg); background: var(--code-bg); }
+.topnav-link.primary {
+  color: var(--fg);
+  border: 1px solid var(--line);
+}
+.topnav-link.primary:hover { background: var(--code-bg); }
+
 .logo { width: 56px; height: 56px; margin-bottom: 2.5rem; }
 .logo svg { width: 100%; height: 100%; display: block; }
 
@@ -48,7 +76,13 @@ h1 {
 .lede {
   font-size: 1.15rem;
   color: var(--fg-muted);
-  margin: 0 0 2.5rem;
+  margin: 0 0 2rem;
+  max-width: 36em;
+}
+.lede-note {
+  font-size: 0.95rem;
+  color: var(--fg-muted);
+  margin: 0 0 3rem;
   max-width: 36em;
 }
 
@@ -86,56 +120,6 @@ h1 {
 .install .copy:hover { color: var(--fg); }
 .install .copy.copied { color: var(--fg); }
 
-/* Platform tiles — borderless. Hover lifts opacity + a faint shade.
- * Unavailable is just dimmed text, no styling chrome. */
-.platforms {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.5rem;
-  margin: 0 0 0.75rem;
-}
-@media (min-width: 600px) {
-  .platforms { grid-template-columns: repeat(3, 1fr); }
-}
-.platform {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.45rem;
-  padding: 1rem;
-  background: transparent;
-  border-radius: 8px;
-  text-decoration: none;
-  color: var(--fg);
-  transition: background 0.15s ease;
-}
-.platform:hover:not(.unavailable) { background: var(--code-bg); }
-.platform.unavailable { opacity: 0.4; cursor: default; }
-.os-icon {
-  display: inline-flex;
-  width: 22px;
-  height: 22px;
-  color: var(--fg);
-}
-.os-icon svg { width: 100%; height: 100%; display: block; }
-.platform-name {
-  font-weight: 600;
-  font-size: 0.95rem;
-  line-height: 1.2;
-  margin-top: 0.15rem;
-}
-.platform-meta {
-  color: var(--fg-muted);
-  font-size: 0.8rem;
-  line-height: 1.3;
-}
-.platforms-note {
-  font-size: 0.8rem;
-  color: var(--fg-muted);
-  margin: 0 0 3rem;
-}
-.platforms-note a { color: inherit; }
-
 section { margin-top: 3rem; }
 section h2 {
   font-size: 1rem;
@@ -144,6 +128,16 @@ section h2 {
   text-transform: uppercase;
   color: var(--fg-muted);
   margin: 0 0 0.75rem;
+}
+.skill-section h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.skill-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 section p { margin: 0 0 1rem; max-width: 36em; }
 section p.muted { color: var(--fg-muted); font-size: 0.9rem; }

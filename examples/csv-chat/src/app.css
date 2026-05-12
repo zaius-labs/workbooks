@@ -1,0 +1,16 @@
+/* Minimal page reset + height cascade for the workbook to fill the
+ * viewport. The CLI injects a similar baseline into every workbook
+ * build (see workbookInline plugin), so this file is mostly here to
+ * document what an author would write themselves. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background: #ffffff;
+  color: #0a0a0a;
+}
+@media (prefers-color-scheme: dark) {
+  body { background: #0a0a0a; color: #f5f5f5; }
+}
+#app { height: 100%; }

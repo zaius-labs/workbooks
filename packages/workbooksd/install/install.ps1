@@ -108,6 +108,13 @@ function Download-Binary {
       Die "download failed: $url ($($_.Exception.Message))"
     }
     Verify-Checksum $tmp $asset
+    # Strip Mark-of-the-Web. Invoke-WebRequest stamps a Zone.Identifier
+    # ADS marking the file as "downloaded from the internet"; combined
+    # with an unsigned binary that pushes SmartScreen to escalate from
+    # a soft warning to a full-screen "Windows protected your PC" wall.
+    # We've already SHA-verified the bytes against the manifest, so
+    # the MOTW is no longer load-bearing here.
+    Unblock-File -Path $tmp -ErrorAction SilentlyContinue
     # Replace atomically (close any running daemon first if upgrading).
     if (Test-Path $BinPath) { Stop-RunningDaemon }
     Move-Item -Force -Path $tmp -Destination $BinPath

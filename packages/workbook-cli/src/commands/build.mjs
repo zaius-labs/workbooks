@@ -9,6 +9,8 @@ import workbookPlugin from "../plugins/workbookInline.mjs";
 import workbookVirtualModulesPlugin from "../plugins/virtualModules.mjs";
 import { readPassphrase, assertStrongPassphrase } from "../encrypt/secrets.mjs";
 import { wrapEncrypted } from "../encrypt/wrapHtml.mjs";
+import { createSourceBundle } from "../bundle/sourceBundle.mjs";
+import { embedBundle } from "../bundle/embedSource.mjs";
 
 export async function runBuild(opts = {}) {
   const { project = ".", out, runtime, wasm } = opts;
@@ -76,13 +78,58 @@ export async function runBuild(opts = {}) {
     logLevel: "info",
   });
 
+  // The workbookInline plugin renames Vite's `index.html` to
+  // `<slug>.html` only when `inlineRuntime` is on. With --no-wasm /
+  // `inlineRuntime: false` (dev-only builds), Vite's own `index.html`
+  // is the artifact. Resolve to whichever one Vite + the plugin
+  // actually wrote.
+  const artifactPath = await resolveArtifactPath(outDir, config.slug);
+
+  // ── Source-bundle stage (Phase W1.3) ──────────────────────────────
+  // Embed a gzipped JSON snapshot of the project source into the
+  // compiled artifact so recipients can `workbook unbundle <file.html>`
+  // and iterate. Skipped when encryption is requested — embedding
+  // unencrypted source inside an encrypted artifact would defeat the
+  // lockscreen. Skipped when --no-bundle (or `bundle: { enabled: false }`
+  // in workbook.config.mjs).
+  if (!encryptRequest && shouldBundle(opts, config)) {
+    const includeGit =
+      opts["bundle-git"] === true ||
+      config.bundle?.includeGit === true;
+    const additionalIgnore = config.bundle?.additionalIgnore ?? [];
+    const { buffer, fileCount, uncompressedSize } = await createSourceBundle(
+      config.root,
+      {
+        includeGit,
+        additionalIgnore,
+        rootName: config.slug,
+      },
+    );
+    const html = await fs.readFile(artifactPath, "utf8");
+    const withBundle = embedBundle(html, buffer, {
+      rootName: config.slug,
+      fileCount,
+      bundleSize: buffer.length,
+      uncompressedSize,
+    });
+    await fs.writeFile(artifactPath, withBundle);
+    const bundleKb = Math.round(buffer.length / 1024);
+    process.stdout.write(
+      `[workbook] bundled ${fileCount} source file(s) → ${bundleKb} KB embedded ` +
+        `(unbundle with: workbook unbundle ${config.slug}.html)\n`,
+    );
+  }
+
   // Encryption stage. workbookInline already wrote the artifact at
   // <slug>.html (0.4.0+ — the .html infix is retired);
   // we read it back, wrap it in a lock screen, and write it back
   // to the same path.
   if (encryptRequest) {
-    const artifactPath = path.join(outDir, `${config.slug}.html`);
     const plaintext = await fs.readFile(artifactPath, "utf8");
+    // Encryption fingerprints the whole file. If a bundle is present
+    // (which we skipped above when encryptRequest is set, so this is
+    // a defensive belt-and-suspenders), it's still inside `plaintext`
+    // and gets sealed alongside the rest.
     const wrapped = await wrapEncrypted({
       html: plaintext,
       passphrase: encryptRequest.passphrase,
@@ -97,6 +144,45 @@ export async function runBuild(opts = {}) {
   }
 
   process.stdout.write(`[workbook] build complete · slug=${config.slug} → ${path.relative(process.cwd(), outDir)}\n`);
+}
+
+/**
+ * Resolve the post-build artifact path. The workbookInline plugin
+ * renames `index.html` to `<slug>.html` when `inlineRuntime` is on
+ * (the normal production path) — but `--no-wasm` / `inlineRuntime:
+ * false` skips that rename. Try the renamed path first; fall back
+ * to plain `index.html`.
+ */
+async function resolveArtifactPath(outDir, slug) {
+  const slugPath = path.join(outDir, `${slug}.html`);
+  try {
+    await fs.access(slugPath);
+    return slugPath;
+  } catch {}
+  const indexPath = path.join(outDir, "index.html");
+  try {
+    await fs.access(indexPath);
+    return indexPath;
+  } catch {}
+  throw new Error(
+    `workbook build: no artifact at ${slugPath} or ${indexPath}. ` +
+      `Vite output may have failed.`,
+  );
+}
+
+/**
+ * Resolve whether this build should embed the source bundle.
+ *
+ * Resolution order (later wins):
+ *   1. `bundle: { enabled: true }`   in workbook.config.mjs (default true)
+ *   2. `--no-bundle`                  flag (forces off)
+ *   3. `--bundle`                     flag (forces on)
+ */
+function shouldBundle(opts, config) {
+  if (opts.bundle === false) return false;
+  if (opts.bundle === true) return true;
+  if (config.bundle?.enabled === false) return false;
+  return true;
 }
 
 /**

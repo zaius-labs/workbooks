@@ -27,12 +27,19 @@ async function help() {
     "  workbook inspect <path>    show metadata of a sealed workbook (no decryption)",
     "  workbook keygen            generate an Ed25519 author keypair for signing",
     "  workbook init <name>       scaffold a new workbook project (--template=spa)",
+    "  workbook unbundle <html>   extract embedded source bundle from a built .html",
+    "  workbook publish <html>    upload a built .html and get a workbooks.sh/w/<id> URL",
     "",
     "Build / dev options:",
     "  --port <n>      dev server port (default 5173)",
     "  --out <dir>     build output dir (default dist)",
     "  --runtime <p>   override path to workbook-runtime checkout (auto-detected)",
     "  --no-wasm       skip inlining wasm + runtime bundle (smaller, dev-only)",
+    "  --no-bundle     skip embedding the gzipped source bundle (default ON for",
+    "                  unencrypted builds; recipients can `workbook unbundle`",
+    "                  the .html to recover the source)",
+    "  --bundle-git    include the .git/ directory in the source bundle (off",
+    "                  by default — git histories can balloon the artifact)",
     "  --encrypt       wrap the artifact in a passphrase lock screen (age-v1).",
     "                  Pair with --password-stdin / --password-file or set",
     "                  the env var declared by encrypt.passwordEnv in",
@@ -167,6 +174,18 @@ try {
       const flags = parseFlags(argv.slice(1));
       const { runInit } = await import(path.join(cmdRoot, "init.mjs"));
       await runInit(flags);
+      break;
+    }
+    case "unbundle": {
+      const flags = parseFlags(argv.slice(1));
+      const { runUnbundle } = await import(path.join(cmdRoot, "unbundle.mjs"));
+      await runUnbundle(flags);
+      break;
+    }
+    case "publish": {
+      const flags = parseFlags(argv.slice(1));
+      const { runPublish } = await import(path.join(cmdRoot, "publish.mjs"));
+      await runPublish(flags);
       break;
     }
     case "help":

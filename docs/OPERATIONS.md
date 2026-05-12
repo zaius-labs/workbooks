@@ -1,5 +1,12 @@
 # Workbook Operations Guide
 
+> **Pivot 2026-05-04 — read first.** This document covers
+> agent-driven document/notebook lifecycles AND the legacy
+> `workbooksd` save-in-place flow. The latter is no longer the
+> primary path; bare `.html` artifacts (built with `workbook build`,
+> source-bundled, sharable as a file) are the recommended shape. See
+> `packages/workbooksd/README.md` for the daemon's legacy status.
+
 A companion to `SPEC.md`. The spec defines *what a workbook is* — its format, schema, protocols, and runtime contract. This document defines *how a workbook is used* — its lifecycle, the agent's role in creating it, the persistence model, identity and auth, observability, quotas, editing UI, format conversions, snapshot history, discovery, and notifications.
 
 If the spec answers "what's in the file?", this answers "what happens when a user clicks the New button?"

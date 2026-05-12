@@ -29,15 +29,12 @@ The browser parses it as ordinary HTML. Everything else is opt-in.
     }
   </script>
 
-  <!-- Save handler. Cmd+S → atomic save (workbooksd or download). -->
+  <!-- Save handler. Cmd+S → File System Access API where supported,
+       or download fallback. (Legacy: routes through workbooksd when
+       installed.) -->
   <!-- BEGIN workbook-save-handler -->
   <script>(function() { /* injected by workbook build */ })()</script>
   <!-- END workbook-save-handler -->
-
-  <!-- Install toast. Bottom-left card if no daemon detected. -->
-  <!-- BEGIN workbook-install-toast -->
-  <script>(function() { /* injected by workbook build */ })()</script>
-  <!-- END workbook-install-toast -->
 
   <!-- Portable assets. Inlined wasm + bindgen + runtime bundle. -->
   <!-- BEGIN workbook-runtime -->
@@ -50,10 +47,15 @@ The browser parses it as ordinary HTML. Everything else is opt-in.
   <!-- Author's content. Plain HTML, custom elements, anything. -->
   …
 
-  <!-- Last-saved state, written by the save handler on Cmd+S. -->
-  <script id="wb-saved-state" type="application/json">
-    { "v": 1, "ts": 1716000000000, "forms": {…}, "localStorage": {…} }
-  </script>
+  <!-- Source bundle (W1). Gzipped JSON snapshot of the project tree.
+       Browsers ignore the non-script type entirely; recipients
+       recover via `workbook unbundle <file.html>`. -->
+  <script id="wb-source-bundle"
+          type="application/x-workbook-source"
+          data-format="json+gzip+base64"
+          data-version="1"
+          data-root-name="my-thing"
+          data-file-count="42">…base64…</script>
 </body>
 </html>
 ```

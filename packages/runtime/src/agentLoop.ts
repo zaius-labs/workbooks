@@ -22,12 +22,26 @@ import type {
   TokenUsage,
 } from "./llmClient";
 
+/**
+ * Tool result shape. Tools can return:
+ *   - a plain string (the message back to the model — used by simple
+ *     query tools); or
+ *   - `{ result, block }` where `block` is an inline WorkbookBlock the
+ *     chat surface should render in the thread + add to the canvas.
+ *     `useChatSession` recognizes this shape; the bare `runAgentLoop`
+ *     ignores `block` and just forwards `result`.
+ */
+export type ToolInvokeResult =
+  | string
+  | { result: string; block?: import("./types").WorkbookBlock };
+
 export interface AgentTool {
   definition: ToolDefinition;
   /** Invoked when the model calls this tool. Receives the parsed
-   *  arguments (per the tool's JSON Schema) and returns a string the
-   *  model can read in its next turn. */
-  invoke: (args: Record<string, unknown>) => Promise<string> | string;
+   *  arguments (per the tool's JSON Schema). The plain-string return
+   *  goes back to the model; the `{result, block}` form additionally
+   *  surfaces a WorkbookBlock for the chat UI. */
+  invoke: (args: Record<string, unknown>) => Promise<ToolInvokeResult> | ToolInvokeResult;
 }
 
 export interface AgentLoopOptions {
@@ -126,7 +140,17 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
             ? (JSON.parse(call.argumentsJson) as Record<string, unknown>)
             : {};
           const r = await tool.invoke(args);
-          result = typeof r === "string" ? r : JSON.stringify(r);
+          if (typeof r === "string") {
+            result = r;
+          } else if (r && typeof r === "object" && "result" in r) {
+            // The {result, block} form — bare runAgentLoop ignores
+            // `block` (no chat UI to render it into) and forwards the
+            // string. `useChatSession` recognizes the same shape and
+            // surfaces the block.
+            result = typeof r.result === "string" ? r.result : JSON.stringify(r);
+          } else {
+            result = JSON.stringify(r);
+          }
         } catch (err) {
           result = `error: ${err instanceof Error ? err.message : String(err)}`;
         }

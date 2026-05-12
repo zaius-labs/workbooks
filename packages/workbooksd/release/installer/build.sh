@@ -32,6 +32,27 @@
 
 set -euo pipefail
 
+# ── Pivot guardrail (2026-05-04) ─────────────────────────────────────
+# `workbooksd` is legacy. The lander no longer ships daemon installs;
+# the CLI + portable .html artifact is the recommended path. This script
+# still works for users who explicitly need it, but won't run unless
+# WORKBOOKSD_LEGACY_RELEASE=1 is set, so accidental CI invocations or
+# muscle-memory builds fail loud. See packages/workbooksd/README.md.
+if [ "${WORKBOOKSD_LEGACY_RELEASE:-0}" != "1" ]; then
+  cat >&2 <<EOF
+[workbooksd legacy guardrail]
+This script builds the legacy daemon installer. As of 2026-05-04 the
+daemon is no longer the recommended path; the workbooks CLI emits
+portable .html artifacts (npm install -g @work.books/cli).
+
+To proceed anyway (you have a reason to ship a new daemon build):
+  WORKBOOKSD_LEGACY_RELEASE=1 ./build.sh "$@"
+
+Background: vendor/workbooks/packages/workbooksd/README.md.
+EOF
+  exit 1
+fi
+
 VERSION="${1:?usage: $0 <version> [--skip-notarize|--skip-sign]}"
 shift || true
 SKIP_NOTARIZE=0

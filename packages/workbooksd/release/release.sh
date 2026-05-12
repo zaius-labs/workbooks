@@ -25,6 +25,27 @@
 
 set -euo pipefail
 
+# ── Pivot guardrail (2026-05-04) ─────────────────────────────────────
+# `workbooksd` is legacy. The lander no longer ships daemon installs;
+# the CLI + portable .html artifact is the recommended path. This
+# script still works for explicit re-cuts, but won't run without
+# WORKBOOKSD_LEGACY_RELEASE=1 — protects against accidental CI
+# invocations + muscle-memory builds.
+if [ "${WORKBOOKSD_LEGACY_RELEASE:-0}" != "1" ]; then
+  cat >&2 <<EOF
+[workbooksd legacy guardrail]
+This script cuts a legacy workbooksd release. As of 2026-05-04 the
+daemon is not the recommended workbooks path; the CLI emits portable
+.html artifacts (npm install -g @work.books/cli).
+
+To proceed anyway:
+  WORKBOOKSD_LEGACY_RELEASE=1 ./release.sh "$@"
+
+Background: vendor/workbooks/packages/workbooksd/README.md.
+EOF
+  exit 1
+fi
+
 VERSION="${1:?usage: $0 <version> (e.g. 0.0.1)}"
 TAG="release-workbooksd-v$VERSION"
 

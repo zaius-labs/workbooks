@@ -333,18 +333,17 @@ function findMeta(html, name) {
     policy: POLICY,
     title: "CTA test",
   });
+  // Pivot 2026-05-04: the "Open in Workbooks app" daemon CTA + the
+  // workbooks-open:// scheme handoff were removed. Sealed workbooks
+  // now only offer the broker sign-in path.
   check(
-    "shell carries 'Open in Workbooks app' button",
-    out.html.includes('id="wb-open-app"') &&
-      out.html.includes("Open in Workbooks app"),
+    "shell does NOT carry the legacy daemon CTA",
+    !out.html.includes('id="wb-open-app"') &&
+      !out.html.includes("workbooks-open://"),
   );
   check(
-    "shell carries workbooks-open:// URL scheme handler",
-    out.html.includes("workbooks-open://"),
-  );
-  check(
-    "shell hides install hint until detection runs",
-    out.html.includes('class="app-hint hide"'),
+    "shell carries the sign-in button",
+    out.html.includes('id="wb-signin"'),
   );
   check(
     "shell carries provenance modal scaffold (C8.8)",

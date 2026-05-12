@@ -62,33 +62,56 @@ Bundles the project into a single `.html` file. The pipeline:
 1. Vite assembles the user code (single-file plugin)
 2. Workbook plugin injects:
    - workbook-spec manifest
-   - save handler (Cmd+S → workbooksd or FSA-API)
-   - install toast (bottom-left card if no daemon detected)
+   - save handler (Cmd+S → File System Access API where supported, or
+     legacy daemon path for users who have `workbooksd` installed)
    - portable runtime assets (base64 wasm + bindgen + bundle)
 3. The whole HTML is wrapped in a DecompressionStream sandwich so the
    on-disk size shrinks ~3x while keeping the file self-contained
+4. The compiled `.html` gets a gzipped source-bundle embed (default on)
+   so recipients can `workbook unbundle` it back to source
 
 ```bash
 workbook build
 # → dist/my-thing.html  (typical: 800 KB – 8 MB)
 ```
 
-Output is always `dist/<slug>.html`. The legacy `.workbook.html`
-compound extension was retired in 0.4.0 — workbook identity is
-content-based (`<meta name="wb-permissions">` / `<script id="wb-meta">`)
-and macOS routing is via the per-file `LaunchServices.OpenWith`
-xattr the daemon stamps, neither of which depend on the filename.
+Output is always `dist/<slug>.html`. Workbook identity is
+content-based (`<meta name="wb-permissions">` / `<script id="wb-meta">`),
+not filename-based.
+
+The build embeds a gzipped JSON snapshot of the project source by
+default — recipients can `workbook unbundle <file.html>` to recover the
+project tree. Browsers ignore the embedded data entirely (the embed
+uses a non-script `type` attribute), so it costs zero parse / render
+overhead.
 
 ### Build flags
 
 ```
 --out <dir>     output directory (default dist)
 --no-wasm       skip inlining wasm + runtime bundle (smaller; dev only)
+--no-bundle     skip embedding the source bundle (default ON)
+--bundle-git    include the .git/ directory in the source bundle
 --encrypt       wrap the artifact in an age-v1 passphrase lock screen
                 pair with --password-stdin / --password-file
                 or set encrypt.passwordEnv in workbook.config.mjs
                 (default WORKBOOK_PASSWORD)
+                (encrypted artifacts skip the source bundle automatically)
 ```
+
+## `workbook unbundle`
+
+Extracts the embedded source bundle from a built `.html` back into a
+working source tree.
+
+```bash
+workbook unbundle path/to/my-thing.html ./my-thing-source
+# default outDir is `<basename>-source/`
+# --force overwrites a non-empty existing dir
+```
+
+Empty or non-bundled artifacts (built with `--no-bundle`) error out
+with a clear message.
 
 ## `workbook check`
 
