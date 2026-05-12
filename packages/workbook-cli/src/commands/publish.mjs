@@ -18,6 +18,7 @@ import os from "node:os";
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { readBundleMeta } from "../bundle/embedSource.mjs";
+import { loadConfig } from "../util/config.mjs";
 
 const DEFAULT_BROKER = process.env.WORKBOOKS_BROKER ?? "https://auth.workbooks.sh";
 const DEFAULT_VIEWER = process.env.WORKBOOKS_VIEWER ?? "https://workbooks.sh";
@@ -53,10 +54,28 @@ export async function runPublish(opts = {}) {
   // Derive a slug from the filename — `dist/my-thing.html` → `my-thing`.
   // If the source bundle exposes a rootName, prefer that.
   const meta = readBundleMeta(html);
-  const slug =
-    opts.slug ??
-    meta?.rootName ??
-    path.basename(inputAbs, path.extname(inputAbs));
+  const slugFromBytes =
+    meta?.rootName ?? path.basename(inputAbs, path.extname(inputAbs));
+
+  // Try to load workbook.config.mjs so the publish picks up author +
+  // description + title. Common layouts:
+  //   - user is in project root, file is at dist/foo.html → cwd works
+  //   - user passes an absolute path to a built .html elsewhere →
+  //     try parent of file's parent (project root next to dist/)
+  // If neither has a config, fall back to byte-derived values —
+  // publishing a one-off built .html still works, just without identity.
+  let cfg = null;
+  const cwd = process.cwd();
+  cfg = await loadConfig(cwd).catch(() => null);
+  if (!cfg) {
+    const projectGuess = path.dirname(path.dirname(inputAbs));
+    cfg = await loadConfig(projectGuess).catch(() => null);
+  }
+
+  const slug = opts.slug ?? cfg?.slug ?? slugFromBytes;
+  const title = opts.title ?? cfg?.name ?? slug;
+  const author = opts.author ?? cfg?.author ?? null;
+  const description = opts.description ?? cfg?.description ?? null;
 
   const bearer = await ensureBearer({
     broker: DEFAULT_BROKER,
@@ -67,7 +86,7 @@ export async function runPublish(opts = {}) {
   // CLI doesn't have to coordinate uniqueness.
   const created = await postJson(
     `${DEFAULT_BROKER}/v1/workbooks/public`,
-    { slug, title: opts.title ?? slug },
+    { slug, title, author, description },
     bearer,
   );
   if (!created.id) {

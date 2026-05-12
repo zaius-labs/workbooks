@@ -33,6 +33,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ICON_PATH = path.resolve(HERE, "..", "..", "templates", "default-icon.svg");
 const SAVE_HANDLER_PATH = path.resolve(HERE, "..", "runtime-inject", "saveHandler.mjs");
 const INSTALL_TOAST_PATH = path.resolve(HERE, "..", "runtime-inject", "installToast.mjs");
+const ABOUT_TOAST_PATH = path.resolve(HERE, "..", "runtime-inject", "aboutToast.mjs");
 
 // Cache the inject sources after first read — they don't change
 // during a build run.
@@ -48,6 +49,12 @@ async function readInstallToast() {
   _installToastSrc = await fs.readFile(INSTALL_TOAST_PATH, "utf8");
   return _installToastSrc;
 }
+let _aboutToastSrc = null;
+async function readAboutToast() {
+  if (_aboutToastSrc !== null) return _aboutToastSrc;
+  _aboutToastSrc = await fs.readFile(ABOUT_TOAST_PATH, "utf8");
+  return _aboutToastSrc;
+}
 
 // Sentinels for each injected block — kept separate so we can update
 // any one independently on re-runs without disturbing the others.
@@ -61,6 +68,12 @@ function makeInstallToastSentinels() {
   return {
     BEGIN: "<!-- BEGIN workbook-install-toast -->",
     END: "<!-- END workbook-install-toast -->",
+  };
+}
+function makeAboutToastSentinels() {
+  return {
+    BEGIN: "<!-- BEGIN workbook-about-toast -->",
+    END: "<!-- END workbook-about-toast -->",
   };
 }
 
@@ -462,6 +475,19 @@ button{background:transparent;border:0;padding:0;cursor:pointer}
         ? `${TOAST_BEGIN}\n<script>${escapeForScript(installToastSrc)}</script>\n${TOAST_END}`
         : "";
 
+      // About toast — fixed bottom-right chip with author name + a
+      // link to workbooks.sh. Reads manifest.author from the baked
+      // workbook-spec JSON at runtime; suppresses itself if author is
+      // unset (so the toggle is the presence of config.author, no
+      // separate enabled flag needed). Suppresses inside iframes
+      // (workbooks.sh splash already shows identity in the parent).
+      const aboutToastEnabled = typeof config.author === "string" && config.author.length > 0;
+      const aboutToastSrc = aboutToastEnabled ? await readAboutToast() : null;
+      const { BEGIN: ABOUT_BEGIN, END: ABOUT_END } = makeAboutToastSentinels();
+      const aboutToastBlock = aboutToastSrc
+        ? `${ABOUT_BEGIN}\n<script>${escapeForScript(aboutToastSrc)}</script>\n${ABOUT_END}`
+        : "";
+
       // Compose the full head-injection block: save handler first
       // (so Cmd+S works as soon as the page parses, even if the
       // runtime fails to boot), then the portable assets. Both go
@@ -522,6 +548,7 @@ button{background:transparent;border:0;padding:0;cursor:pointer}
         installPromptsBlock,
         saveBlock,
         installToastBlock,
+        aboutToastBlock,
         `${BEGIN}\n${portableBlock}\n${END}`,
       ]
         .filter(Boolean)
@@ -629,6 +656,12 @@ function buildSpec(config) {
       // in (or render it raw, in the SPA case).
       type: config.type ?? "spa",
       version: config.version,
+      // Author identity + description for the social splash + the
+      // in-workbook about toast. Both nullable (config-driven, not
+      // required). When `author` is null the about toast is suppressed
+      // at runtime — the field's presence is the toggle.
+      author: config.author ?? null,
+      description: config.description ?? null,
       env: config.env ?? {},
       runtimeFeatures: config.runtimeFeatures ?? [],
       // Per-secret HTTPS host allowlist. workbooksd reads this at

@@ -342,6 +342,13 @@ export async function loadConfig(projectDir) {
     configPath,
     name: cfg.name ?? cfg.slug,
     slug: cfg.slug,
+    // Author + description surface on the hosted viewer's trust prompt
+    // (workbooks.sh/w/<id>). Both optional; if absent the splash falls
+    // back to slug-only display. Author is per-workbook so the same
+    // account can publish under different display names.
+    author: typeof cfg.author === "string" ? cfg.author.trim() : null,
+    description:
+      typeof cfg.description === "string" ? cfg.description.trim() : null,
     type,
     version: cfg.version ?? "0.1",
     entry: cfg.entry,
