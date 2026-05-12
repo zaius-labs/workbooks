@@ -26,6 +26,7 @@ const SDK_ROOT = path.resolve(HERE, "..", "sdk");
 // new namespace = adding an .mjs file under src/sdk/ AND an entry here.
 const NAMESPACES = new Map([
   ["data", "data.mjs"],
+  ["connect", "connect.mjs"],
   // future: ["ml", "ml.mjs"], ["ui", "ui.mjs"], ["runtime", "runtime.mjs"]
 ]);
 

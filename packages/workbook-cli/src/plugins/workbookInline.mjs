@@ -662,6 +662,12 @@ function buildSpec(config) {
       // at runtime — the field's presence is the toggle.
       author: config.author ?? null,
       description: config.description ?? null,
+      // Group env vars the workbook is wired to consume via the
+      // broker proxy. Surfaces in the chrome widget so recipients
+      // see what credentials this workbook needs, and feeds the
+      // workbook:connect SDK so it can pick the right env name by
+      // URL host. See workbook.config.mjs > connect: { … }.
+      connect: config.connect ?? {},
       env: config.env ?? {},
       runtimeFeatures: config.runtimeFeatures ?? [],
       // Per-secret HTTPS host allowlist. workbooksd reads this at

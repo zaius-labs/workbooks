@@ -349,6 +349,17 @@ export async function loadConfig(projectDir) {
     author: typeof cfg.author === "string" ? cfg.author.trim() : null,
     description:
       typeof cfg.description === "string" ? cfg.description.trim() : null,
+    // Group env vars the workbook uses at runtime, e.g.
+    //   connect: {
+    //     OPENAI_KEY: { inject: "bearer", domains: ["api.openai.com"] }
+    //   }
+    // Distinct from the legacy `env` field below (daemon-era runtime
+    // prompts). The workbook code calls
+    //   wbFetch(url, { env: "OPENAI_KEY", ... })
+    // and the broker proxy splices the group's stored value into the
+    // outbound header IF the URL host matches the var's domains.
+    // Plaintext never reaches the workbook.
+    connect: extractConnectDeclarations(cfg.connect),
     type,
     version: cfg.version ?? "0.1",
     entry: cfg.entry,
@@ -368,4 +379,74 @@ export async function loadConfig(projectDir) {
     save,                       // { enabled: true } default
     bundle,                     // source-bundle settings; default enabled
   };
+}
+
+/**
+ * Validate + normalize the `connect` block from workbook.config.mjs.
+ * Returns a plain object that the build pipeline bakes into the
+ * workbook manifest as `manifest.connect`.
+ *
+ * Shape:
+ *   connect: {
+ *     OPENAI_KEY: { inject: "bearer", domains: ["api.openai.com"] },
+ *     STRIPE_KEY: { inject: "header:Stripe-Account", template: "{value}", domains: ["api.stripe.com"] },
+ *   }
+ *
+ * Naming: keys are UPPER_SNAKE env-var-style identifiers, 1-64 chars.
+ * Workbook code refers to them by name via `env: "OPENAI_KEY"` on
+ * each proxy call.
+ *
+ * Inject directives:
+ *   - "bearer"               → Authorization: Bearer <value> (or template)
+ *   - "header:HeaderName"    → set that header to the template
+ *   - "query:paramName"      → append/set query param
+ *
+ * Domains: array of host patterns. Same wildcard rules as
+ * workbooksd's wb-secrets-policy: exact match, or "*.example.com"
+ * for any subdomain. Empty → broker will reject every call.
+ */
+function extractConnectDeclarations(raw) {
+  if (raw == null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("workbook.config: 'connect' must be an object keyed by env-var name");
+  }
+  const out = {};
+  for (const [name, decl] of Object.entries(raw)) {
+    if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(name)) {
+      throw new Error(
+        `workbook.config: connect[${JSON.stringify(name)}] must be UPPER_SNAKE_CASE [A-Z][A-Z0-9_]{0,63}`,
+      );
+    }
+    if (!decl || typeof decl !== "object" || Array.isArray(decl)) {
+      throw new Error(`workbook.config: connect[${name}] must be an object`);
+    }
+    const inject = decl.inject;
+    if (typeof inject !== "string") {
+      throw new Error(`workbook.config: connect[${name}].inject is required`);
+    }
+    if (
+      inject !== "bearer" &&
+      !/^header:[A-Za-z][A-Za-z0-9-]{0,64}$/.test(inject) &&
+      !/^query:[A-Za-z][A-Za-z0-9_]{0,64}$/.test(inject)
+    ) {
+      throw new Error(
+        `workbook.config: connect[${name}].inject must be 'bearer' | 'header:Name' | 'query:name'`,
+      );
+    }
+    const domains = Array.isArray(decl.domains) ? decl.domains : [];
+    if (
+      domains.length === 0 ||
+      !domains.every((d) => typeof d === "string" && d.length > 0)
+    ) {
+      throw new Error(
+        `workbook.config: connect[${name}].domains must be a non-empty array of host patterns`,
+      );
+    }
+    const template =
+      typeof decl.template === "string" && decl.template.length > 0
+        ? decl.template
+        : "{value}";
+    out[name] = { inject, domains, template };
+  }
+  return out;
 }
