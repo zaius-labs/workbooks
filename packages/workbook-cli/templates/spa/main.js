@@ -1,5 +1,5 @@
 // Welcome. This is the smallest possible workbook — one Arrow table
-// built via the `workbook:data` virtual module, rendered into the page.
+// built via the `workbook:data` virtual module and rendered as HTML.
 // Three things to know:
 //
 //   1. `workbook:data` is the SDK. Always import from there, not from
@@ -18,6 +18,39 @@ const t = fromArrays({
   count: [1, 2, 3, 4, 5],
 });
 
-document.querySelector("#out").textContent =
-  `built an Arrow table — ${t.numRows} rows, ${t.numCols} cols\n\n` +
-  t.toString();
+renderTable(t, document.querySelector("#out"));
+
+function renderTable(table, mount) {
+  const fields = table.schema.fields.map((f) => f.name);
+  const rows = table.toArray();
+
+  const thead =
+    "<thead><tr>" +
+    fields.map((f) => `<th>${escape(f)}</th>`).join("") +
+    "</tr></thead>";
+
+  const tbody =
+    "<tbody>" +
+    rows
+      .map(
+        (row) =>
+          "<tr>" +
+          fields.map((f) => `<td>${escape(row[f])}</td>`).join("") +
+          "</tr>",
+      )
+      .join("") +
+    "</tbody>";
+
+  mount.innerHTML = `<table>${thead}${tbody}</table>`;
+
+  const caption = document.querySelector("#out-caption");
+  if (caption) {
+    caption.textContent = `${table.numRows} rows · ${table.numCols} columns · built in WASM`;
+  }
+}
+
+function escape(value) {
+  return String(value).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]),
+  );
+}

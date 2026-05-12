@@ -12,6 +12,7 @@ body { margin: 0; min-height: 100vh; display: grid; place-items: center; }
 main {
   max-width: 640px;
   padding: 32px;
+  width: 100%;
 }
 
 h1 {
@@ -32,15 +33,52 @@ code {
   border-radius: 3px;
 }
 
-pre {
+.card {
   background: white;
   border: 1px solid #e5e2db;
-  border-radius: 6px;
-  padding: 16px;
+  border-radius: 8px;
+  padding: 8px;
   overflow: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th, td {
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 1px solid #f0eee8;
+}
+
+th {
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #777;
+  background: #fafaf7;
+  border-bottom: 1px solid #e5e2db;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: #fafaf7;
+}
+
+td:last-child {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: #444;
+}
+
+.caption {
+  margin: 12px 4px 0;
+  color: #888;
   font-size: 12px;
-  line-height: 1.5;
-  color: #333;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
