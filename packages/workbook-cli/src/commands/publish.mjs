@@ -19,6 +19,8 @@ import http from "node:http";
 import { spawn } from "node:child_process";
 import { readBundleMeta } from "../bundle/embedSource.mjs";
 import { loadConfig } from "../util/config.mjs";
+import { buildToolsWorker } from "../util/buildToolsWorker.mjs";
+import { renderAuthCallbackPage } from "../util/authCallbackPage.mjs";
 
 const DEFAULT_BROKER = process.env.WORKBOOKS_BROKER ?? "https://auth.workbooks.sh";
 const DEFAULT_VIEWER = process.env.WORKBOOKS_VIEWER ?? "https://workbooks.sh";
@@ -95,9 +97,35 @@ export async function runPublish(opts = {}) {
   // is personal (public to anyone with the link).
   const group_id = opts.group ?? null;
 
+  // Workbook type from manifest (spa | notebook | document). Used by
+  // group view filtering / kanban grouping.
+  const type = cfg?.type ?? null;
+
+  // `--tag <slug>` (repeatable). Tags categorize the workbook within
+  // the group library. Slashes are allowed for folder-style finders.
+  const rawTags = Array.isArray(opts.tag)
+    ? opts.tag
+    : opts.tag != null
+      ? [opts.tag]
+      : [];
+  const tags = rawTags
+    .map((t) => String(t).trim().toLowerCase())
+    .filter((t) => t.length > 0);
+
+  // Tools declared in workbook.config.mjs > tools: {} — same shape as
+  // the manifest emits. The broker stores these so search results can
+  // surface "this workbook exposes a `forecast` tool" without having
+  // to re-parse the artifact.
+  const tools = Array.isArray(cfg?.tools) && cfg.tools.length > 0 ? cfg.tools : undefined;
+
+  // `--strip-git` removes the .git/ tree from the embedded source
+  // bundle the public artifact ships with. Author's local checkout
+  // stays untouched; this only changes what recipients unbundle.
+  const strip_git = opts["strip-git"] === true;
+
   const created = await postJson(
     `${DEFAULT_BROKER}/v1/workbooks/public`,
-    { slug, title, author, description, connect, group_id },
+    { slug, title, author, description, connect, group_id, type, tags, tools, strip_git },
     bearer,
   );
   if (!created.id) {
@@ -111,6 +139,32 @@ export async function runPublish(opts = {}) {
     html,
     bearer,
   );
+
+  // If the workbook declared any worker-runtime tools, compile their
+  // handlers into one ES module and upload to the broker's WFP
+  // dispatch path. Best-effort — never block the publish on this,
+  // surface failures so the author can fix without re-running the
+  // whole pipeline.
+  if (cfg && Object.keys(cfg._toolHandlers ?? {}).length > 0) {
+    try {
+      const built = await buildToolsWorker(cfg);
+      if (built) {
+        await putJson(
+          `${DEFAULT_BROKER}/v1/workbooks/${encodeURIComponent(created.id)}/tools-script`,
+          { source: built.source },
+          bearer,
+        );
+        process.stdout.write(
+          `  tools (${built.tools.length}) → uploaded to dispatch namespace\n`,
+        );
+      }
+    } catch (e) {
+      process.stderr.write(
+        `  tools upload failed: ${e?.message ?? e}\n` +
+          `  (the workbook is published; tools won't dispatch until you re-publish)\n`,
+      );
+    }
+  }
 
   const shareUrl = created.share_url ?? `${DEFAULT_VIEWER}/w/${created.id}`;
   process.stdout.write(
@@ -213,21 +267,36 @@ function startLoopbackListener() {
       const code = url.searchParams.get("broker_code");
       const err = url.searchParams.get("error");
       if (err) {
-        res.writeHead(400, { "content-type": "text/html" }).end(
-          `<h2>sign-in failed</h2><p>${escapeHtml(err)}</p>`,
+        res.writeHead(400, { "content-type": "text/html; charset=utf-8" }).end(
+          renderAuthCallbackPage({
+            status: "error",
+            title: "Sign-in failed",
+            message: "Workbooks could not complete CLI authentication.",
+            detail: err,
+          }),
         );
         clearTimeout(deadline);
         rejectCode(new Error(`broker error: ${err}`));
         return;
       }
       if (!code) {
-        res.writeHead(400, { "content-type": "text/html" }).end(
-          `<h2>missing broker_code</h2><p>did you complete sign-in?</p>`,
+        res.writeHead(400, { "content-type": "text/html; charset=utf-8" }).end(
+          renderAuthCallbackPage({
+            status: "error",
+            title: "Sign-in incomplete",
+            message: "This callback did not include a sign-in code.",
+            detail: "Return to your terminal and run the command again.",
+          }),
         );
         return;
       }
-      res.writeHead(200, { "content-type": "text/html" }).end(
-        `<!doctype html><html><body style="font:14px system-ui;padding:32px"><h2>Signed in.</h2><p>You can close this tab and return to the terminal.</p></body></html>`,
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(
+        renderAuthCallbackPage({
+          status: "success",
+          title: "You're signed in",
+          message: "The Workbooks CLI is authenticated.",
+          detail: "You can close this tab and return to your terminal.",
+        }),
       );
       clearTimeout(deadline);
       resolveCode(code);
@@ -290,6 +359,22 @@ async function putBytes(url, body, bearer) {
   }
 }
 
+async function putJson(url, body, bearer) {
+  const r = await fetch(url, {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${bearer}`,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    throw new Error(`PUT ${url} → ${r.status}: ${text.slice(0, 500)}`);
+  }
+  return r.json();
+}
+
 async function revokeWorkbook({ broker, bearer, id }) {
   const r = await fetch(`${broker}/v1/workbooks/${encodeURIComponent(id)}/revoke`, {
     method: "POST",
@@ -299,10 +384,4 @@ async function revokeWorkbook({ broker, bearer, id }) {
     const text = await r.text().catch(() => "");
     throw new Error(`revoke → ${r.status}: ${text.slice(0, 500)}`);
   }
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]),
-  );
 }

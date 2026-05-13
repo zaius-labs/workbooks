@@ -34,6 +34,8 @@ async function help() {
     "  workbook env <action>      manage group env vars (list/set/rotate/delete/import)",
     "  workbook group <action>    list groups, invite teammates, see members",
     "  workbook mcp serve         expose CLI actions as MCP tools for Claude / Cursor / Codex",
+    "  workbook call <id> <tool>  invoke a tool exposed by a workbook (--list to introspect)",
+    "  workbook workgroup <action> manage a group's portal config end-to-end (pull/push)",
     "",
     "Build / dev options:",
     "  --port <n>      dev server port (default 5173)",
@@ -77,7 +79,7 @@ async function help() {
 
 // Flags that may appear multiple times (`--recipient age1... --recipient age1...`).
 // On repeat, values accumulate into an array instead of clobbering.
-const MULTI_VALUE_FLAGS = new Set(["recipient", "recipient-file"]);
+const MULTI_VALUE_FLAGS = new Set(["recipient", "recipient-file", "tag", "arg"]);
 
 // Flags that NEVER take a value — always boolean. Without this, the
 // next positional arg is mistakenly consumed as the flag's value
@@ -215,6 +217,18 @@ try {
       const flags = parseFlags(argv.slice(1));
       const { runMcp } = await import(path.join(cmdRoot, "mcp.mjs"));
       await runMcp(flags);
+      break;
+    }
+    case "call": {
+      const flags = parseFlags(argv.slice(1));
+      const { runCall } = await import(path.join(cmdRoot, "call.mjs"));
+      await runCall(flags);
+      break;
+    }
+    case "workgroup": {
+      const flags = parseFlags(argv.slice(1));
+      const { runWorkgroup } = await import(path.join(cmdRoot, "workgroup.mjs"));
+      await runWorkgroup(flags);
       break;
     }
     case "help":

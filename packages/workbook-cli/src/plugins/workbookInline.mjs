@@ -651,7 +651,7 @@ function buildSpec(config) {
     manifest: {
       name: config.name,
       slug: config.slug,
-      // Canonical rendering type: "document" | "notebook" | "spa".
+      // Canonical rendering type: "document" | "notebook" | "spa" | "presentation".
       // Hosts use this to decide which chrome to wrap the workbook
       // in (or render it raw, in the SPA case).
       type: config.type ?? "spa",
@@ -668,6 +668,12 @@ function buildSpec(config) {
       // workbook:connect SDK so it can pick the right env name by
       // URL host. See workbook.config.mjs > connect: { … }.
       connect: config.connect ?? {},
+      // Tools the workbook advertises for MCP/CLI invocation. The
+      // broker indexer reads this surface and produces one Vectorize
+      // row per tool so agents can search "find a workbook that
+      // exposes a forecast tool" and get a direct hit. No new author
+      // surface — declared in workbook.config.mjs > tools: {}.
+      tools: config.tools ?? [],
       env: config.env ?? {},
       runtimeFeatures: config.runtimeFeatures ?? [],
       // Per-secret HTTPS host allowlist. workbooksd reads this at

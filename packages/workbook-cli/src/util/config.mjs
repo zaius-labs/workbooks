@@ -361,6 +361,22 @@ export async function loadConfig(projectDir) {
     // outbound header IF the URL host matches the var's domains.
     // Plaintext never reaches the workbook.
     connect: extractConnectDeclarations(cfg.connect),
+    // Tools the workbook advertises to MCP clients. Same shape as
+    // an MCP tool definition — name, description, input_schema —
+    // baked into manifest.tools[] at build time. Extracted here,
+    // indexed by the broker, surfaced to agents via the workbooks
+    // MCP server. No separate authoring file: declare them in
+    // workbook.config.mjs > tools: { fn_name: { description, input } }
+    // Public manifest entries (no handler paths — those stay internal).
+    tools: extractToolDeclarations(cfg.tools).manifest,
+    // Build-time only: handler path per tool. Used by the tools
+    // Worker bundler at publish; not baked into the artifact.
+    _toolHandlers: extractToolDeclarations(cfg.tools).handlers,
+    // Optional distribution wrappers. Recipients consume the tools[]
+    // surface through one of these packages. No new capability — the
+    // HTTP /call surface always works regardless; package config
+    // changes how the surface gets advertised to friendly clients.
+    package: extractPackageDeclarations(cfg.package),
     type,
     version: cfg.version ?? "0.1",
     entry: cfg.entry,
@@ -406,6 +422,122 @@ export async function loadConfig(projectDir) {
  * workbooksd's wb-secrets-policy: exact match, or "*.example.com"
  * for any subdomain. Empty → broker will reject every call.
  */
+/**
+ * Validate + normalize the `tools` block from workbook.config.mjs.
+ *
+ * Shape:
+ *   tools: {
+ *     forecast_revenue: {
+ *       description: "Project Q3 revenue from Q1/Q2 actuals.",
+ *       input_schema: { ... JSON Schema ... },
+ *       output_schema: { ... JSON Schema ... },
+ *     },
+ *   }
+ *
+ * Tool names: lowercase + underscore (matches MCP tool naming
+ * conventions). 1-64 chars. The author declares one entry per
+ * function the workbook exposes for invocation; the runtime / agent
+ * client looks them up by name.
+ *
+ * The tool's IMPLEMENTATION lives in workbook code — same author
+ * writes the function and exports it; the build pipeline maps the
+ * name from this declaration to an entry in the artifact. Today
+ * we just bake the advertisement; #82 wires invocation.
+ */
+/** Returns { manifest, handlers } —
+ *  - `manifest` is the public list baked into <script id="workbook-spec">
+ *    (no handler paths — those are internal build-time data).
+ *  - `handlers` maps tool name → file path so the build can locate
+ *    the implementation and bundle it into the tools Worker. */
+function extractToolDeclarations(raw) {
+  const out = { manifest: [], handlers: {} };
+  if (raw == null) return out;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("workbook.config: 'tools' must be an object keyed by tool name");
+  }
+  for (const [name, decl] of Object.entries(raw)) {
+    if (!/^[a-z][a-z0-9_]{0,63}$/.test(name)) {
+      throw new Error(
+        `workbook.config: tools[${JSON.stringify(name)}] must be snake_case [a-z][a-z0-9_]{0,63}`,
+      );
+    }
+    if (!decl || typeof decl !== "object" || Array.isArray(decl)) {
+      throw new Error(`workbook.config: tools[${name}] must be an object`);
+    }
+    const description =
+      typeof decl.description === "string" ? decl.description.trim() : "";
+    const input_schema = decl.input_schema ?? decl.input ?? null;
+    const output_schema = decl.output_schema ?? decl.output ?? null;
+    const handler = typeof decl.handler === "string" ? decl.handler : null;
+    const runtime = decl.runtime === "browser" ? "browser" : "worker";
+
+    out.manifest.push({
+      name,
+      ...(description ? { description } : {}),
+      ...(input_schema ? { input_schema } : {}),
+      ...(output_schema ? { output_schema } : {}),
+      runtime,
+    });
+    if (handler && runtime === "worker") {
+      // Only worker-runtime tools need a handler path — browser tools
+      // are dispatched recipient-side via the workbook's own runtime.
+      out.handlers[name] = handler;
+    }
+  }
+  return out;
+}
+
+/** Validate the optional `package: { mcp, skill }` block. Keep this
+ *  intentionally small — packaging just controls how we *announce*
+ *  the workbook's tools, not what they are.
+ *
+ *   package: {
+ *     mcp:   { enabled: true, name?: "my-workbook" },
+ *     skill: { enabled: true, name?: "my-workbook", persona?: "..." },
+ *   }
+ *
+ *  Defaults: mcp.enabled = true when any tool is declared; skill
+ *  disabled by default (the author has to opt in because skill
+ *  bundles ship persona text that should be intentional). */
+function extractPackageDeclarations(raw) {
+  const out = {
+    mcp:   { enabled: false },
+    skill: { enabled: false },
+  };
+  if (raw == null) return out;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("workbook.config: 'package' must be an object");
+  }
+  if (raw.mcp !== undefined) {
+    if (raw.mcp === false) out.mcp = { enabled: false };
+    else if (raw.mcp === true) out.mcp = { enabled: true };
+    else if (typeof raw.mcp === "object" && !Array.isArray(raw.mcp)) {
+      out.mcp = {
+        enabled: raw.mcp.enabled !== false,
+        ...(typeof raw.mcp.name === "string" ? { name: raw.mcp.name } : {}),
+      };
+    } else {
+      throw new Error("workbook.config: package.mcp must be boolean or object");
+    }
+  }
+  if (raw.skill !== undefined) {
+    if (raw.skill === false) out.skill = { enabled: false };
+    else if (raw.skill === true) out.skill = { enabled: true };
+    else if (typeof raw.skill === "object" && !Array.isArray(raw.skill)) {
+      out.skill = {
+        enabled: raw.skill.enabled !== false,
+        ...(typeof raw.skill.name === "string" ? { name: raw.skill.name } : {}),
+        ...(typeof raw.skill.persona === "string"
+          ? { persona: raw.skill.persona }
+          : {}),
+      };
+    } else {
+      throw new Error("workbook.config: package.skill must be boolean or object");
+    }
+  }
+  return out;
+}
+
 function extractConnectDeclarations(raw) {
   if (raw == null) return {};
   if (typeof raw !== "object" || Array.isArray(raw)) {

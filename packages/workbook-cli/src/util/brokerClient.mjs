@@ -15,6 +15,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { renderAuthCallbackPage } from "./authCallbackPage.mjs";
 
 export const DEFAULT_BROKER =
   process.env.WORKBOOKS_BROKER ?? "https://auth.workbooks.sh";
@@ -96,6 +97,9 @@ export function apiPost(pathname, body, { bearer, broker = DEFAULT_BROKER } = {}
 export function apiPatch(pathname, body, { bearer, broker = DEFAULT_BROKER } = {}) {
   return request({ method: "PATCH", url: `${broker}${pathname}`, bearer, body });
 }
+export function apiPut(pathname, body, { bearer, broker = DEFAULT_BROKER } = {}) {
+  return request({ method: "PUT", url: `${broker}${pathname}`, bearer, body });
+}
 export function apiDelete(pathname, { bearer, broker = DEFAULT_BROKER } = {}) {
   return request({ method: "DELETE", url: `${broker}${pathname}`, bearer });
 }
@@ -173,21 +177,36 @@ function startLoopbackListener() {
       const code = url.searchParams.get("broker_code");
       const err = url.searchParams.get("error");
       if (err) {
-        res.writeHead(400, { "content-type": "text/html" }).end(
-          `<h2>sign-in failed</h2><p>${escapeHtml(err)}</p>`,
+        res.writeHead(400, { "content-type": "text/html; charset=utf-8" }).end(
+          renderAuthCallbackPage({
+            status: "error",
+            title: "Sign-in failed",
+            message: "Workbooks could not complete CLI authentication.",
+            detail: err,
+          }),
         );
         clearTimeout(deadline);
         rejectCode(new Error(`broker error: ${err}`));
         return;
       }
       if (!code) {
-        res.writeHead(400, { "content-type": "text/html" }).end(
-          `<h2>missing broker_code</h2><p>did you complete sign-in?</p>`,
+        res.writeHead(400, { "content-type": "text/html; charset=utf-8" }).end(
+          renderAuthCallbackPage({
+            status: "error",
+            title: "Sign-in incomplete",
+            message: "This callback did not include a sign-in code.",
+            detail: "Return to your terminal and run the command again.",
+          }),
         );
         return;
       }
-      res.writeHead(200, { "content-type": "text/html" }).end(
-        `<!doctype html><html><body style="font:14px system-ui;padding:32px"><h2>Signed in.</h2><p>You can close this tab and return to the terminal.</p></body></html>`,
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(
+        renderAuthCallbackPage({
+          status: "success",
+          title: "You're signed in",
+          message: "The Workbooks CLI is authenticated.",
+          detail: "You can close this tab and return to your terminal.",
+        }),
       );
       clearTimeout(deadline);
       resolveCode(code);
@@ -213,10 +232,4 @@ function openInBrowser(url) {
   } catch {
     /* headless / no browser */
   }
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]),
-  );
 }
