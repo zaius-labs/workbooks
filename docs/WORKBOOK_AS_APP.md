@@ -67,7 +67,7 @@ npm i -D @work.books/cli @sveltejs/vite-plugin-svelte svelte
 export default {
   name: "my workbook",
   slug: "my-workbook",
-  type: "spa",                 // document | notebook | spa
+  type: "spa",                 // document | notebook | presentation | spa
   entry: "src/index.html",
   env: {
     OPENROUTER_API_KEY: { required: true, secret: true, prompt: "sk-or-…" },

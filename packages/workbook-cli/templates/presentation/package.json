@@ -1,0 +1,20 @@
+{
+  "name": "%%SLUG%%",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "workbook dev",
+    "build": "workbook build",
+    "export:pdf": "workbook export pdf dist/%%SLUG%%.html --out dist/%%SLUG%%.pdf"
+  },
+  "dependencies": {
+    "@work.books/runtime": "*",
+    "svelte": "^5.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@work.books/cli": "%%CLI_VERSION%%",
+    "vite": "^6.0.0"
+  }
+}

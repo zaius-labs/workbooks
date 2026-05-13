@@ -59,6 +59,16 @@ export type {
   MemoryHandle,
 } from "./authoring";
 
+// Presentation SDK — fixed-aspect slide chrome for interactive
+// presentation-shaped workbooks.
+export {
+  Presentation,
+  Slide,
+  getPresentationContext,
+  setPresentationContext,
+} from "./presentation";
+export type { PresentationApi } from "./presentation";
+
 // Markdown renderer — small CommonMark-ish; suitable for chat / agent
 // workbooks rendering assistant output. Returns trusted HTML.
 export { renderMarkdown, escapeHtml } from "./markdown";

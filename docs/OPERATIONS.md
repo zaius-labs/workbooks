@@ -458,6 +458,7 @@ A workbook is canonical, but Signal interoperates with adjacent formats.
 | `.workbook` | Canonical Signal format | Lossless |
 | `.ipynb` | Jupyter compatibility | Best-effort: code → cells, prose → markdown, charts → static images, runnable blocks → static |
 | `.pdf` | Stakeholder reports | Pre-rendered via Puppeteer; cells are static; sized for print |
+| `.pdf` presentation | Slide handoff | One static page per slide; HTML interactivity and animations are captured as rendered state |
 | `.md` | Documentation embedding | Manifest serialized to markdown; cells as fenced code blocks; charts as image links |
 | `.xlsx` | Spreadsheet handoff | Tables only (one sheet per `table` block); charts as embedded images |
 | `.html` (standalone) | Email-friendly | Same as `.workbook` portable mode but without runtime JS — pure pre-rendered HTML for read-only sharing |

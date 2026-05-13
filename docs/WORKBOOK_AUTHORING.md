@@ -15,7 +15,8 @@ the end.
 
 This document is the umbrella reference. Two axes:
 
-- **Shape**: what kind of artifact is this? `document`, `notebook`, `spa`.
+- **Shape**: what kind of artifact is this? `document`, `notebook`,
+  `presentation`, `spa`.
 - **Authoring style**: how do you write the source? Vanilla JS in one
   file, Svelte components, mdsvex markdown, raw HTML.
 
@@ -29,6 +30,7 @@ Pick one of each. They compose.
 Q: what is the reader of this workbook supposed to do?
 ├── read it (prose-heavy, citations, charts) ──→  shape = "document"
 ├── re-run it, edit inputs, see updated outputs ──→  shape = "notebook"
+├── present it as fixed-ratio slides ──→  shape = "presentation"
 └── use it as an interactive app (chat, editor, dashboard, …) ──→  shape = "spa"
 
 Q: how big / complex is the source?
@@ -45,13 +47,13 @@ doesn't care which path you took.
 
 ## The matrix
 
-|  | **document** | **notebook** | **spa** |
-|---|---|---|---|
-| **Vanilla single-file** (one `index.html`) | `examples/html-workbook/` | `examples/reactive-cells/`, `examples/runner/` | `examples/chat-app/` |
-| **Raw HTML + cells** | `examples/html-agent/` | (uses `<wb-cell>` directly) | (write your own UI) |
-| **Svelte** (multi-file build) | — | — | `examples/svelte-app/`, `examples/notebook-agent/` |
-| **Svelte + Tailwind** | — | — | `examples/tailwind-app/` |
-| **mdsvex** (markdown + Svelte) | `examples/document-mdx/` | `examples/notebook-mdx/`, `examples/dependency-chain/` | (rare — wrap markdown in any layout) |
+|  | **document** | **notebook** | **presentation** | **spa** |
+|---|---|---|---|---|
+| **Vanilla single-file** (one `index.html`) | `examples/html-workbook/` | `examples/reactive-cells/`, `examples/runner/` | (possible, but Svelte is canonical) | `examples/chat-app/` |
+| **Raw HTML + cells** | `examples/html-agent/` | (uses `<wb-cell>` directly) | (possible, but Svelte is canonical) | (write your own UI) |
+| **Svelte** (multi-file build) | — | — | `examples/presentation-svelte/` | `examples/svelte-app/`, `examples/notebook-agent/` |
+| **Svelte + Tailwind** | — | — | (same SDK) | `examples/tailwind-app/` |
+| **mdsvex** (markdown + Svelte) | `examples/document-mdx/` | `examples/notebook-mdx/`, `examples/dependency-chain/` | (rare — slides are usually component-authored) | (rare — wrap markdown in any layout) |
 
 Empty cells aren't gaps in capability — they're just shapes for
 which one of the other styles is a better fit. Nothing stops you
@@ -318,6 +320,34 @@ opt-in.
 CSS variables for theming without ejecting:
 - `--nb-bg` / `--nb-bg-2` / `--nb-bg-3` — background tones
 - `--nb-ink` / `--nb-ink-2` / `--nb-ink-3` / `--nb-ink-4` — text shades
+
+## The standardized presentation chrome (SDK)
+
+For `type: "presentation"` workbooks, `@work.books/runtime/presentation`
+ships a fixed-aspect slide stage. The HTML artifact stays interactive;
+PDF export renders one static page per slide.
+
+```svelte
+<script>
+  import { Presentation, Slide } from "@work.books/runtime/presentation";
+</script>
+
+<Presentation aspectRatio="16:9" title="Board review">
+  <Slide>
+    <h1>Q2 growth review</h1>
+  </Slide>
+
+  <Slide>
+    <input type="range" />
+    <p>Interactive controls work in the HTML deck.</p>
+  </Slide>
+</Presentation>
+```
+
+Use presentation workbooks when the artifact should behave like a deck:
+fixed composition, slide navigation, keyboard controls, fullscreen-friendly
+display, and print/PDF output. Use `spa` when the artifact needs open-ended
+application navigation or a fully custom interaction model.
 - `--nb-line` / `--nb-line-2` — borders
 - `--nb-error` — error red (default `#dc2626`)
 - `--nb-mono` — monospace stack

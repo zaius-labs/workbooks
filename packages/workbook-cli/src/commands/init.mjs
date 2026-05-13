@@ -24,12 +24,12 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_ROOT = path.resolve(HERE, "..", "..", "templates");
 const CLI_VERSION = await readCliVersion();
 
-const SHAPES = ["spa"]; // notebook + document forthcoming
+const SHAPES = ["spa", "presentation"]; // notebook + document forthcoming
 
 /**
  * @param {{
  *   _: string[],
- *   template?: string,    // shape name (spa | notebook | document)
+ *   template?: string,    // shape name (spa | presentation | notebook | document)
  *   force?: boolean,      // overwrite a non-empty target directory
  * }} flags
  */
@@ -37,7 +37,7 @@ export async function runInit(flags = {}) {
   const name = flags._?.[0];
   if (!name) {
     process.stderr.write("workbook init: project name required.\n");
-    process.stderr.write("usage: workbook init <name> [--template=spa]\n");
+    process.stderr.write("usage: workbook init <name> [--template=spa|presentation]\n");
     process.exit(2);
   }
 

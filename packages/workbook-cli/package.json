@@ -44,6 +44,9 @@
     "vite-plugin-singlefile": "^2.0.0",
     "zod": "^3.23.0"
   },
+  "optionalDependencies": {
+    "puppeteer": "^24.41.0"
+  },
   "peerDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "mdsvex": "^0.12.0",

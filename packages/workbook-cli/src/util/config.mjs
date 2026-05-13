@@ -63,8 +63,9 @@ export async function loadConfig(projectDir) {
   //   "document" — sdoc-style read-mostly artifact (prose + auto-rendered blocks)
   //   "notebook" — Jupyter-style linear runner with cells + reactive DAG
   //   "spa"      — full canvas app (chat-app, svelte-app); author renders custom UI
+  //   "presentation" — fixed-ratio slide deck with interactive HTML slides
   // Defaults to "spa" since it's the least opinionated.
-  const VALID_TYPES = new Set(["document", "notebook", "spa"]);
+  const VALID_TYPES = new Set(["document", "notebook", "spa", "presentation"]);
   const type = cfg.type ?? "spa";
   if (!VALID_TYPES.has(type)) {
     throw new Error(`workbook.config: 'type' must be one of: ${[...VALID_TYPES].join(", ")} (got '${type}')`);

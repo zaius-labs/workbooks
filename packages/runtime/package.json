@@ -38,6 +38,10 @@
       "svelte": "./src/notebook/index.ts",
       "types": "./src/notebook/index.ts"
     },
+    "./presentation": {
+      "svelte": "./src/presentation/index.ts",
+      "types": "./src/presentation/index.ts"
+    },
     "./blockRegistry": {
       "svelte": "./src/blockRegistry.ts",
       "types": "./src/blockRegistry.ts"

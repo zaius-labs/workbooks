@@ -1,0 +1,20 @@
+{
+  "name": "@work.books/example-presentation-svelte",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "workbook dev",
+    "build": "workbook build",
+    "export:pdf": "workbook export pdf dist/presentation-svelte.html --out dist/presentation-svelte.pdf"
+  },
+  "dependencies": {
+    "@work.books/runtime": "*",
+    "svelte": "^5.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@work.books/cli": "*",
+    "vite": "^6.0.0"
+  }
+}

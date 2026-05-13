@@ -4,14 +4,15 @@
 
 A `.workbook` is the canonical artifact format for **portable browser apps with an embedded execution runtime**. Reports, notebooks, data analyses, ML experiments, recurring monitors, full chat agents, multi-page Svelte SPAs — all expressed as a single canonical type. There is no separate "report type" or "app type". A workbook can be opened in a browser as a static document, executed as a live notebook, scheduled as a recurring pipeline, called as an API, or served as an MCP server. These are modes of the same artifact, not different artifact types.
 
-## Three canonical types
+## Four canonical types
 
-`manifest.type` (string, optional, default `"spa"`) declares which rendering profile a host should apply. Same format, same runtime, same env contract across all three:
+`manifest.type` (string, optional, default `"spa"`) declares which rendering profile a host should apply. Same format, same runtime, same env contract across all four:
 
 | `type`     | Shape | Example | Host renders |
 |------------|-------|---------|---|
 | `document` | Read-mostly. Prose + auto-rendered blocks (charts, tables, citations). No agent loop or compute affordances surfaced to the reader. | a quarterly report, a published analysis | Paper-like reader chrome wrapping the workbook tree |
 | `notebook` | Linear runner with cells in a static DAG. Reactive execution; reader edits inputs, re-runs cells, sees outputs materialize. | an ML experiment, a data exploration | Notebook chrome with run/restart/clear controls |
+| `presentation` | Fixed-aspect slide narrative. Creative Svelte-authored slides with optional live controls, cells, charts, and media. Static exports capture slide state one page at a time. | a board deck, product narrative, interactive data presentation | Presentation chrome with scaled slide stage + navigation |
 | `spa`      | Full canvas application. Author renders whatever UI they want; runtime is a service available on demand. | `examples/chat-app/`, `examples/svelte-app/` | None — workbook renders itself |
 
 Type is a hint to consumers about what chrome (if any) to wrap the workbook in. It is **not** a build-path branch — the same `.html` file format produces all three. Cells, inputs, manifest schema, runtime contract, env declarations are identical.
@@ -352,7 +353,7 @@ OpenAPI is generated automatically alongside the proto. SDK consumers pick which
 {
   "version": "1.0",
   "kind": "workbook",
-  "type": "document | notebook | spa",
+  "type": "document | notebook | presentation | spa",
   "id": "<convex id>",
   "slug": "<human-readable slug>",
   "title": "string",

@@ -21,7 +21,8 @@
     "examples/earthquakes",
     "examples/stocks",
     "examples/chess",
-    "examples/image-to-video"
+    "examples/image-to-video",
+    "examples/presentation-svelte"
   ],
   "scripts": {
     "build": "pnpm -r --filter ./packages/* build",

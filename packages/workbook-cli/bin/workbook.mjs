@@ -20,13 +20,15 @@ async function help() {
     "  workbook dev [project]     start a Vite dev server with HMR",
     "  workbook build [project]   compile project into dist/<slug>.html",
     "  workbook check [project]   lint a workbook source tree (--reporter=json for tools)",
+    "  workbook export pdf <html> --out <file.pdf>",
+    "                            render a presentation workbook to static PDF",
     "  workbook explain <rule>    show rationale + fix for a check rule",
     "  workbook encrypt           emit an encrypted <wb-data> element from a file",
     "  workbook seal              wrap a workbook in a Workbooks Studio envelope",
     "  workbook unseal            (testing) decrypt a sealed workbook with a known DEK",
     "  workbook inspect <path>    show metadata of a sealed workbook (no decryption)",
     "  workbook keygen            generate an Ed25519 author keypair for signing",
-    "  workbook init <name>       scaffold a new workbook project (--template=spa)",
+    "  workbook init <name>       scaffold a new workbook project (--template=spa|presentation)",
     "  workbook unbundle <html>   extract embedded source bundle from a built .html",
     "  workbook publish <html>    upload a built .html and get a workbooks.sh/w/<id> URL",
     "  workbook env <action>      manage group env vars (list/set/rotate/delete/import)",
@@ -165,6 +167,12 @@ try {
       const flags = parseFlags(argv.slice(1));
       const { runCheck } = await import(path.join(cmdRoot, "check.mjs"));
       await runCheck({ project: flags._[0] ?? ".", ...flags });
+      break;
+    }
+    case "export": {
+      const flags = parseFlags(argv.slice(1));
+      const { runExport } = await import(path.join(cmdRoot, "export.mjs"));
+      await runExport(flags);
       break;
     }
     case "explain": {
