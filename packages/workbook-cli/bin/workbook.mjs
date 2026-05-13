@@ -29,6 +29,9 @@ async function help() {
     "  workbook init <name>       scaffold a new workbook project (--template=spa)",
     "  workbook unbundle <html>   extract embedded source bundle from a built .html",
     "  workbook publish <html>    upload a built .html and get a workbooks.sh/w/<id> URL",
+    "  workbook env <action>      manage group env vars (list/set/rotate/delete/import)",
+    "  workbook group <action>    list groups, invite teammates, see members",
+    "  workbook mcp serve         expose CLI actions as MCP tools for Claude / Cursor / Codex",
     "",
     "Build / dev options:",
     "  --port <n>      dev server port (default 5173)",
@@ -186,6 +189,24 @@ try {
       const flags = parseFlags(argv.slice(1));
       const { runPublish } = await import(path.join(cmdRoot, "publish.mjs"));
       await runPublish(flags);
+      break;
+    }
+    case "env": {
+      const flags = parseFlags(argv.slice(1));
+      const { runEnv } = await import(path.join(cmdRoot, "env.mjs"));
+      await runEnv(flags);
+      break;
+    }
+    case "group": {
+      const flags = parseFlags(argv.slice(1));
+      const { runGroup } = await import(path.join(cmdRoot, "group.mjs"));
+      await runGroup(flags);
+      break;
+    }
+    case "mcp": {
+      const flags = parseFlags(argv.slice(1));
+      const { runMcp } = await import(path.join(cmdRoot, "mcp.mjs"));
+      await runMcp(flags);
       break;
     }
     case "help":

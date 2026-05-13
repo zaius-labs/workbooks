@@ -84,9 +84,20 @@ export async function runPublish(opts = {}) {
 
   // Register the workbook record. The broker mints the id so the
   // CLI doesn't have to coordinate uniqueness.
+  // The `connect:` block declares the workbook's routing policy
+  // (which env-var name maps to which destination + splice rule).
+  // The broker stores this on the workbook record and reads it at
+  // proxy time — admin sets values, author sets policy.
+  const connect = cfg?.connect && Object.keys(cfg.connect).length > 0 ? cfg.connect : undefined;
+
+  // `--group <id>` publishes the workbook into a group library; only
+  // members can view it on the hosted viewer. Without it, the workbook
+  // is personal (public to anyone with the link).
+  const group_id = opts.group ?? null;
+
   const created = await postJson(
     `${DEFAULT_BROKER}/v1/workbooks/public`,
-    { slug, title, author, description },
+    { slug, title, author, description, connect, group_id },
     bearer,
   );
   if (!created.id) {

@@ -11,6 +11,8 @@ bunx -p @work.books/cli workbook <command>
 
 ## Commands
 
+Authoring:
+
 ```
 workbook init <name>         scaffold (--template=spa | document | notebook)
 workbook dev   [project]     dev server with HMR (default :5173)
@@ -19,6 +21,16 @@ workbook check [project]     lint the project
 workbook explain <rule>      print rationale + fix for a check rule
 workbook encrypt             wrap a payload in a passphrase lock
 workbook keygen              generate an Ed25519 author keypair
+workbook unbundle <html>     extract embedded source bundle
+```
+
+Publishing + portal control plane (talks to auth.workbooks.sh):
+
+```
+workbook publish <html>      upload artifact → workbooks.sh/w/<id>
+workbook env <action>        manage group env vars (list/set/rotate/delete/import)
+workbook group <action>      list groups, members, workbooks, invite teammates
+workbook mcp serve           expose all of the above as MCP tools for AI clients
 ```
 
 ## `workbook init`
@@ -163,6 +175,78 @@ verify provenance (`signal-workbooks` worker, etc.).
 workbook keygen --out wb-author.key
 ```
 
+## `workbook publish`
+
+Uploads a built `.html` to workbooks.sh and prints a public viewer URL.
+On first use, opens the browser for a one-time loopback OAuth and caches
+a bearer at `~/.config/workbooks/auth.json`.
+
+```bash
+workbook publish dist/my-thing.html
+# → https://workbooks.sh/w/<id>
+
+workbook publish dist/my-thing.html --group <gid>
+# → gated to members of <gid>
+
+workbook publish --revoke <id>
+```
+
+For unattended / CI use, set `WORKBOOKS_API_TOKEN=wbat_...` (create one
+under Studio → Settings → API tokens) — the CLI skips the browser flow
+entirely.
+
+## `workbook env`
+
+Manage the group-scoped environment variables the broker splices into
+outbound workbook calls. **Authors** declare destinations + splice
+rules in `workbook.config.mjs` (the `connect:` block); **admins** set
+the values here. Plaintext only ever lives at the broker.
+
+```bash
+workbook env list --group <gid>
+
+workbook env set OPENAI_KEY sk-... --group <gid>           # group-wide
+workbook env set OPENAI_KEY sk-... --group <gid> \
+                                   --workbook <wid>        # one workbook
+
+workbook env rotate <env-var-id> --value sk-... --group <gid>
+workbook env delete <env-var-id> --group <gid>
+workbook env import .env --group <gid> [--replace]         # bulk paste
+```
+
+## `workbook group`
+
+```bash
+workbook group list                                # groups you belong to
+workbook group members   --group <gid>             # roster + invites
+workbook group workbooks --group <gid>             # workbooks in the group
+workbook group invite teammate@example.com --group <gid> [--role admin|member]
+```
+
+## `workbook mcp serve`
+
+A stdio MCP (Model Context Protocol) server that exposes every
+publish / env / group / usage operation as a structured tool. Use it
+to drive a Workbooks Studio account from Claude Code, Cursor, or any
+other MCP client.
+
+Claude Code config (`~/.claude/mcp.json`):
+
+```json
+{ "mcpServers": { "workbooks": { "command": "workbook", "args": ["mcp", "serve"] } } }
+```
+
+Tools surfaced:
+
+- `workbooks_groups_list`, `workbooks_group_members`, `workbooks_group_workbooks`, `workbooks_group_invite`
+- `workbooks_env_list`, `workbooks_env_set`, `workbooks_env_rotate`, `workbooks_env_delete`, `workbooks_env_import`
+- `workbooks_publish` (uploads from a local path), `workbooks_workbook_revoke`
+- `workbooks_workbook_views` (per-viewer usage rows)
+
+Auth: same as the rest of the CLI. Set `WORKBOOKS_API_TOKEN` for
+headless use, or run `workbook group list` once first to seed the
+browser-session cache.
+
 ## Common config knobs
 
 `workbook.config.mjs`:
@@ -179,9 +263,18 @@ export default {
   installToast: { enabled: false },
   // disable Cmd+S save flow (rare):
   save: { enabled: false },
-  // declare runtime env vars the workbook will prompt for at first run:
+  // declare runtime env vars the workbook will prompt for at first run
+  // (file:// + BYO-key path only — for hosted workbooks, prefer `connect:`):
   env: {
     OPENROUTER_API_KEY: { label: "OpenRouter key", prompt: "sk-or-…", required: true, secret: true },
+  },
+  // declare destinations + splice rules for the broker-proxied env-var
+  // path. The author owns this; group admins set values via the Studio
+  // (or `workbook env set`). Plaintext never reaches the browser.
+  connect: {
+    OPENAI_KEY:  { inject: "bearer",                    domains: ["api.openai.com"] },
+    HUBSPOT_PAT: { inject: "header:Authorization",      domains: ["api.hubapi.com"] },
+    STRIPE_KEY:  { inject: "query:secret",              domains: ["api.stripe.com"] },
   },
   // standard Vite config — anything here flows through:
   vite: { plugins: [/* … */] },

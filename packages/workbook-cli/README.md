@@ -15,14 +15,17 @@ without sacrificing the single-file artifact at the end.
 
 ## Install
 
-Inside the workbooks monorepo:
-
 ```bash
-npm install
-# CLI is available at packages/workbook-cli/bin/workbook.mjs
+npm install -g @work.books/cli
+# → adds the `workbook` command to PATH
 ```
 
-(Standalone npm publish: TBD.)
+Or use it ad-hoc:
+
+```bash
+bunx -p @work.books/cli workbook <command>
+npx  -p @work.books/cli workbook <command>
+```
 
 ## Project layout
 
@@ -68,20 +71,87 @@ platform-level registration and is intentionally out of scope here.
 
 ## Commands
 
+Authoring:
+
 ```
-workbook dev             # Vite dev server with HMR
-workbook build           # → dist/<slug>.html (single file)
-workbook init <name>     # (todo) scaffold a project
+workbook init <name>      scaffold a new project (--template=spa|notebook|document)
+workbook dev   [project]  Vite dev server with HMR (default :5173)
+workbook build [project]  compile → dist/<slug>.html (single file)
+workbook check [project]  lint the source tree
+workbook explain <rule>   rationale + fix recipe for a check rule
+workbook encrypt          wrap a payload in a passphrase lock (age-v1)
+workbook unbundle <html>  extract the embedded source bundle
+workbook keygen           generate an Ed25519 author keypair
 ```
 
-Flags:
+Publishing + control plane (talks to auth.workbooks.sh):
+
+```
+workbook publish <html>     upload to workbooks.sh/w/<id>  [--group <gid>]
+workbook env <action>       manage group env vars (list/set/rotate/delete/import)
+workbook group <action>     list groups, members, workbooks, invite teammates
+workbook mcp serve          stdio MCP server — drive everything from Claude / Cursor
+```
+
+Auth: first time you run a publish/env/group/mcp command it opens a
+browser for a one-time OAuth and caches a bearer at
+`~/.config/workbooks/auth.json`. For CI / headless use, set
+`WORKBOOKS_API_TOKEN=wbat_...` (create one in Studio → Settings).
+
+Build flags:
 
 ```
 --port <n>      dev server port (default 5173)
 --out <dir>     build output dir (default dist)
---runtime <p>   override path to workbook-runtime checkout
---no-wasm       skip inlining wasm + bundle (smaller, dev-only)
+--no-wasm       skip inlining wasm + runtime bundle (smaller, dev-only)
+--no-bundle     skip embedding the gzipped source bundle in the artifact
+--bundle-git    include .git/ when embedding the source bundle
+--encrypt       wrap the built artifact in an age-v1 passphrase gate
 ```
+
+## Driving Workbooks from Claude / Cursor / Codex
+
+The same install ships an MCP server. Add to your MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "workbooks": { "command": "workbook", "args": ["mcp", "serve"] }
+  }
+}
+```
+
+Tools exposed: `workbooks_groups_list`, `workbooks_group_members`,
+`workbooks_group_workbooks`, `workbooks_group_invite`,
+`workbooks_env_list`, `workbooks_env_set`, `workbooks_env_rotate`,
+`workbooks_env_delete`, `workbooks_env_import`, `workbooks_publish`,
+`workbooks_workbook_views`, `workbooks_workbook_revoke`.
+
+## Secrets that workbooks call out with
+
+The author declares **policy** — which hosts a key may be sent to and
+how to splice it into the request — in `workbook.config.mjs`:
+
+```js
+export default {
+  // ...
+  connect: {
+    OPENAI_KEY:  { inject: "bearer",               domains: ["api.openai.com"] },
+    HUBSPOT_PAT: { inject: "header:Authorization", domains: ["api.hubapi.com"] },
+  },
+};
+```
+
+A group admin sets **values** in Studio (or via `workbook env set`).
+The workbook calls upstream APIs through the SDK:
+
+```js
+import { fetch as wb } from "workbook:env";
+const r = await wb("https://api.openai.com/v1/chat/completions", { ... });
+```
+
+The broker splices the value in flight. Plaintext never reaches the
+browser; recipients never see the key.
 
 ## What `build` does
 
@@ -117,7 +187,8 @@ can prematurely close the script tag in the generated artifact. All
 trigger substrings are assembled at runtime (see
 `src/util/triggerSafe.mjs`).
 
-## Status
+## Links
 
-v0.1 — works for the `examples/svelte-app/` reference project.
-Standalone npm publish + `workbook init` scaffolding are TBD.
+- Hosted viewer + portal: <https://workbooks.sh>
+- Studio (publish, env vars, members, usage): <https://studio.workbooks.sh>
+- Source: <https://github.com/shinyobjectz-sh/workbooks>

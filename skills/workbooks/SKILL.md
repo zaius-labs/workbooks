@@ -26,15 +26,17 @@ Three render shapes — pick the one that matches what the reader does:
 
 This skill is intentionally split. Don't read everything at once.
 
-| If the user wants to…                           | Load                                              |
-| ----------------------------------------------- | ------------------------------------------------- |
-| understand the file format itself               | [references/format.md](references/format.md)      |
-| scaffold, dev, build, lint, sign, unbundle      | [references/cli.md](references/cli.md)            |
-| call the browser-side runtime (DataFrames, ML)  | [references/runtime.md](references/runtime.md)    |
-| fix a `workbook check` rule failure             | [references/checks.md](references/checks.md)      |
-| ship to users (file://, USB, email, web host)   | [references/deploy.md](references/deploy.md)      |
-| use the file-as-database substrate (legacy)     | [references/substrate.md](references/substrate.md)|
-| copy a working example as a starting point      | [references/examples.md](references/examples.md)  |
+| If the user wants to…                                | Load                                              |
+| ---------------------------------------------------- | ------------------------------------------------- |
+| understand the file format itself                    | [references/format.md](references/format.md)      |
+| scaffold, dev, build, lint, sign, unbundle           | [references/cli.md](references/cli.md)            |
+| publish / manage env vars / groups / per-viewer data | [references/cli.md](references/cli.md)            |
+| drive the workbooks portal from Claude / Cursor      | [references/cli.md](references/cli.md) (§ MCP)    |
+| call the browser-side runtime (DataFrames, ML)       | [references/runtime.md](references/runtime.md)    |
+| fix a `workbook check` rule failure                  | [references/checks.md](references/checks.md)      |
+| ship to users (file://, USB, email, web host)        | [references/deploy.md](references/deploy.md)      |
+| use the file-as-database substrate (legacy)          | [references/substrate.md](references/substrate.md)|
+| copy a working example as a starting point           | [references/examples.md](references/examples.md)  |
 
 ## Hard rules
 
@@ -63,6 +65,28 @@ These hold regardless of what the user is building.
    state move to the hosted viewer at workbooks.sh; the artifact stays
    portable, the host adds storage.
 
+   When the workbook needs to call a third-party API with a secret key,
+   declare the destinations + splice rule in `workbook.config.mjs`:
+
+   ```js
+   connect: {
+     OPENAI_KEY: { inject: "bearer", domains: ["api.openai.com"] },
+   }
+   ```
+
+   then call via the SDK:
+
+   ```js
+   import { fetch as wb } from "workbook:env";
+   const r = await wb("https://api.openai.com/v1/chat/completions", { ... });
+   ```
+
+   The author owns the **policy** (which hosts a key may be sent to,
+   how it's spliced into the request). A group admin sets the
+   **value** in Studio (or via `workbook env set`). The plaintext
+   never reaches the browser — the broker proxies the call and
+   splices the key in flight.
+
 6. **`workbooksd` is legacy.** The save-in-place daemon still exists
    for installed users, but it's no longer the recommended path. Don't
    propose new daemon work without flagging the pivot. See
@@ -84,7 +108,27 @@ open dist/my-thing.html                                # any browser
 # Recover the source from a built artifact
 workbook unbundle dist/my-thing.html ./extracted
 cd extracted && npm install && workbook dev
+
+# Publish to a group on workbooks.sh
+workbook group list                                    # find the group id
+workbook env set OPENAI_KEY sk-… --group <gid>         # admin sets values
+workbook publish dist/my-thing.html --group <gid>      # → workbooks.sh/w/<id>
 ```
+
+## From Claude / Cursor / Codex
+
+`@work.books/cli` ships an MCP server so you can drive the whole
+workbooks portal — env vars, groups, publish, per-viewer usage —
+through tool calls. Add this to your MCP client config:
+
+```json
+{ "mcpServers": { "workbooks": { "command": "workbook", "args": ["mcp", "serve"] } } }
+```
+
+Tools exposed include `workbooks_groups_list`, `workbooks_env_set`,
+`workbooks_env_import`, `workbooks_publish`, `workbooks_workbook_views`,
+`workbooks_workbook_revoke`. Auth defaults to `WORKBOOKS_API_TOKEN` for
+headless use; falls back to a cached browser session.
 
 Build flags worth knowing:
 
